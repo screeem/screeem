@@ -1,0 +1,11 @@
+{
+  "id": "jane-smith",
+  "name": "Jane Smith",
+  "email": "jane.smith@example.com",
+  "bio": "Frontend architect with 8 years of experience building scalable web applications.",
+  "avatar": "/avatars/jane-smith.jpg",
+  "socialLinks": {
+    "twitter": "https://twitter.com/janesmith",
+    "github": "https://github.com/janesmith"
+  }
+}

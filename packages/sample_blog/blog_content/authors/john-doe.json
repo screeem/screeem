@@ -1,0 +1,12 @@
+{
+  "id": "john-doe",
+  "name": "John Doe",
+  "email": "john.doe@example.com",
+  "bio": "A passionate developer and writer who loves sharing knowledge about web technologies.",
+  "avatar": "/avatars/john-doe.jpg",
+  "socialLinks": {
+    "twitter": "https://twitter.com/johndoe",
+    "github": "https://github.com/johndoe",
+    "linkedin": "https://linkedin.com/in/johndoe"
+  }
+}
