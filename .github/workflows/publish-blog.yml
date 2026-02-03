@@ -1,0 +1,38 @@
+name: Publish @screeem/blog
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/blog_components/**'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm --filter @screeem/blog build
+
+      - name: Publish
+        run: pnpm --filter @screeem/blog publish --no-git-checks --access public --provenance
+        env:
+          NPM_CONFIG_PROVENANCE: true
