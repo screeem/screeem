@@ -1,4 +1,4 @@
-import { BlogPost } from '@screeem/blog-components';
+import { BlogPost } from '@screeem/blog';
 
 export default function BlogPage() {
   return (
