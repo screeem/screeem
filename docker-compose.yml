@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: screeem-postgres
+    environment:
+      POSTGRES_DB: screeem
+      POSTGRES_USER: screeem
+      POSTGRES_PASSWORD: screeem_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U screeem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API service (optional - for local development)
+  # Uncomment when ready to run the API in Docker
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: packages/api/Dockerfile
+  #   container_name: screeem-api
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     DATABASE_URL: postgresql://screeem:screeem_dev_password@postgres:5432/screeem
+  #     NODE_ENV: development
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./packages/api:/app/packages/api
+  #     - ./packages/shared:/app/packages/shared
+  #     - ./packages/event-sourcing:/app/packages/event-sourcing
+
+volumes:
+  postgres_data:

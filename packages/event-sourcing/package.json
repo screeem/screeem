@@ -1,0 +1,21 @@
+{
+  "name": "@screeem/event-sourcing",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@screeem/shared": "workspace:*",
+    "pg": "^8.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.6",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.3"
+  }
+}
