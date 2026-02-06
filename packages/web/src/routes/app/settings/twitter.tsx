@@ -1,7 +1,6 @@
 import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useState, useEffect } from 'react'
 import { useOrganizations, useTwitterAccount, useDisconnectTwitter } from '../../../lib/api/hooks'
-import { twitterApi } from '../../../lib/api/client'
 
 export const Route = createFileRoute('/app/settings/twitter')({
   component: TwitterSettingsComponent,
@@ -33,12 +32,12 @@ function TwitterSettingsComponent() {
     if (connected === 'true') {
       alert('Twitter account connected successfully!')
       // Clear search params
-      navigate({ to: '/app/settings/twitter', replace: true })
+      navigate({ to: '/app/settings/twitter', search: { connected: '', error: '' }, replace: true })
       refetch()
     } else if (error) {
       alert(`Failed to connect Twitter: ${error}`)
       // Clear search params
-      navigate({ to: '/app/settings/twitter', replace: true })
+      navigate({ to: '/app/settings/twitter', search: { connected: '', error: '' }, replace: true })
     }
   }, [connected, error, navigate, refetch])
 

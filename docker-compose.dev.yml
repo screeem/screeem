@@ -1,0 +1,25 @@
+version: '3.8'
+
+# Development docker-compose - just PostgreSQL
+# Use: docker-compose -f docker-compose.dev.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: screeem-postgres
+    environment:
+      POSTGRES_DB: screeem
+      POSTGRES_USER: screeem
+      POSTGRES_PASSWORD: screeem_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U screeem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

@@ -5,6 +5,7 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
+import rateLimit from '@fastify/rate-limit'
 import { env } from './config/env.js'
 import { pool, closeDatabasePool } from './config/database.js'
 import authPlugin from './plugins/auth.js'
@@ -43,6 +44,19 @@ await fastify.register(cors, {
 })
 
 await fastify.register(cookie)
+
+// Register rate limiting
+await fastify.register(rateLimit, {
+  max: 100, // 100 requests
+  timeWindow: '1 minute', // per minute
+  errorResponseBuilder: () => ({
+    statusCode: 429,
+    error: 'Too Many Requests',
+    message: 'Rate limit exceeded. Please try again later.',
+  }),
+  // Skip rate limiting for health check
+  allowList: (request) => request.url === '/health',
+})
 
 // Register auth plugin
 await fastify.register(authPlugin)

@@ -70,7 +70,7 @@ function DashboardComponent() {
           <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
           <div className="space-y-2">
             <button
-              onClick={() => navigate({ to: '/app/posts/new' })}
+              onClick={() => navigate({ to: '/app/posts/new', search: { orgId: firstOrgId || '' } })}
               className="w-full text-left px-4 py-3 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               + Schedule New Post
