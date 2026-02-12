@@ -1,0 +1,48 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Build outputs
+dist
+**/dist
+
+# Environment files
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Logs
+*.log
+logs
+
+# Test coverage
+coverage
+
+# Temp files
+*.tmp
+*.temp
+
+# Documentation (not needed in container)
+*.md
+!README.md
+
+# Docker files (don't copy docker files into container)
+docker-compose*.yml
+Dockerfile*
+.dockerignore

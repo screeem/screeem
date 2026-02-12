@@ -4,7 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "pnpm -r test",
+    "type-check": "pnpm -r type-check",
+    "build": "pnpm -r build",
+    "dev:api": "pnpm --filter @screeem/api dev",
+    "dev:web": "pnpm --filter @screeem/web dev"
   },
   "keywords": [],
   "author": "",
