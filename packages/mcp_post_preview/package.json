@@ -1,0 +1,39 @@
+{
+  "name": "@screeem/mcp-post-preview",
+  "version": "0.0.1",
+  "description": "MCP server for previewing blog posts — write and iterate on posts in Claude with a live visual preview",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "mcp-post-preview": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "blog",
+    "preview",
+    "claude",
+    "model-context-protocol"
+  ],
+  "author": "",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/screeem/screeem.git",
+    "directory": "packages/mcp_post_preview"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
