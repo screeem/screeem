@@ -1,7 +1,7 @@
 {
   "name": "@screeem/mcp-post-preview",
   "version": "0.0.1",
-  "description": "MCP server for previewing blog posts — write and iterate on posts in Claude with a live visual preview",
+  "description": "MCP server for previewing tweets — write and iterate on tweets in Claude with a live Twitter/X visual preview",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -16,7 +16,8 @@
   },
   "keywords": [
     "mcp",
-    "blog",
+    "twitter",
+    "tweet",
     "preview",
     "claude",
     "model-context-protocol"

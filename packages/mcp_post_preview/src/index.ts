@@ -4,12 +4,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod/v3";
 import http from "node:http";
-import { renderPostHtml, PostData } from "./renderPost.js";
+import { renderTweetHtml, TweetData } from "./renderTweet.js";
 
 const DEFAULT_PORT = 3456;
 
-let currentPost: PostData | null = null;
-let postVersion = 0;
+let currentTweet: TweetData | null = null;
+let tweetVersion = 0;
 let previewServer: http.Server | null = null;
 let serverPort: number | null = null;
 
@@ -23,14 +23,14 @@ function startPreviewServer(port: number): Promise<number> {
     previewServer = http.createServer((req, res) => {
       if (req.url === "/api/version") {
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ version: postVersion }));
+        res.end(JSON.stringify({ version: tweetVersion }));
         return;
       }
 
-      if (!currentPost) {
+      if (!currentTweet) {
         res.writeHead(200, { "Content-Type": "text/html" });
         res.end(`<!DOCTYPE html>
-<html><head><title>Post Preview</title>
+<html><head><title>Tweet Preview</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   setInterval(async () => {
@@ -42,17 +42,17 @@ function startPreviewServer(port: number): Promise<number> {
   }, 2000);
 </script>
 </head>
-<body class="min-h-screen bg-gray-50 flex items-center justify-center">
+<body class="min-h-screen bg-gray-100 flex items-center justify-center">
   <div class="text-center">
-    <h1 class="text-2xl font-bold text-gray-400 mb-2">Waiting for post...</h1>
-    <p class="text-gray-500">Use the <code class="bg-gray-100 px-2 py-1 rounded">create_or_update_post</code> tool in Claude to get started.</p>
+    <h1 class="text-2xl font-bold text-gray-400 mb-2">Waiting for tweet...</h1>
+    <p class="text-gray-500">Use the <code class="bg-gray-100 px-2 py-1 rounded">create_or_update_tweet</code> tool in Claude to get started.</p>
   </div>
 </body></html>`);
         return;
       }
 
       res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(renderPostHtml(currentPost));
+      res.end(renderTweetHtml(currentTweet));
     });
 
     previewServer.on("error", (err: NodeJS.ErrnoException) => {
@@ -72,49 +72,53 @@ function startPreviewServer(port: number): Promise<number> {
 }
 
 const server = new McpServer({
-  name: "Post Preview",
+  name: "Tweet Preview",
   version: "0.0.1",
 });
 
-const CreatePostSchema = {
-  title: z.string(),
-  content: z.string(),
-  author: z.string(),
-  date: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-  slug: z.string().optional(),
-  excerpt: z.string().optional(),
+const CreateTweetSchema = {
+  displayName: z.string(),
+  handle: z.string(),
+  text: z.string(),
+  avatarUrl: z.string().optional(),
+  imageUrl: z.string().optional(),
+  verified: z.boolean().optional(),
+  timestamp: z.string().optional(),
+  likes: z.number().optional(),
+  retweets: z.number().optional(),
+  replies: z.number().optional(),
+  views: z.number().optional(),
 };
 
 server.tool(
-  "create_or_update_post",
-  "Create or update a blog post and preview it in the browser. Supports markdown content. The preview auto-refreshes in the browser whenever the post is updated.",
-  CreatePostSchema,
+  "create_or_update_tweet",
+  "Create or update a tweet and preview it in the browser, rendered exactly like it would appear on Twitter/X. Supports @mentions, #hashtags, and links which are auto-highlighted. The preview auto-refreshes when the tweet is updated so you can iterate on it live. Includes a character count indicator (280 limit) and a light/dark theme toggle.",
+  CreateTweetSchema,
   async (params) => {
-    currentPost = {
-      title: params.title,
-      content: params.content,
-      author: params.author,
-      date:
-        params.date ||
-        new Date().toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        }),
-      tags: params.tags,
-      slug: params.slug,
-      excerpt: params.excerpt,
+    currentTweet = {
+      displayName: params.displayName,
+      handle: params.handle,
+      text: params.text,
+      avatarUrl: params.avatarUrl,
+      imageUrl: params.imageUrl,
+      verified: params.verified,
+      timestamp: params.timestamp,
+      likes: params.likes,
+      retweets: params.retweets,
+      replies: params.replies,
+      views: params.views,
     };
-    postVersion++;
+    tweetVersion++;
 
     const port = await startPreviewServer(DEFAULT_PORT);
+    const charCount = params.text.length;
+    const overLimit = charCount > 280;
 
     return {
       content: [
         {
           type: "text" as const,
-          text: `Post "${params.title}" has been ${postVersion === 1 ? "created" : "updated"} (version ${postVersion}).\n\nPreview is live at: http://localhost:${port}\n\nThe browser will auto-refresh when you make changes. Use this tool again to update the post content.`,
+          text: `Tweet by @${params.handle} has been ${tweetVersion === 1 ? "created" : "updated"} (version ${tweetVersion}).\n\nCharacter count: ${charCount}/280${overLimit ? " — OVER LIMIT!" : ""}\n\nPreview is live at: http://localhost:${port}\n\nThe browser will auto-refresh when you make changes. Use this tool again to update the tweet.`,
         },
       ],
     };
@@ -122,16 +126,16 @@ server.tool(
 );
 
 server.tool(
-  "get_current_post",
-  "Get the current post data as JSON. Useful for reviewing the current state of the post before making edits.",
+  "get_current_tweet",
+  "Get the current tweet data as JSON. Useful for reviewing the current state of the tweet before making edits.",
   {},
   async () => {
-    if (!currentPost) {
+    if (!currentTweet) {
       return {
         content: [
           {
             type: "text" as const,
-            text: "No post has been created yet. Use create_or_update_post to create one.",
+            text: "No tweet has been created yet. Use create_or_update_tweet to create one.",
           },
         ],
       };
@@ -141,7 +145,7 @@ server.tool(
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(currentPost, null, 2),
+          text: JSON.stringify(currentTweet, null, 2),
         },
       ],
     };
@@ -149,22 +153,22 @@ server.tool(
 );
 
 server.tool(
-  "export_post_html",
-  "Export the current post as standalone HTML. Returns the full HTML source that can be saved to a file.",
+  "export_tweet_html",
+  "Export the current tweet preview as standalone HTML. Returns the full HTML source that can be saved to a file.",
   {},
   async () => {
-    if (!currentPost) {
+    if (!currentTweet) {
       return {
         content: [
           {
             type: "text" as const,
-            text: "No post has been created yet. Use create_or_update_post to create one.",
+            text: "No tweet has been created yet. Use create_or_update_tweet to create one.",
           },
         ],
       };
     }
 
-    const html = renderPostHtml(currentPost);
+    const html = renderTweetHtml(currentTweet);
     return {
       content: [
         {
@@ -177,49 +181,26 @@ server.tool(
 );
 
 server.tool(
-  "export_post_markdown",
-  "Export the current post as markdown with front matter. Returns markdown that can be saved directly as a blog post file.",
+  "export_tweet_text",
+  "Export the current tweet as plain text, ready to copy-paste into Twitter/X.",
   {},
   async () => {
-    if (!currentPost) {
+    if (!currentTweet) {
       return {
         content: [
           {
             type: "text" as const,
-            text: "No post has been created yet. Use create_or_update_post to create one.",
+            text: "No tweet has been created yet. Use create_or_update_tweet to create one.",
           },
         ],
       };
     }
 
-    const frontMatter = [
-      "---",
-      `title: "${currentPost.title}"`,
-      `author: "${currentPost.author}"`,
-      `date: "${currentPost.date}"`,
-    ];
-
-    if (currentPost.slug) {
-      frontMatter.push(`slug: "${currentPost.slug}"`);
-    }
-    if (currentPost.excerpt) {
-      frontMatter.push(`excerpt: "${currentPost.excerpt}"`);
-    }
-    if (currentPost.tags && currentPost.tags.length > 0) {
-      frontMatter.push(`tags:`);
-      for (const tag of currentPost.tags) {
-        frontMatter.push(`  - "${tag}"`);
-      }
-    }
-    frontMatter.push("---");
-
-    const markdown = `${frontMatter.join("\n")}\n\n${currentPost.content}`;
-
     return {
       content: [
         {
           type: "text" as const,
-          text: markdown,
+          text: currentTweet.text,
         },
       ],
     };
