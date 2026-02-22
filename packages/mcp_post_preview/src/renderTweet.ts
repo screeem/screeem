@@ -29,31 +29,40 @@ function formatNumber(n: number): string {
 
 /**
  * Renders tweet text with clickable hashtags, @mentions, and links.
+ * Tokenizes special patterns on raw text before HTML-escaping so that
+ * entities like &#039; (apostrophe) don't get matched as #hashtags.
  */
 function renderTweetText(text: string): string {
-  let html = escapeHtml(text);
+  const tokens: { placeholder: string; html: string }[] = [];
+  let idx = 0;
 
-  // URLs
-  html = html.replace(
-    /(https?:\/\/[^\s]+)/g,
-    '<a href="$1" class="text-sky-500 hover:underline">$1</a>'
+  function tokenize(raw: string, pattern: RegExp, toHtml: (match: string, ...groups: string[]) => string): string {
+    return raw.replace(pattern, (...args) => {
+      const placeholder = `\x00TOK${idx++}\x00`;
+      tokens.push({ placeholder, html: toHtml(...args) });
+      return placeholder;
+    });
+  }
+
+  // Order matters: URLs first, then @mentions, then #hashtags
+  let processed = text;
+  processed = tokenize(processed, /(https?:\/\/[^\s]+)/g, (_, url) =>
+    `<a href="${escapeHtml(url)}" class="text-sky-500 hover:underline">${escapeHtml(url)}</a>`
+  );
+  processed = tokenize(processed, /@(\w+)/g, (_, handle) =>
+    `<a href="#" class="text-sky-500 hover:underline">@${escapeHtml(handle)}</a>`
+  );
+  processed = tokenize(processed, /#(\w+)/g, (_, tag) =>
+    `<a href="#" class="text-sky-500 hover:underline">#${escapeHtml(tag)}</a>`
   );
 
-  // @mentions
-  html = html.replace(
-    /@(\w+)/g,
-    '<a href="#" class="text-sky-500 hover:underline">@$1</a>'
-  );
+  let html = escapeHtml(processed);
 
-  // #hashtags
-  html = html.replace(
-    /#(\w+)/g,
-    '<a href="#" class="text-sky-500 hover:underline">#$1</a>'
-  );
+  for (const { placeholder, html: replacement } of tokens) {
+    html = html.replace(placeholder, replacement);
+  }
 
-  // Newlines
   html = html.replace(/\n/g, "<br>");
-
   return html;
 }
 

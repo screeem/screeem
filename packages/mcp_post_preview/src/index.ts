@@ -2,79 +2,28 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  registerAppTool,
+  registerAppResource,
+  RESOURCE_MIME_TYPE,
+} from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod/v3";
-import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderTweetHtml, TweetData } from "./renderTweet.js";
 
-const DEFAULT_PORT = 3456;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let currentTweet: TweetData | null = null;
 let tweetVersion = 0;
-let previewServer: http.Server | null = null;
-let serverPort: number | null = null;
-
-function startPreviewServer(port: number): Promise<number> {
-  return new Promise((resolve, reject) => {
-    if (previewServer) {
-      resolve(serverPort!);
-      return;
-    }
-
-    previewServer = http.createServer((req, res) => {
-      if (req.url === "/api/version") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ version: tweetVersion }));
-        return;
-      }
-
-      if (!currentTweet) {
-        res.writeHead(200, { "Content-Type": "text/html" });
-        res.end(`<!DOCTYPE html>
-<html><head><title>Tweet Preview</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  setInterval(async () => {
-    try {
-      const res = await fetch('/api/version');
-      const data = await res.json();
-      if (data.version > 0) window.location.reload();
-    } catch(e) {}
-  }, 2000);
-</script>
-</head>
-<body class="min-h-screen bg-gray-100 flex items-center justify-center">
-  <div class="text-center">
-    <h1 class="text-2xl font-bold text-gray-400 mb-2">Waiting for tweet...</h1>
-    <p class="text-gray-500">Use the <code class="bg-gray-100 px-2 py-1 rounded">create_or_update_tweet</code> tool in Claude to get started.</p>
-  </div>
-</body></html>`);
-        return;
-      }
-
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(renderTweetHtml(currentTweet));
-    });
-
-    previewServer.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "EADDRINUSE") {
-        previewServer = null;
-        startPreviewServer(port + 1).then(resolve).catch(reject);
-      } else {
-        reject(err);
-      }
-    });
-
-    previewServer.listen(port, () => {
-      serverPort = port;
-      resolve(port);
-    });
-  });
-}
 
 const server = new McpServer({
   name: "Tweet Preview",
   version: "0.0.1",
 });
+
+const RESOURCE_URI = "ui://tweet-preview/app";
 
 const CreateTweetSchema = {
   displayName: z.string(),
@@ -90,10 +39,18 @@ const CreateTweetSchema = {
   views: z.number().optional(),
 };
 
-server.tool(
+registerAppTool(
+  server,
   "create_or_update_tweet",
-  "Create or update a tweet and preview it in the browser, rendered exactly like it would appear on Twitter/X. Supports @mentions, #hashtags, and links which are auto-highlighted. The preview auto-refreshes when the tweet is updated so you can iterate on it live. Includes a character count indicator (280 limit) and a light/dark theme toggle.",
-  CreateTweetSchema,
+  {
+    title: "Create or Update Tweet",
+    description:
+      "Create or update a tweet and preview it inline, rendered exactly like it would appear on Twitter/X. Supports @mentions, #hashtags, and links which are auto-highlighted. Includes a character count indicator (280 limit).",
+    inputSchema: CreateTweetSchema,
+    _meta: {
+      ui: { resourceUri: RESOURCE_URI },
+    },
+  },
   async (params) => {
     currentTweet = {
       displayName: params.displayName,
@@ -110,19 +67,32 @@ server.tool(
     };
     tweetVersion++;
 
-    const port = await startPreviewServer(DEFAULT_PORT);
-    const charCount = params.text.length;
-    const overLimit = charCount > 280;
-
     return {
       content: [
         {
           type: "text" as const,
-          text: `Tweet by @${params.handle} has been ${tweetVersion === 1 ? "created" : "updated"} (version ${tweetVersion}).\n\nCharacter count: ${charCount}/280${overLimit ? " — OVER LIMIT!" : ""}\n\nPreview is live at: http://localhost:${port}\n\nThe browser will auto-refresh when you make changes. Use this tool again to update the tweet.`,
+          text: JSON.stringify(currentTweet),
         },
       ],
     };
   }
+);
+
+// Register the UI resource serving the bundled HTML app
+registerAppResource(
+  server,
+  "Tweet Preview App",
+  RESOURCE_URI,
+  { description: "Interactive tweet preview card" },
+  async () => ({
+    contents: [
+      {
+        uri: RESOURCE_URI,
+        mimeType: RESOURCE_MIME_TYPE,
+        text: await fs.readFile(path.join(__dirname, "index.html"), "utf-8"),
+      },
+    ],
+  })
 );
 
 server.tool(
