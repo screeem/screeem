@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tweet Preview</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: transparent;
+      color: #0f1419;
+      padding: 12px;
+    }
+
+    body.dark { color: #e7e9ea; }
+
+    a { color: #1d9bf0; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .tweet-card {
+      max-width: 598px;
+      margin: 0 auto;
+      border: 1px solid #eff3f4;
+      border-radius: 16px;
+      padding: 16px;
+      background: #fff;
+    }
+    body.dark .tweet-card {
+      border-color: #2f3336;
+      background: #000;
+    }
+
+    .tweet-header { display: flex; align-items: flex-start; gap: 12px; }
+    .tweet-header-content { flex: 1; min-width: 0; }
+
+    .avatar {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: #e1e8ed; flex-shrink: 0; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+    .display-name {
+      font-weight: 700; font-size: 15px; line-height: 20px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      display: inline;
+    }
+
+    .verified-badge {
+      display: inline-block; width: 18px; height: 18px;
+      vertical-align: middle; margin-left: 2px; fill: #1d9bf0;
+    }
+
+    .handle { font-size: 15px; color: #536471; line-height: 20px; }
+    body.dark .handle { color: #71767b; }
+
+    .x-logo { width: 24px; height: 24px; flex-shrink: 0; fill: #0f1419; }
+    body.dark .x-logo { fill: #e7e9ea; }
+
+    .tweet-text {
+      margin-top: 12px; font-size: 17px; line-height: 24px;
+      white-space: pre-wrap; word-wrap: break-word;
+    }
+
+    .tweet-image {
+      margin-top: 12px; border-radius: 16px; overflow: hidden;
+      border: 1px solid #eff3f4;
+    }
+    body.dark .tweet-image { border-color: #2f3336; }
+    .tweet-image img { width: 100%; display: block; max-height: 512px; object-fit: cover; }
+
+    .timestamp { margin-top: 12px; font-size: 13px; color: #536471; }
+    body.dark .timestamp { color: #71767b; }
+
+    .divider {
+      border-top: 1px solid #eff3f4; margin: 12px 0;
+    }
+    body.dark .divider { border-color: #2f3336; }
+
+    .metrics { display: flex; gap: 24px; font-size: 13px; color: #536471; flex-wrap: wrap; }
+    body.dark .metrics { color: #71767b; }
+    .metrics .value { font-weight: 700; color: #0f1419; }
+    body.dark .metrics .value { color: #e7e9ea; }
+
+    .actions {
+      display: flex; justify-content: space-around; color: #536471;
+    }
+    body.dark .actions { color: #71767b; }
+    .action-btn {
+      display: flex; align-items: center; gap: 8px;
+      background: none; border: none; color: inherit; cursor: pointer;
+      padding: 8px; border-radius: 50%;
+      font-size: 13px;
+    }
+    .action-btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+    .char-count {
+      margin-top: 16px; display: flex; align-items: center;
+      gap: 12px; font-size: 14px; color: #536471;
+    }
+    body.dark .char-count { color: #71767b; }
+    .char-count.over-limit { color: #f4212e; }
+
+    .empty-state {
+      text-align: center; padding: 40px 20px; color: #536471;
+    }
+    body.dark .empty-state { color: #71767b; }
+    .empty-state h2 { font-size: 20px; margin-bottom: 8px; color: #9ca3af; }
+    body.dark .empty-state h2 { color: #6b7280; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div class="empty-state">
+      <h2>Waiting for tweet...</h2>
+      <p>Use the <code>create_or_update_tweet</code> tool to get started.</p>
+    </div>
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
