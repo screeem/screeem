@@ -109,13 +109,101 @@
     body.dark .empty-state { color: #71767b; }
     .empty-state h2 { font-size: 20px; margin-bottom: 8px; color: #9ca3af; }
     body.dark .empty-state h2 { color: #6b7280; }
+
+    /* ── LinkedIn styles ── */
+    .tweet-link { color: #1d9bf0; text-decoration: none; }
+    .tweet-link:hover { text-decoration: underline; }
+
+    .li-card {
+      max-width: 555px;
+      margin: 0 auto;
+      border: 1px solid #e0dfe2;
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+    body.dark .li-card { background: #1b1f23; border-color: #38434f; }
+
+    .li-header { display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; }
+
+    .li-avatar {
+      width: 48px; height: 48px; border-radius: 50%;
+      overflow: hidden; flex-shrink: 0;
+      background: #e0dfe2; display: flex; align-items: center; justify-content: center;
+    }
+    .li-avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+
+    .li-author-info { flex: 1; min-width: 0; }
+    .li-author-name {
+      font-weight: 600; font-size: 14px; color: rgba(0,0,0,0.9); line-height: 1.4;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    body.dark .li-author-name { color: rgba(255,255,255,0.9); }
+    .li-headline {
+      font-size: 12px; color: rgba(0,0,0,0.6); line-height: 1.4;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;
+    }
+    body.dark .li-headline { color: rgba(255,255,255,0.6); }
+    .li-post-meta {
+      font-size: 12px; color: rgba(0,0,0,0.6); margin-top: 2px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    body.dark .li-post-meta { color: rgba(255,255,255,0.6); }
+    .li-dot { font-size: 10px; }
+    .li-globe-icon { width: 12px; height: 12px; fill: rgba(0,0,0,0.6); vertical-align: middle; }
+    body.dark .li-globe-icon { fill: rgba(255,255,255,0.6); }
+
+    .li-follow-btn {
+      background: transparent; color: #0a66c2;
+      border: 1px solid #0a66c2; padding: 5px 14px;
+      border-radius: 20px; font-size: 14px; font-weight: 600;
+      cursor: pointer; flex-shrink: 0; white-space: nowrap;
+    }
+    body.dark .li-follow-btn { color: #70b5f9; border-color: #70b5f9; }
+
+    .li-text {
+      padding: 0 16px 8px; font-size: 14px; line-height: 1.5;
+      color: rgba(0,0,0,0.9); word-wrap: break-word; white-space: pre-wrap;
+    }
+    body.dark .li-text { color: rgba(255,255,255,0.9); }
+    .li-link { color: #0a66c2; text-decoration: none; font-weight: 600; }
+    .li-link:hover { text-decoration: underline; }
+    body.dark .li-link { color: #70b5f9; }
+
+    .li-image { overflow: hidden; }
+    .li-image img { width: 100%; display: block; max-height: 512px; object-fit: cover; }
+
+    .li-reactions {
+      padding: 6px 16px; display: flex; justify-content: space-between;
+      align-items: center; color: rgba(0,0,0,0.6); font-size: 13px;
+    }
+    body.dark .li-reactions { color: rgba(255,255,255,0.6); }
+    .li-reaction-left { display: inline-flex; align-items: center; gap: 3px; }
+    .li-reaction-emoji { font-size: 14px; }
+    .li-reaction-count { color: rgba(0,0,0,0.6); font-size: 13px; }
+    body.dark .li-reaction-count { color: rgba(255,255,255,0.6); }
+    .li-reactions-secondary { font-size: 13px; color: rgba(0,0,0,0.6); }
+    body.dark .li-reactions-secondary { color: rgba(255,255,255,0.6); }
+
+    .li-divider { border-top: 1px solid #e0dfe2; margin: 0 16px; }
+    body.dark .li-divider { border-color: #38434f; }
+
+    .li-actions { display: flex; padding: 2px 8px 4px; }
+    .li-action-btn {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      gap: 6px; padding: 10px 8px; border: none; background: none;
+      color: rgba(0,0,0,0.6); font-size: 14px; font-weight: 600;
+      cursor: pointer; border-radius: 4px;
+    }
+    body.dark .li-action-btn { color: rgba(255,255,255,0.6); }
+    .li-action-btn svg { width: 18px; height: 18px; fill: currentColor; }
   </style>
 </head>
 <body>
   <div id="root">
     <div class="empty-state">
-      <h2>Waiting for tweet...</h2>
-      <p>Use the <code>create_or_update_tweet</code> tool to get started.</p>
+      <h2>Waiting for post...</h2>
+      <p>Use <code>create_or_update_tweet</code> or <code>create_or_update_linkedin_post</code> to get started.</p>
     </div>
   </div>
   <script type="module" src="./main.ts"></script>
