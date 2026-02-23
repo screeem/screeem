@@ -66,7 +66,11 @@ async function main() {
   assert(toolNames.includes("get_current_tweet"), "get_current_tweet tool exists");
   assert(toolNames.includes("export_tweet_html"), "export_tweet_html tool exists");
   assert(toolNames.includes("export_tweet_text"), "export_tweet_text tool exists");
-  assert(tools.length === 4, `exactly 4 tools registered (got ${tools.length})`);
+  assert(toolNames.includes("create_or_update_linkedin_post"), "create_or_update_linkedin_post tool exists");
+  assert(toolNames.includes("get_current_linkedin_post"), "get_current_linkedin_post tool exists");
+  assert(toolNames.includes("export_linkedin_html"), "export_linkedin_html tool exists");
+  assert(toolNames.includes("export_linkedin_post_text"), "export_linkedin_post_text tool exists");
+  assert(tools.length === 8, `exactly 8 tools registered (got ${tools.length})`);
 
   // Check that create_or_update_tweet has UI metadata
   const createTool = tools.find((t) => t.name === "create_or_update_tweet")!;
@@ -238,6 +242,96 @@ async function main() {
   assert(minimalData.imageUrl === undefined, "minimal tweet has no image URL");
   assert(minimalData.verified === undefined, "minimal tweet has no verified flag");
   assert(minimalData.likes === undefined, "minimal tweet has no likes");
+
+  // --- LinkedIn: get before creating ---
+  console.log("\n14. get_current_linkedin_post (no post yet)");
+  const noPostResult = await client.callTool({ name: "get_current_linkedin_post", arguments: {} });
+  assertIncludes(getTextContent(noPostResult as any), "No LinkedIn post has been created yet", "returns 'no post' message");
+
+  // --- LinkedIn: export before creating ---
+  console.log("\n15. export_linkedin_html (no post yet)");
+  const noLiHtmlResult = await client.callTool({ name: "export_linkedin_html", arguments: {} });
+  assertIncludes(getTextContent(noLiHtmlResult as any), "No LinkedIn post has been created yet", "returns 'no post' message");
+
+  console.log("\n16. export_linkedin_post_text (no post yet)");
+  const noLiTextResult = await client.callTool({ name: "export_linkedin_post_text", arguments: {} });
+  assertIncludes(getTextContent(noLiTextResult as any), "No LinkedIn post has been created yet", "returns 'no post' message");
+
+  // --- LinkedIn: create ---
+  console.log("\n17. create_or_update_linkedin_post");
+  const liCreateResult = await client.callTool({
+    name: "create_or_update_linkedin_post",
+    arguments: {
+      authorName: "Jane Smith",
+      authorHeadline: "Senior Engineer at Acme",
+      text: "Excited to share this post! #opentowork @claude",
+      likes: 150,
+      comments: 12,
+      reposts: 5,
+      timestamp: "3h",
+    },
+  });
+  const liCreateText = getTextContent(liCreateResult as any);
+  let liData: any;
+  try {
+    liData = JSON.parse(liCreateText);
+    assert(true, "LinkedIn tool result is valid JSON");
+  } catch {
+    assert(false, "LinkedIn tool result is valid JSON");
+    liData = {};
+  }
+  assert(liData._type === "linkedin", "JSON has _type: 'linkedin'");
+  assert(liData.authorName === "Jane Smith", "JSON has correct authorName");
+  assert(liData.authorHeadline === "Senior Engineer at Acme", "JSON has correct authorHeadline");
+  assertIncludes(liData.text, "Excited to share", "JSON has correct text");
+  assert(liData.likes === 150, "JSON has correct likes");
+  assert(liData.comments === 12, "JSON has correct comments");
+  assert(liData.reposts === 5, "JSON has correct reposts");
+  assert(liData.timestamp === "3h", "JSON has correct timestamp");
+
+  // --- LinkedIn: get after creating ---
+  console.log("\n18. get_current_linkedin_post (after creating)");
+  const liGetResult = await client.callTool({ name: "get_current_linkedin_post", arguments: {} });
+  const liGetData = JSON.parse(getTextContent(liGetResult as any));
+  assert(liGetData.authorName === "Jane Smith", "get_current_linkedin_post has correct authorName");
+
+  // --- LinkedIn: export HTML ---
+  console.log("\n19. export_linkedin_html");
+  const liHtmlResult = await client.callTool({ name: "export_linkedin_html", arguments: {} });
+  const liHtml = getTextContent(liHtmlResult as any);
+  assertIncludes(liHtml, "<!DOCTYPE html>", "returns full HTML document");
+  assertIncludes(liHtml, "Jane Smith", "HTML contains author name");
+  assertIncludes(liHtml, "Senior Engineer at Acme", "HTML contains headline");
+  assertIncludes(liHtml, "Excited to share", "HTML contains post text");
+  assertIncludes(liHtml, "0a66c2", "HTML contains LinkedIn blue color");
+
+  // --- LinkedIn: export text ---
+  console.log("\n20. export_linkedin_post_text");
+  const liTextResult = await client.callTool({ name: "export_linkedin_post_text", arguments: {} });
+  assert(
+    getTextContent(liTextResult as any) === "Excited to share this post! #opentowork @claude",
+    "returns exact post text"
+  );
+
+  // --- LinkedIn: minimal post ---
+  console.log("\n21. Minimal LinkedIn post (only required fields)");
+  const liMinResult = await client.callTool({
+    name: "create_or_update_linkedin_post",
+    arguments: { authorName: "Min User", text: "Just a post." },
+  });
+  const liMinData = JSON.parse(getTextContent(liMinResult as any));
+  assert(liMinData.authorName === "Min User", "minimal post has authorName");
+  assert(liMinData.authorHeadline === undefined, "minimal post has no headline");
+  assert(liMinData.likes === undefined, "minimal post has no likes");
+
+  // --- LinkedIn: character limit ---
+  console.log("\n22. LinkedIn character limit edge case (3000+ chars)");
+  const longLiResult = await client.callTool({
+    name: "create_or_update_linkedin_post",
+    arguments: { authorName: "Test", text: "B".repeat(3100) },
+  });
+  const longLiData = JSON.parse(getTextContent(longLiResult as any));
+  assert(longLiData.text.length === 3100, "accepts text over 3000 chars (server doesn't truncate)");
 
   // --- Cleanup ---
   await client.close();
