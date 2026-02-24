@@ -80,7 +80,9 @@ const TWEET_DEFAULT_AVATAR_SVG = `<svg viewBox="0 0 24 24" style="width:100%;hei
 
 const X_LOGO_SVG = `<svg viewBox="0 0 24 24" class="x-logo"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path></svg>`;
 
-function renderTweet(tweet: TweetData): string {
+function renderTweet(tweet: Partial<TweetData> & { text: string }): string {
+  const displayName = tweet.displayName ?? "";
+  const handle = tweet.handle ?? "";
   const charCount = tweet.text.length;
   const charLimit = 280;
   const isOverLimit = charCount > charLimit;
@@ -118,8 +120,8 @@ function renderTweet(tweet: TweetData): string {
       <div class="tweet-header">
         <div class="avatar">${avatarHtml}</div>
         <div class="tweet-header-content">
-          <div><span class="display-name">${escapeHtml(tweet.displayName)}</span>${verifiedHtml}</div>
-          <div class="handle">@${escapeHtml(tweet.handle)}</div>
+          <div><span class="display-name">${escapeHtml(displayName)}</span>${verifiedHtml}</div>
+          <div class="handle">@${escapeHtml(handle)}</div>
         </div>
         ${X_LOGO_SVG}
       </div>
@@ -178,7 +180,8 @@ const LI_DEFAULT_AVATAR_SVG = `<svg viewBox="0 0 24 24" style="width:100%;height
 
 const GLOBE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" class="li-globe-icon"><path d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8A6.5 6.5 0 018 1.5c.47 0 .93.05 1.38.14L7.5 3.5H5L3.06 6.44A6.48 6.48 0 011.5 8zm1.06 2.5L4 8.5h2.5l1 3H5l-2.44-1zm5.94 4a6.5 6.5 0 01-3.44-1.5H6l1-2.5h3l.5 2-2 2zm2.94-1.56L13 11.5h-1.5L10 8.5H12l1.44 1.44c-.23.68-.55 1.33-.94 1.92l-.06.08zm1.56-4.94c0 .68-.1 1.34-.28 1.96L13 10H11L9.5 6.5H12l.94.94c.06.5.09 1 .09 1.5l-.03.5zM10 5.5H8.5l1-2.5c.52.25 1 .58 1.44.96L10 5.5z"/></svg>`;
 
-function renderLinkedInPost(post: LinkedInPostData): string {
+function renderLinkedInPost(post: Partial<LinkedInPostData> & { text: string }): string {
+  const authorName = post.authorName ?? "";
   const charCount = post.text.length;
   const charLimit = 3000;
   const isOverLimit = charCount > charLimit;
@@ -219,7 +222,7 @@ function renderLinkedInPost(post: LinkedInPostData): string {
       <div class="li-header">
         <div class="li-avatar">${avatarHtml}</div>
         <div class="li-author-info">
-          <div class="li-author-name">${escapeHtml(post.authorName)}</div>
+          <div class="li-author-name">${escapeHtml(authorName)}</div>
           ${headlineHtml}
           <div class="li-post-meta">
             <span>${escapeHtml(timestamp)}</span>
