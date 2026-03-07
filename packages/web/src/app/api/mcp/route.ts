@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+const RESOURCE_URI = "ui://tweet-preview/app";
+const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 
 const TOOL_DEFINITION = {
   name: "create_or_update_post",
@@ -19,6 +24,9 @@ const TOOL_DEFINITION = {
       },
     },
     required: ["platform", "text"],
+  },
+  _meta: {
+    "ui/resourceUri": RESOURCE_URI,
   },
 };
 
@@ -89,8 +97,30 @@ export async function POST(request: NextRequest) {
   if (method === "initialize") {
     return jsonRpcResult(id, {
       protocolVersion: "2024-11-05",
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: {} },
       serverInfo: { name: "screeem-post-preview", version: "0.1.0" },
+    });
+  }
+
+  if (method === "resources/list") {
+    return jsonRpcResult(id, {
+      resources: [
+        {
+          uri: RESOURCE_URI,
+          name: "Post Preview App",
+          mimeType: RESOURCE_MIME_TYPE,
+        },
+      ],
+    });
+  }
+
+  if (method === "resources/read") {
+    const html = await fs.readFile(
+      path.join(process.cwd(), "public", "mcp-app.html"),
+      "utf-8"
+    );
+    return jsonRpcResult(id, {
+      contents: [{ uri: RESOURCE_URI, mimeType: RESOURCE_MIME_TYPE, text: html }],
     });
   }
 

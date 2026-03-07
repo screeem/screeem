@@ -49,10 +49,13 @@ export function McpSetup() {
     {
       mcpServers: {
         screeem: {
-          url: `${baseUrl}/api/mcp`,
-          headers: {
-            Authorization: `Bearer ${apiKey ?? "<your-api-key>"}`,
-          },
+          command: "npx",
+          args: [
+            "mcp-remote",
+            `${baseUrl}/api/mcp`,
+            "--header",
+            `Authorization: Bearer ${apiKey ?? "<your-api-key>"}`,
+          ],
         },
       },
     },
