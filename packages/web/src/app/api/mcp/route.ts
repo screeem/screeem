@@ -160,10 +160,16 @@ export async function POST(request: NextRequest) {
         authorName: user.linkedinHandle ?? undefined,
       };
     } else {
+      const handle = user.twitterHandle ?? undefined;
       responseData = {
         text,
-        handle: user.twitterHandle ?? undefined,
-        displayName: user.twitterHandle ?? undefined,
+        handle,
+        displayName: handle,
+        avatarUrl: handle ? `https://unavatar.io/twitter/${handle}` : undefined,
+        likes: 42,
+        retweets: 7,
+        replies: 3,
+        views: 1337,
       };
     }
 
