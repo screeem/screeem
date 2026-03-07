@@ -70,6 +70,21 @@ async function resolveApiKey(
   };
 }
 
+async function fetchAvatarDataUrl(handle: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(`https://unavatar.io/twitter/${handle}`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return undefined;
+    const buffer = await res.arrayBuffer();
+    const contentType = res.headers.get("content-type") ?? "image/jpeg";
+    const base64 = Buffer.from(buffer).toString("base64");
+    return `data:${contentType};base64,${base64}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function jsonRpcError(id: unknown, code: number, message: string) {
   return NextResponse.json(
     { jsonrpc: "2.0", id, error: { code, message } },
@@ -161,11 +176,12 @@ export async function POST(request: NextRequest) {
       };
     } else {
       const handle = user.twitterHandle ?? undefined;
+      const avatarUrl = handle ? await fetchAvatarDataUrl(handle) : undefined;
       responseData = {
         text,
         handle,
         displayName: handle,
-        avatarUrl: handle ? `https://unavatar.io/twitter/${handle}` : undefined,
+        avatarUrl,
         likes: 42,
         retweets: 7,
         replies: 3,
