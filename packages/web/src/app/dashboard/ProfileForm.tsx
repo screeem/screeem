@@ -36,9 +36,40 @@ export function ProfileForm({ userId }: { userId: string }) {
     },
   });
 
+  const savedTwitter = data?.twitter_handle;
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 mt-8">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Profile</h2>
+
+      {savedTwitter && (
+        <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200 max-w-md">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">
+            Twitter / X Preview
+          </p>
+          <div className="flex items-center gap-3">
+            <img
+              src={`https://unavatar.io/twitter/${savedTwitter}`}
+              alt={`@${savedTwitter}`}
+              className="w-12 h-12 rounded-full bg-gray-200"
+            />
+            <div>
+              <p className="font-semibold text-gray-900 text-sm leading-tight">
+                @{savedTwitter}
+              </p>
+              <a
+                href={`https://x.com/${savedTwitter}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-500 hover:underline"
+              >
+                x.com/{savedTwitter}
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-4 max-w-md">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
