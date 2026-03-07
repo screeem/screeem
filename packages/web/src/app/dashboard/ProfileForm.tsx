@@ -37,6 +37,7 @@ export function ProfileForm({ userId }: { userId: string }) {
   });
 
   const savedTwitter = data?.twitter_handle;
+  const savedLinkedin = data?.linkedin_handle;
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 mt-8">
@@ -64,6 +65,34 @@ export function ProfileForm({ userId }: { userId: string }) {
                 className="text-xs text-blue-500 hover:underline"
               >
                 x.com/{savedTwitter}
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {savedLinkedin && (
+        <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200 max-w-md">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">
+            LinkedIn Preview
+          </p>
+          <div className="flex items-center gap-3">
+            <img
+              src={`https://unavatar.io/linkedin/${savedLinkedin}`}
+              alt={savedLinkedin}
+              className="w-12 h-12 rounded-full bg-gray-200"
+            />
+            <div>
+              <p className="font-semibold text-gray-900 text-sm leading-tight">
+                {savedLinkedin}
+              </p>
+              <a
+                href={`https://linkedin.com/in/${savedLinkedin}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-500 hover:underline"
+              >
+                linkedin.com/in/{savedLinkedin}
               </a>
             </div>
           </div>

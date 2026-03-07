@@ -171,6 +171,8 @@ function renderTweet(tweet: Partial<TweetData> & { text: string }): string {
       </svg>
       <span>${charCount} / ${charLimit}${isOverLimit ? " (over limit!)" : ""}</span>
     </div>
+
+    <button id="copy-btn" class="copy-btn">Copy post</button>
   `;
 }
 
@@ -274,6 +276,8 @@ function renderLinkedInPost(post: Partial<LinkedInPostData> & { text: string }):
       </svg>
       <span>${charCount} / ${charLimit}${isOverLimit ? " (over limit!)" : ""}</span>
     </div>
+
+    <button id="copy-btn" class="li-copy-btn">Copy post</button>
   `;
 }
 
@@ -300,6 +304,24 @@ app.ontoolresult = (params) => {
       root.innerHTML = renderLinkedInPost(data as LinkedInPostData);
     } else {
       root.innerHTML = renderTweet(data as TweetData);
+    }
+
+    const copyBtn = root.querySelector("#copy-btn") as HTMLButtonElement | null;
+    if (copyBtn) {
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(data.text);
+        } catch {
+          const ta = Object.assign(document.createElement("textarea"), { value: data.text });
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        const original = copyBtn.textContent;
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = original; }, 2000);
+      });
     }
   } catch {
     root.textContent = text.text;
