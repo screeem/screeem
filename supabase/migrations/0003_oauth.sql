@@ -6,6 +6,8 @@ CREATE TABLE oauth_clients (
 );
 
 ALTER TABLE oauth_clients ENABLE ROW LEVEL SECURITY;
+-- Service-role only: no RLS policies needed. All access goes through createAdminClient().
+REVOKE ALL ON oauth_clients FROM anon, authenticated;
 
 CREATE TABLE oauth_auth_codes (
   code          text PRIMARY KEY,
@@ -17,3 +19,5 @@ CREATE TABLE oauth_auth_codes (
 );
 
 ALTER TABLE oauth_auth_codes ENABLE ROW LEVEL SECURITY;
+-- Service-role only: no RLS policies needed. All access goes through createAdminClient().
+REVOKE ALL ON oauth_auth_codes FROM anon, authenticated;

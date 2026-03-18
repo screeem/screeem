@@ -52,8 +52,27 @@ export async function approveAuthorization(formData: FormData) {
 }
 
 export async function denyAuthorization(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/auth/login");
+
+  const clientId = formData.get("clientId") as string;
   const redirectUri = formData.get("redirectUri") as string;
   const state = formData.get("state") as string;
+
+  // Validate redirect_uri belongs to the registered client
+  const admin = createAdminClient();
+  const { data: client } = await admin
+    .from("oauth_clients")
+    .select("redirect_uris")
+    .eq("client_id", clientId)
+    .single();
+
+  if (!client || !client.redirect_uris.includes(redirectUri)) {
+    throw new Error("Invalid client or redirect_uri");
+  }
 
   const url = new URL(redirectUri);
   url.searchParams.set("error", "access_denied");

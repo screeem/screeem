@@ -6,6 +6,8 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
+  "Cache-Control": "no-store",
+  Pragma: "no-cache",
 };
 
 export async function OPTIONS() {
@@ -55,18 +57,17 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
 
+  // Atomically consume the auth code (single-use: delete and return in one step)
   const { data: authCode } = await admin
     .from("oauth_auth_codes")
-    .select("user_id, client_id, redirect_uri, code_challenge, expires_at")
+    .delete()
     .eq("code", code)
+    .select("user_id, client_id, redirect_uri, code_challenge, expires_at")
     .single();
 
   if (!authCode) {
     return error(400, "invalid_grant", "Authorization code not found or already used");
   }
-
-  // Delete immediately (codes are single-use)
-  await admin.from("oauth_auth_codes").delete().eq("code", code);
 
   if (new Date(authCode.expires_at) < new Date()) {
     return error(400, "invalid_grant", "Authorization code has expired");
@@ -97,9 +98,13 @@ export async function POST(request: NextRequest) {
     accessToken = existing.key;
   } else {
     const newKey = crypto.randomUUID();
-    await admin
+    const { error: insertError } = await admin
       .from("api_keys")
       .insert({ user_id: authCode.user_id, key: newKey });
+    if (insertError) {
+      console.error("Failed to insert API key for user", authCode.user_id, insertError);
+      return error(500, "server_error", "Could not create access token");
+    }
     accessToken = newKey;
   }
 

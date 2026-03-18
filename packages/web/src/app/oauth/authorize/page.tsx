@@ -72,7 +72,10 @@ export default async function AuthorizePage({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    const returnTo = `/oauth/authorize?${new URLSearchParams(params as Record<string, string>).toString()}`;
+    const filteredEntries = Object.entries(params).filter(
+      ([, value]) => value !== undefined && value !== ""
+    ) as [string, string][];
+    const returnTo = `/oauth/authorize?${new URLSearchParams(filteredEntries).toString()}`;
     redirect(`/auth/login?next=${encodeURIComponent(returnTo)}`);
   }
 
