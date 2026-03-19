@@ -40,9 +40,16 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
+type SocialAccount = {
+  id: string;
+  platform: string;
+  handle: string;
+  label: string | null;
+};
+
 async function resolveApiKey(
   request: NextRequest
-): Promise<{ userId: string; twitterHandle: string | null; linkedinHandle: string | null } | null> {
+): Promise<{ userId: string; accounts: SocialAccount[] } | null> {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) return null;
 
@@ -57,16 +64,15 @@ async function resolveApiKey(
 
   if (!apiKey) return null;
 
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("twitter_handle, linkedin_handle")
-    .eq("id", apiKey.user_id)
-    .single();
+  const { data: accounts } = await admin
+    .from("social_accounts")
+    .select("id, platform, handle, label")
+    .eq("user_id", apiKey.user_id)
+    .order("created_at", { ascending: true });
 
   return {
     userId: apiKey.user_id,
-    twitterHandle: profile?.twitter_handle ?? null,
-    linkedinHandle: profile?.linkedin_handle ?? null,
+    accounts: accounts ?? [],
   };
 }
 
@@ -166,32 +172,62 @@ export async function POST(request: NextRequest) {
     }
 
     const { platform, text } = params.arguments;
+    const platformAccounts = user.accounts.filter((a) => a.platform === platform);
 
-    let responseData: Record<string, unknown>;
     if (platform === "linkedin") {
-      responseData = {
+      const variants = await Promise.all(
+        platformAccounts.map(async (account) => ({
+          _type: "linkedin",
+          text,
+          authorName: account.handle,
+          accountLabel: account.label ?? undefined,
+          accountId: account.id,
+        }))
+      );
+
+      const responseData = {
         _type: "linkedin",
         text,
-        authorName: user.linkedinHandle ?? undefined,
+        accounts: variants.length > 0 ? variants : [{ _type: "linkedin", text }],
       };
-    } else {
-      const handle = user.twitterHandle ?? undefined;
-      const avatarUrl = handle ? await fetchAvatarDataUrl(handle) : undefined;
-      responseData = {
-        text,
-        handle,
-        displayName: handle,
-        avatarUrl,
-        likes: 42,
-        retweets: 7,
-        replies: 3,
-        views: 1337,
-      };
-    }
 
-    return jsonRpcResult(id, {
-      content: [{ type: "text", text: JSON.stringify(responseData) }],
-    });
+      return jsonRpcResult(id, {
+        content: [{ type: "text", text: JSON.stringify(responseData) }],
+      });
+    } else {
+      const variants = await Promise.all(
+        platformAccounts.map(async (account) => {
+          const avatarUrl = await fetchAvatarDataUrl(account.handle);
+          return {
+            text,
+            handle: account.handle,
+            displayName: account.handle,
+            avatarUrl,
+            accountLabel: account.label ?? undefined,
+            accountId: account.id,
+            likes: 42,
+            retweets: 7,
+            replies: 3,
+            views: 1337,
+          };
+        })
+      );
+
+      const responseData = {
+        text,
+        accounts: variants.length > 0 ? variants : [{
+          text,
+          likes: 42,
+          retweets: 7,
+          replies: 3,
+          views: 1337,
+        }],
+      };
+
+      return jsonRpcResult(id, {
+        content: [{ type: "text", text: JSON.stringify(responseData) }],
+      });
+    }
   }
 
   return jsonRpcError(id, -32601, `Method not found: ${method}`);

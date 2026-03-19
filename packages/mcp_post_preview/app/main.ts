@@ -294,37 +294,70 @@ function applyTheme(theme: "light" | "dark" | undefined) {
   }
 }
 
+function renderAccountSwitcher(accounts: Array<{ handle?: string; authorName?: string; accountLabel?: string; accountId?: string }>, selectedIndex: number): string {
+  if (accounts.length <= 1) return "";
+  const options = accounts.map((a, i) => {
+    const handle = a.handle ?? a.authorName ?? "Unknown";
+    const label = a.accountLabel ? `${handle} (${a.accountLabel})` : handle;
+    return `<option value="${i}"${i === selectedIndex ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("");
+  return `<div class="account-switcher"><label>Account:</label><select id="account-select">${options}</select></div>`;
+}
+
+function renderForAccount(data: Record<string, unknown>, accounts: Array<Record<string, unknown>>, index: number) {
+  const account = accounts[index] ?? accounts[0];
+  if (!account) return;
+
+  const switcherHtml = renderAccountSwitcher(accounts as Array<{ handle?: string; authorName?: string; accountLabel?: string }>, index);
+  const isLinkedin = data._type === "linkedin" || (account as Record<string, unknown>)._type === "linkedin";
+
+  let previewHtml: string;
+  if (isLinkedin) {
+    previewHtml = renderLinkedInPost(account as unknown as LinkedInPostData);
+  } else {
+    previewHtml = renderTweet(account as unknown as TweetData);
+  }
+
+  root.innerHTML = switcherHtml + previewHtml;
+
+  const select = root.querySelector("#account-select") as HTMLSelectElement | null;
+  if (select) {
+    select.addEventListener("change", () => {
+      renderForAccount(data, accounts, parseInt(select.value, 10));
+    });
+  }
+
+  const postText = (account as Record<string, unknown>).text as string ?? data.text as string;
+  const copyBtn = root.querySelector("#copy-btn") as HTMLButtonElement | null;
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(postText);
+      } catch {
+        const ta = Object.assign(document.createElement("textarea"), { value: postText });
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      const original = copyBtn.textContent;
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => { copyBtn.textContent = original; }, 2000);
+    });
+  }
+}
+
 app.ontoolresult = (params) => {
   const text = params.content?.find((c: { type: string }) => c.type === "text") as { type: string; text: string } | undefined;
   if (!text?.text) return;
 
   try {
-    const data = JSON.parse(text.text);
-    if (data._type === "linkedin") {
-      root.innerHTML = renderLinkedInPost(data as LinkedInPostData);
-    } else {
-      root.innerHTML = renderTweet(data as TweetData);
-    }
+    const data = JSON.parse(text.text) as Record<string, unknown>;
+    const accounts = (data.accounts as Array<Record<string, unknown>>) ?? [data];
 
-    const copyBtn = root.querySelector("#copy-btn") as HTMLButtonElement | null;
-    if (copyBtn) {
-      copyBtn.addEventListener("click", async () => {
-        try {
-          await navigator.clipboard.writeText(data.text);
-        } catch {
-          const ta = Object.assign(document.createElement("textarea"), { value: data.text });
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand("copy");
-          ta.remove();
-        }
-        const original = copyBtn.textContent;
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = original; }, 2000);
-      });
-    }
+    renderForAccount(data, accounts, 0);
   } catch {
-    root.textContent = text.text;
+    root.textContent = text?.text ?? "";
   }
 };
 
