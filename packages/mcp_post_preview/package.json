@@ -13,6 +13,8 @@
   ],
   "scripts": {
     "build": "vite build && tsc",
+    "test:visual": "pnpm exec playwright test test-e2e-visual.spec.ts",
+    "test:visual:update": "pnpm exec playwright test test-e2e-visual.spec.ts --update-snapshots",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -38,6 +40,7 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^20.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
