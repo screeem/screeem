@@ -34,8 +34,9 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isAuthRoute = pathname.startsWith("/auth");
   const isMcpRoute = pathname.startsWith("/api/mcp");
+  const isOAuthRoute = pathname.startsWith("/oauth") || pathname.startsWith("/.well-known");
 
-  if (!user && !isAuthRoute && !isMcpRoute) {
+  if (!user && !isAuthRoute && !isMcpRoute && !isOAuthRoute) {
     return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
