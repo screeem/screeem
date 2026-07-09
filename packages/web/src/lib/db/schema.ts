@@ -20,3 +20,18 @@ export const apiKeys = pgTable("api_keys", {
   key: text("key").notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
+
+export const workspaces = pgTable("workspaces", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ownerId: uuid("owner_id").notNull().unique(),
+  name: text("name").notNull().default("My workspace"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const workspaceMembers = pgTable("workspace_members", {
+  workspaceId: uuid("workspace_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  role: text("role").notNull().default("owner"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});

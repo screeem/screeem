@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "./SignOutButton";
 import { ProfileForm } from "./ProfileForm";
 import { McpSetup } from "./McpSetup";
+import { WorkspaceSettings } from "./WorkspaceSettings";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -30,6 +31,7 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">Dashboard</h1>
         <p className="text-gray-500">Welcome back, {user.email}</p>
         <ProfileForm userId={user.id} />
+        <WorkspaceSettings userId={user.id} userEmail={user.email ?? "Account user"} />
         <McpSetup />
       </main>
     </div>
