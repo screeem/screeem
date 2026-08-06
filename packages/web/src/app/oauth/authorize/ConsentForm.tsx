@@ -1,6 +1,7 @@
 "use client";
 
 import { approveAuthorization, denyAuthorization } from "./actions";
+import type { UserTeam } from "@/lib/teams/server";
 
 interface Props {
   clientName: string;
@@ -9,6 +10,7 @@ interface Props {
   state: string;
   codeChallenge: string;
   userId: string;
+  teams: UserTeam[];
 }
 
 export function ConsentForm({
@@ -18,6 +20,7 @@ export function ConsentForm({
   state,
   codeChallenge,
   userId,
+  teams,
 }: Props) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -34,7 +37,7 @@ export function ConsentForm({
         </h1>
         <p className="text-sm text-gray-500 mb-6">
           <strong className="text-gray-700">{clientName}</strong> is requesting
-          access to your Screeem account to create and preview social media
+          access to a Screeem team to create and preview social media
           posts on your behalf.
         </p>
 
@@ -61,6 +64,12 @@ export function ConsentForm({
             <input type="hidden" name="redirectUri" value={redirectUri} />
             <input type="hidden" name="state" value={state} />
             <input type="hidden" name="codeChallenge" value={codeChallenge} />
+            <label className="mb-4 block text-sm font-medium text-gray-700">
+              Team
+              <select name="teamId" className="mt-1 block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              </select>
+            </label>
             <button
               type="submit"
               className="w-full py-2.5 px-4 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
@@ -70,6 +79,7 @@ export function ConsentForm({
           </form>
 
           <form action={denyAuthorization}>
+            <input type="hidden" name="clientId" value={clientId} />
             <input type="hidden" name="redirectUri" value={redirectUri} />
             <input type="hidden" name="state" value={state} />
             <button

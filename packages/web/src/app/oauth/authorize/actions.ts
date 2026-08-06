@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import crypto from "node:crypto";
+import { getMembership } from "@/lib/teams/server";
 
 export async function approveAuthorization(formData: FormData) {
   const supabase = await createClient();
@@ -19,6 +20,11 @@ export async function approveAuthorization(formData: FormData) {
   const redirectUri = formData.get("redirectUri") as string;
   const state = formData.get("state") as string;
   const codeChallenge = formData.get("codeChallenge") as string;
+  const teamId = formData.get("teamId") as string;
+
+  if (!teamId || !(await getMembership(user.id, teamId))) {
+    throw new Error("You are not a member of that team");
+  }
 
   const admin = createAdminClient();
 
@@ -40,6 +46,7 @@ export async function approveAuthorization(formData: FormData) {
     client_id: clientId,
     redirect_uri: redirectUri,
     code_challenge: codeChallenge,
+    team_id: teamId,
   });
 
   if (error) throw new Error("Failed to create authorization code");

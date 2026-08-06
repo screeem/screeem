@@ -58,16 +58,24 @@ async function resolveApiKey(
 
   const { data: apiKey } = await admin
     .from("api_keys")
-    .select("user_id")
+    .select("user_id, team_id")
     .eq("key", token)
     .single();
 
   if (!apiKey) return null;
 
+  const { data: membership } = await admin
+    .from("team_members")
+    .select("user_id")
+    .eq("team_id", apiKey.team_id)
+    .eq("user_id", apiKey.user_id)
+    .maybeSingle();
+  if (!membership) return null;
+
   const { data: accounts } = await admin
     .from("social_accounts")
     .select("id, platform, handle, label")
-    .eq("user_id", apiKey.user_id)
+    .eq("team_id", apiKey.team_id)
     .order("created_at", { ascending: true });
 
   return {

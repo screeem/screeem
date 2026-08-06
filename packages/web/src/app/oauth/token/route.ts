@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     .from("oauth_auth_codes")
     .delete()
     .eq("code", code)
-    .select("user_id, client_id, redirect_uri, code_challenge, expires_at")
+    .select("user_id, team_id, client_id, redirect_uri, code_challenge, expires_at")
     .single();
 
   if (!authCode) {
@@ -85,10 +85,25 @@ export async function POST(request: NextRequest) {
     return error(400, "invalid_grant", "PKCE verification failed");
   }
 
-  // Get or create the user's API key — that becomes the access token
+  if (!authCode.team_id) {
+    return error(400, "invalid_grant", "Authorization code has no team context");
+  }
+
+  const { data: membership } = await admin
+    .from("team_members")
+    .select("user_id")
+    .eq("team_id", authCode.team_id)
+    .eq("user_id", authCode.user_id)
+    .maybeSingle();
+  if (!membership) {
+    return error(400, "invalid_grant", "User is no longer a member of this team");
+  }
+
+  // Get or create the selected team's API key — that becomes the access token.
   const { data: existing } = await admin
     .from("api_keys")
     .select("key")
+    .eq("team_id", authCode.team_id)
     .eq("user_id", authCode.user_id)
     .limit(1)
     .single();
@@ -100,7 +115,7 @@ export async function POST(request: NextRequest) {
     const newKey = crypto.randomUUID();
     const { error: insertError } = await admin
       .from("api_keys")
-      .insert({ user_id: authCode.user_id, key: newKey });
+      .insert({ user_id: authCode.user_id, team_id: authCode.team_id, key: newKey });
     if (insertError) {
       console.error("Failed to insert API key for user", authCode.user_id, insertError);
       return error(500, "server_error", "Could not create access token");

@@ -35,10 +35,12 @@ function AccountCard({
   account,
   onDelete,
   isDeleting,
+  canManage,
 }: {
   account: SocialAccount;
   onDelete: () => void;
   isDeleting: boolean;
+  canManage: boolean;
 }) {
   const config = PLATFORM_CONFIG[account.platform];
   return (
@@ -66,13 +68,13 @@ function AccountCard({
           {account.handle}
         </a>
       </div>
-      <button
+      {canManage && <button
         onClick={onDelete}
         disabled={isDeleting}
         className="px-2 py-1 text-xs text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50"
       >
         Remove
-      </button>
+      </button>}
     </div>
   );
 }
@@ -80,10 +82,12 @@ function AccountCard({
 function AddAccountForm({
   platform,
   userId,
+  teamId,
   onAdded,
 }: {
   platform: Platform;
   userId: string;
+  teamId: string;
   onAdded: () => void;
 }) {
   const [handle, setHandle] = useState("");
@@ -94,6 +98,7 @@ function AddAccountForm({
     mutationFn: () =>
       addSocialAccount({
         user_id: userId,
+        team_id: teamId,
         platform,
         handle: handle.replace(/^@/, ""),
         ...(label ? { label } : {}),
@@ -145,6 +150,8 @@ function PlatformSection({
   platform,
   accounts,
   userId,
+  teamId,
+  canManage,
   onChanged,
   deletingId,
   onDelete,
@@ -152,6 +159,8 @@ function PlatformSection({
   platform: Platform;
   accounts: SocialAccount[];
   userId: string;
+  teamId: string;
+  canManage: boolean;
   onChanged: () => void;
   deletingId: string | null;
   onDelete: (id: string) => void;
@@ -170,26 +179,27 @@ function PlatformSection({
               account={account}
               onDelete={() => onDelete(account.id)}
               isDeleting={deletingId === account.id}
+              canManage={canManage}
             />
           ))}
         </div>
       )}
-      <AddAccountForm platform={platform} userId={userId} onAdded={onChanged} />
+      {canManage && <AddAccountForm platform={platform} userId={userId} teamId={teamId} onAdded={onChanged} />}
     </div>
   );
 }
 
-export function ProfileForm({ userId }: { userId: string }) {
+export function ProfileForm({ userId, teamId, canManage }: { userId: string; teamId: string; canManage: boolean }) {
   const queryClient = useQueryClient();
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data: accounts = [] } = useQuery({
-    queryKey: ["social-accounts", userId],
-    queryFn: () => getSocialAccounts(userId),
+    queryKey: ["social-accounts", teamId],
+    queryFn: () => getSocialAccounts(teamId),
   });
 
   function invalidate() {
-    queryClient.invalidateQueries({ queryKey: ["social-accounts", userId] });
+    queryClient.invalidateQueries({ queryKey: ["social-accounts", teamId] });
   }
 
   async function handleDelete(id: string) {
@@ -208,7 +218,7 @@ export function ProfileForm({ userId }: { userId: string }) {
         Connected Accounts
       </h2>
       <p className="text-sm text-gray-500 mb-6">
-        Add your social media accounts. You can connect multiple accounts per platform.
+        Social media accounts are shared with everyone in this team.
       </p>
 
       <div className="space-y-8 max-w-lg">
@@ -216,6 +226,8 @@ export function ProfileForm({ userId }: { userId: string }) {
           platform="twitter"
           accounts={accounts}
           userId={userId}
+          teamId={teamId}
+          canManage={canManage}
           onChanged={invalidate}
           deletingId={deletingId}
           onDelete={handleDelete}
@@ -224,6 +236,8 @@ export function ProfileForm({ userId }: { userId: string }) {
           platform="linkedin"
           accounts={accounts}
           userId={userId}
+          teamId={teamId}
+          canManage={canManage}
           onChanged={invalidate}
           deletingId={deletingId}
           onDelete={handleDelete}

@@ -37,7 +37,9 @@ export async function proxy(request: NextRequest) {
   const isOAuthRoute = pathname.startsWith("/oauth") || pathname.startsWith("/.well-known");
 
   if (!user && !isAuthRoute && !isMcpRoute && !isOAuthRoute) {
-    return NextResponse.redirect(new URL("/auth/login", request.url));
+    const loginUrl = new URL("/auth/login", request.url);
+    loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+    return NextResponse.redirect(loginUrl);
   }
 
   if (user && isAuthRoute && !pathname.startsWith("/auth/callback")) {
