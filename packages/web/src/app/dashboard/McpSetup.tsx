@@ -19,7 +19,7 @@ async function regenerateApiKey(): Promise<string> {
 
 type Tab = "claude-ai" | "desktop";
 
-export function McpSetup() {
+export function McpSetup({ teamId }: { teamId: string }) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("claude-ai");
   const [revealed, setRevealed] = useState(false);
@@ -28,14 +28,14 @@ export function McpSetup() {
   const [urlCopied, setUrlCopied] = useState(false);
 
   const { data: apiKey, isLoading } = useQuery({
-    queryKey: ["api-key"],
+    queryKey: ["api-key", teamId],
     queryFn: fetchApiKey,
   });
 
   const mutation = useMutation({
     mutationFn: regenerateApiKey,
     onSuccess: (newKey) => {
-      queryClient.setQueryData(["api-key"], newKey);
+      queryClient.setQueryData(["api-key", teamId], newKey);
       setRevealed(true);
     },
   });

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ConsentForm } from "./ConsentForm";
+import { getUserTeams } from "@/lib/teams/server";
 
 interface SearchParams {
   response_type?: string;
@@ -79,6 +80,8 @@ export default async function AuthorizePage({
     redirect(`/auth/login?next=${encodeURIComponent(returnTo)}`);
   }
 
+  const teams = await getUserTeams(user.id, user.email);
+
   return (
     <ConsentForm
       clientName={client.client_name ?? client_id}
@@ -87,6 +90,7 @@ export default async function AuthorizePage({
       state={state ?? ""}
       codeChallenge={code_challenge}
       userId={user.id}
+      teams={teams}
     />
   );
 }

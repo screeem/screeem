@@ -10,13 +10,15 @@ Screeem is an MCP server that gives Claude a `create_or_update_post` tool. When 
 - **Your avatar & handle** — pulls your profile from the account you connect
 - **Character count indicator** — visual progress ring, turns red when over the limit
 - **Copy button** — copy the final post text to your clipboard with one click
+- **Team workspaces** — share social accounts with teammates using owner, admin, and member roles
+- **Team-aware access** — each member gets a revocable MCP key for the workspace they select
 - **Works in Claude.ai and Claude Desktop**
 
 ## Getting Started
 
 ### Claude.ai (custom connector)
 
-1. Sign up at [screeem.app](https://screeem.app) and add your Twitter/LinkedIn handle in the dashboard.
+1. Sign up at [screeem.app](https://screeem.app), choose or create a team, and add its Twitter/LinkedIn handles in the dashboard.
 2. In Claude.ai go to **Settings → Customize → Connectors** and click **+**.
 3. Enter the name `Screeem` and the connector URL shown in your dashboard.
 4. Click **Save** — Claude will redirect you to sign in and authorize access.
