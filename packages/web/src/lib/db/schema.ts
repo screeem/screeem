@@ -1,4 +1,4 @@
-import { pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, jsonb, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const profiles = pgTable("profiles", {
   id: uuid("id").primaryKey(),
@@ -51,4 +51,26 @@ export const teamInvitations = pgTable("team_invitations", {
   invitedBy: uuid("invited_by").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+export const forms = pgTable("forms", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").notNull(),
+  name: text("name").notNull(),
+  endpointKey: uuid("endpoint_key").notNull().defaultRandom().unique(),
+  allowedOrigin: text("allowed_origin"),
+  successUrl: text("success_url"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const formSubmissions = pgTable("form_submissions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  formId: uuid("form_id").notNull(),
+  payload: jsonb("payload").notNull(),
+  origin: text("origin"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
