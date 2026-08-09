@@ -36,6 +36,7 @@ export async function proxy(request: NextRequest) {
   const isMcpRoute = pathname.startsWith("/api/mcp");
   const isPublicFormSubmissionRoute =
     /^\/api\/forms\/[^/]+\/submissions\/?$/.test(pathname);
+  const isPublicApiRoute = pathname === "/api/openapi" || pathname.startsWith("/api/v1/");
   const isOAuthRoute = pathname.startsWith("/oauth") || pathname.startsWith("/.well-known");
 
   if (
@@ -43,6 +44,7 @@ export async function proxy(request: NextRequest) {
     !isAuthRoute &&
     !isMcpRoute &&
     !isPublicFormSubmissionRoute &&
+    !isPublicApiRoute &&
     !isOAuthRoute
   ) {
     const loginUrl = new URL("/auth/login", request.url);

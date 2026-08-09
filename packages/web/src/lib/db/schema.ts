@@ -23,6 +23,17 @@ export const apiKeys = pgTable("api_keys", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+export const publicApiKeys = pgTable("public_api_keys", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").notNull(),
+  name: text("name").notNull(),
+  keyPrefix: text("key_prefix").notNull(),
+  keyHash: text("key_hash").notNull().unique(),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+});
+
 export const teams = pgTable("teams", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
