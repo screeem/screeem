@@ -7,6 +7,7 @@ import { TeamSwitcher } from "./TeamSwitcher";
 import { TeamSettings, type TeamMemberView, type TeamInvitationView } from "./TeamSettings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { canManage, getActiveTeam } from "@/lib/teams/server";
+import { Forms } from "./Forms";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -71,6 +72,7 @@ export default async function DashboardPage() {
         <p className="text-gray-500">Manage {activeTeam.name}&apos;s shared Screeem workspace.</p>
         <TeamSettings team={activeTeam} members={members} invitations={invitations} />
         <ProfileForm userId={user.id} teamId={activeTeam.id} canManage={canManage(activeTeam.role)} />
+        <Forms teamId={activeTeam.id} canManage={canManage(activeTeam.role)} />
         <McpSetup teamId={activeTeam.id} />
       </main>
     </div>
