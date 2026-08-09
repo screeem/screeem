@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("forms")
-    .select("id, name, endpoint_key, allowed_origin, success_url, is_active, created_at, updated_at")
+    .select("id, name, endpoint_key, allowed_origin, success_url, is_active, requires_turnstile, submission_schema, created_at, updated_at")
     .eq("team_id", auth.teamId)
     .order("created_at", { ascending: false });
 

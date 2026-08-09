@@ -72,6 +72,8 @@ export const forms = pgTable("forms", {
   allowedOrigin: text("allowed_origin"),
   successUrl: text("success_url"),
   isActive: boolean("is_active").notNull().default(true),
+  requiresTurnstile: boolean("requires_turnstile").notNull().default(false),
+  submissionSchema: jsonb("submission_schema"),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

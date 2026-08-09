@@ -97,10 +97,12 @@ export function GET(request: NextRequest) {
             allowed_origin: { type: ["string", "null"], format: "uri" },
             success_url: { type: ["string", "null"], format: "uri" },
             is_active: { type: "boolean" },
+            requires_turnstile: { type: "boolean" },
+            submission_schema: { type: ["object", "null"], additionalProperties: true },
             created_at: { type: "string", format: "date-time" },
             updated_at: { type: "string", format: "date-time" },
           },
-          required: ["id", "name", "endpoint_key", "is_active", "created_at", "updated_at"],
+          required: ["id", "name", "endpoint_key", "is_active", "requires_turnstile", "submission_schema", "created_at", "updated_at"],
         },
         FormSubmission: {
           type: "object",
