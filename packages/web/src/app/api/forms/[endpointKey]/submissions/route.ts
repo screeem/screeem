@@ -50,7 +50,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
   } catch {
     return NextResponse.json({ error: "Send a JSON object or form fields" }, { status: 400 });
   }
-  if (JSON.stringify(payload).length > MAX_BYTES) return NextResponse.json({ error: "Submission is too large" }, { status: 413 });
+  if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_BYTES) {
+    return NextResponse.json({ error: "Submission is too large" }, { status: 413 });
+  }
   const headers = cors(origin, form.allowed_origin);
   if (payload._gotcha) return NextResponse.json({ ok: true }, { status: 202, headers });
   delete payload._gotcha;

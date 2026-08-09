@@ -34,9 +34,17 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isAuthRoute = pathname.startsWith("/auth");
   const isMcpRoute = pathname.startsWith("/api/mcp");
+  const isPublicFormSubmissionRoute =
+    /^\/api\/forms\/[^/]+\/submissions\/?$/.test(pathname);
   const isOAuthRoute = pathname.startsWith("/oauth") || pathname.startsWith("/.well-known");
 
-  if (!user && !isAuthRoute && !isMcpRoute && !isOAuthRoute) {
+  if (
+    !user &&
+    !isAuthRoute &&
+    !isMcpRoute &&
+    !isPublicFormSubmissionRoute &&
+    !isOAuthRoute
+  ) {
     const loginUrl = new URL("/auth/login", request.url);
     loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
     return NextResponse.redirect(loginUrl);
