@@ -17,9 +17,7 @@ export async function GET(
   try {
     const form = await findPublicForm(admin, endpointKey)
     if (!form) return notFound()
-    // Direct hosted-form navigation may omit Origin on its same-origin GET.
-    // When a browser does send Origin, keep the form's configured restriction.
-    if (form.allowedOrigin && origin !== null && origin !== form.allowedOrigin) {
+    if (!originIsAllowed(request, origin, form.allowedOrigin)) {
       return NextResponse.json({ error: "Origin is not allowed" }, { status: 403 })
     }
 
@@ -52,4 +50,15 @@ function notFound() {
 function cors(origin: string | null, allowed: string | null): Record<string, string> {
   if (!allowed) return { "Access-Control-Allow-Origin": "*" }
   return origin === allowed ? { "Access-Control-Allow-Origin": allowed, Vary: "Origin" } : {}
+}
+
+function originIsAllowed(
+  request: NextRequest,
+  origin: string | null,
+  allowed: string | null,
+): boolean {
+  if (!allowed || origin === null || origin === allowed) return true
+  return (
+    origin === request.nextUrl.origin && request.headers.get("sec-fetch-site") === "same-origin"
+  )
 }

@@ -28,7 +28,10 @@ export async function OPTIONS(
     if (!originIsAllowed(request, origin, form.allowedOrigin)) {
       return new NextResponse(null, { status: 403 })
     }
-    if (form.publishedVersion !== null && form.definitionAvailability !== "active") {
+    if (
+      (!form.legacyUnstructured && form.publishedVersion === null) ||
+      (form.publishedVersion !== null && form.definitionAvailability !== "active")
+    ) {
       return new NextResponse(null, { status: 404 })
     }
 
@@ -52,9 +55,6 @@ export async function POST(
 ) {
   const { endpointKey } = await context.params
   const origin = request.headers.get("origin")
-  const length = Number(request.headers.get("content-length"))
-  if (length > MAX_BYTES) return tooLarge()
-
   const admin = createAdminClient()
   let form: PublicFormRecord
   try {
@@ -70,6 +70,8 @@ export async function POST(
   }
 
   const headers = cors(origin, form.allowedOrigin)
+  const length = Number(request.headers.get("content-length"))
+  if (length > MAX_BYTES) return tooLarge(headers)
   try {
     const published = await loadActivePublicDefinition(admin, form)
     return published
@@ -96,9 +98,9 @@ async function structuredSubmission(
   origin: string | null,
   headers: Record<string, string>,
 ) {
-  const parsed = await readStructuredPayload(request)
+  const parsed = await readStructuredPayload(request, headers)
   if (parsed.response) return parsed.response
-  if (parsed.encodedBytes > MAX_BYTES) return tooLarge()
+  if (parsed.encodedBytes > MAX_BYTES) return tooLarge(headers)
 
   if (honeypotValue(parsed.input)) {
     return NextResponse.json({ ok: true }, { status: 202, headers })
@@ -139,10 +141,10 @@ async function legacySubmission(
   origin: string | null,
   headers: Record<string, string>,
 ) {
-  const parsed = await readLegacyPayload(request)
+  const parsed = await readLegacyPayload(request, headers)
   if (parsed.response) return parsed.response
   if (new TextEncoder().encode(JSON.stringify(parsed.payload)).byteLength > MAX_BYTES) {
-    return tooLarge()
+    return tooLarge(headers)
   }
   if (parsed.payload._gotcha) {
     return NextResponse.json({ ok: true }, { status: 202, headers })
@@ -174,7 +176,10 @@ async function legacySubmission(
   return success(request, form.successUrl, headers)
 }
 
-async function readStructuredPayload(request: NextRequest): Promise<
+async function readStructuredPayload(
+  request: NextRequest,
+  headers: Record<string, string>,
+): Promise<
   | {
       readonly input: unknown
       readonly mode: "json" | "form"
@@ -201,13 +206,17 @@ async function readStructuredPayload(request: NextRequest): Promise<
     }
   } catch {
     return {
-      response: NextResponse.json({ error: "Send a JSON object or form fields" }, { status: 400 }),
+      response: NextResponse.json(
+        { error: "Send a JSON object or form fields" },
+        { status: 400, headers },
+      ),
     }
   }
 }
 
 async function readLegacyPayload(
   request: NextRequest,
+  headers: Record<string, string>,
 ): Promise<
   | { readonly payload: Record<string, unknown>; readonly response?: never }
   | { readonly response: NextResponse }
@@ -223,13 +232,16 @@ async function readLegacyPayload(
     return { payload: formDataPayload(formData) }
   } catch {
     return {
-      response: NextResponse.json({ error: "Send a JSON object or form fields" }, { status: 400 }),
+      response: NextResponse.json(
+        { error: "Send a JSON object or form fields" },
+        { status: 400, headers },
+      ),
     }
   }
 }
 
 function formDataPayload(input: FormData): Record<string, unknown> {
-  const payload: Record<string, unknown> = {}
+  const payload: Record<string, unknown> = Object.create(null)
   for (const [key, value] of input.entries()) {
     const cleanValue =
       typeof value === "string" ? value : { name: value.name, size: value.size, type: value.type }
@@ -333,8 +345,8 @@ function invalidSubmission(error: InvalidSubmissionError, headers: Record<string
   )
 }
 
-function tooLarge() {
-  return NextResponse.json({ error: "Submission is too large" }, { status: 413 })
+function tooLarge(headers: Record<string, string>) {
+  return NextResponse.json({ error: "Submission is too large" }, { status: 413, headers })
 }
 
 function saveFailure(headers: Record<string, string>) {
