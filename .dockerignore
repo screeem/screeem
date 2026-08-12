@@ -1,0 +1,12 @@
+.git
+.next
+**/.next
+**/node_modules
+**/dist
+**/.env*
+!**/.env.example
+!**/.env.local.example
+supabase/.branches
+supabase/.temp
+supabase/.env.docker.local
+test-results
