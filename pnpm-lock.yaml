@@ -179,6 +179,9 @@ importers:
       '@screeem/forms-react':
         specifier: workspace:*
         version: link:../forms-react
+      '@screeem/routing':
+        specifier: workspace:*
+        version: link:../routing
       '@supabase/ssr':
         specifier: ^0.6.1
         version: 0.6.1(@supabase/supabase-js@2.97.0)
