@@ -113,6 +113,7 @@ export const forms = pgTable(
     legacyUnstructured: boolean("legacy_unstructured").notNull().default(true),
     definitionAvailability: text("definition_availability").notNull().default("draft"),
     draftDefinition: jsonb("draft_definition"),
+    routingDraft: jsonb("routing_draft"),
     draftRevision: bigint("draft_revision", { mode: "number" }).notNull().default(0),
     publishedVersion: bigint("published_version", { mode: "number" }),
     lastPublishedDraftRevision: bigint("last_published_draft_revision", { mode: "number" }),
@@ -134,6 +135,7 @@ export const formDefinitionVersions = pgTable(
     version: bigint("version", { mode: "number" }).notNull(),
     draftRevision: bigint("draft_revision", { mode: "number" }).notNull(),
     definition: jsonb("definition").notNull(),
+    routingDefinition: jsonb("routing_definition"),
     publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
   },
   (table) => [

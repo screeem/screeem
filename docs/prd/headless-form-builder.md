@@ -217,7 +217,7 @@ Before production integration, a development-only playground shows the selected 
 - Routing receives the normalized plain submission object and does not depend on React, TanStack Form, the builder controller, or a store implementation.
 - Publication makes enough version information available for a host to compile or refresh routing definitions safely.
 - This feature does not add business-rule authoring UI. It establishes the stable schema and validated values that a separate rule-authoring experience can inspect and use.
-- A published form whose routing definition fails to compile may still collect submissions unless the host product explicitly configures routing as a publication prerequisite. Screeem will surface routing configuration status separately rather than hiding form-definition errors inside routing errors.
+- Forms without routing can publish normally. When routing is configured, publication compiles it against the current form fields and returns routing diagnostics without replacing the active version if compilation fails.
 
 ### Permissions and API behavior
 

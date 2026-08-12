@@ -35,10 +35,11 @@ importers:
         version: 5.8.3
 
   packages/forms:
-    devDependencies:
+    dependencies:
       '@screeem/routing':
         specifier: workspace:*
         version: link:../routing
+    devDependencies:
       effect:
         specifier: ^3.17.7
         version: 3.22.1

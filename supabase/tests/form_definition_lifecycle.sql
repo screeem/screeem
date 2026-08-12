@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(23);
+SELECT plan(35);
 
 INSERT INTO auth.users (
   id,
@@ -244,6 +244,91 @@ SELECT is(
   'the accepted submissions are stored'
 );
 
+SELECT lives_ok(
+  $$
+    SELECT save_form_routing_draft(
+      (SELECT id FROM teams WHERE created_by = '10000000-0000-0000-0000-000000000001'),
+      '20000000-0000-0000-0000-000000000001',
+      1,
+      '{
+        "version": 1,
+        "rules": [{
+          "id": "adult",
+          "when": "submission.age >= 18",
+          "route": "allow"
+        }],
+        "fallback": "deny"
+      }'::jsonb
+    )
+  $$,
+  'routing saves against the shared form draft revision'
+);
+
+SELECT results_eq(
+  $$
+    SELECT draft_revision, routing_draft ->> 'fallback'
+    FROM forms
+    WHERE id = '20000000-0000-0000-0000-000000000001'
+  $$,
+  $$ VALUES (2::bigint, 'deny'::text) $$,
+  'routing advances the shared revision and remains team-scoped on the form row'
+);
+
+SELECT set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-0000-0000-000000000001',
+  true
+);
+SET LOCAL ROLE authenticated;
+SELECT throws_ok(
+  $$
+    UPDATE forms
+    SET routing_draft = '{"version": 1, "rules": [], "fallback": "bypass"}'::jsonb
+    WHERE id = '20000000-0000-0000-0000-000000000001'
+  $$,
+  'P0001',
+  'form_lifecycle_fields_require_rpc',
+  'an authenticated manager cannot bypass the routing revision RPC'
+);
+
+SELECT lives_ok(
+  $$
+    UPDATE forms
+    SET name = 'Lifecycle metadata update'
+    WHERE id = '20000000-0000-0000-0000-000000000001'
+  $$,
+  'an authenticated manager can still update ordinary form metadata'
+);
+RESET ROLE;
+
+SET LOCAL ROLE service_role;
+SELECT lives_ok(
+  $$
+    SELECT save_form_routing_draft(
+      (SELECT id FROM teams WHERE created_by = '10000000-0000-0000-0000-000000000001'),
+      '20000000-0000-0000-0000-000000000001',
+      2,
+      (SELECT routing_draft FROM forms WHERE id = '20000000-0000-0000-0000-000000000001')
+    )
+  $$,
+  'the service role can use the guarded routing lifecycle RPC'
+);
+RESET ROLE;
+
+SELECT throws_ok(
+  $$
+    SELECT save_form_definition_draft(
+      (SELECT id FROM teams WHERE created_by = '10000000-0000-0000-0000-000000000001'),
+      '20000000-0000-0000-0000-000000000001',
+      1,
+      (SELECT draft_definition FROM forms WHERE id = '20000000-0000-0000-0000-000000000001')
+    )
+  $$,
+  'P0001',
+  'form_revision_conflict:3',
+  'a routing save makes an older form edit stale'
+);
+
 SELECT throws_ok(
   $$
     SELECT save_form_submission_if_active(
@@ -257,6 +342,75 @@ SELECT throws_ok(
   'P0001',
   'form_rate_limited',
   'the sixty-first submission in a minute is rejected'
+);
+
+SELECT throws_ok(
+  $$
+    SELECT save_form_routing_draft(
+      '00000000-0000-0000-0000-000000000099',
+      '20000000-0000-0000-0000-000000000001',
+      3,
+      NULL
+    )
+  $$,
+  'P0001',
+  'form_not_found',
+  'another team cannot save routing for the form'
+);
+
+SELECT lives_ok(
+  $$
+    SELECT publish_form_definition(
+      (SELECT id FROM teams WHERE created_by = '10000000-0000-0000-0000-000000000001'),
+      '20000000-0000-0000-0000-000000000001',
+      3,
+      '2026-08-12T11:00:00Z'
+    )
+  $$,
+  'form and routing publish in one version operation'
+);
+
+SELECT is(
+  (
+    SELECT routing_definition -> 'rules' -> 0 ->> 'id'
+    FROM form_definition_versions
+    WHERE form_id = '20000000-0000-0000-0000-000000000001' AND version = 3
+  ),
+  'adult',
+  'the immutable form version contains its exact routing snapshot'
+);
+
+SELECT lives_ok(
+  $$
+    SELECT save_form_routing_draft(
+      (SELECT id FROM teams WHERE created_by = '10000000-0000-0000-0000-000000000001'),
+      '20000000-0000-0000-0000-000000000001',
+      3,
+      '{"version": 1, "rules": [], "fallback": "review"}'::jsonb
+    )
+  $$,
+  'a new routing draft can be prepared after publication'
+);
+
+SELECT is(
+  (
+    SELECT routing_definition ->> 'fallback'
+    FROM form_definition_versions
+    WHERE form_id = '20000000-0000-0000-0000-000000000001' AND version = 3
+  ),
+  'deny',
+  'later routing edits do not mutate the published snapshot'
+);
+
+SELECT throws_ok(
+  $$
+    UPDATE form_definition_versions
+    SET routing_definition = '{"version": 1, "rules": [], "fallback": "mutated"}'::jsonb
+    WHERE form_id = '20000000-0000-0000-0000-000000000001' AND version = 3
+  $$,
+  'P0001',
+  'published_form_versions_are_immutable',
+  'published routing rejects direct updates'
 );
 
 SELECT has_index('forms', 'forms_team_created_idx', 'team form lists have a tenant-first index');

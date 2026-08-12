@@ -1,4 +1,4 @@
-import type { FormIssue, SubmissionIssue } from "./model.js"
+import type { FormIssue, FormRoutingIssue, SubmissionIssue } from "./model.js"
 
 export class FormsError extends Error {
   constructor(
@@ -13,6 +13,12 @@ export class FormsError extends Error {
 export class InvalidFormDefinitionError extends FormsError {
   constructor(readonly issues: readonly FormIssue[]) {
     super("invalid_form_definition", issues[0]?.message ?? "Form definition is invalid")
+  }
+}
+
+export class InvalidFormRoutingError extends FormsError {
+  constructor(readonly issues: readonly FormRoutingIssue[]) {
+    super("invalid_form_routing", issues[0]?.message ?? "Form routing is invalid")
   }
 }
 
