@@ -205,7 +205,7 @@ export function ProfileForm({ userId, teamId, canManage }: { userId: string; tea
   async function handleDelete(id: string) {
     setDeletingId(id);
     try {
-      await deleteSocialAccount(id);
+      await deleteSocialAccount(teamId, id);
       invalidate();
     } finally {
       setDeletingId(null);

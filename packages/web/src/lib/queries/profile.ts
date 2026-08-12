@@ -40,6 +40,7 @@ export async function addSocialAccount(account: {
 }
 
 export async function updateSocialAccount(
+  teamId: string,
   id: string,
   updates: { handle?: string; label?: string }
 ): Promise<SocialAccount> {
@@ -47,6 +48,7 @@ export async function updateSocialAccount(
   const { data, error } = await supabase
     .from("social_accounts")
     .update(updates)
+    .eq("team_id", teamId)
     .eq("id", id)
     .select("id, user_id, team_id, platform, handle, label")
     .single();
@@ -55,11 +57,12 @@ export async function updateSocialAccount(
   return data;
 }
 
-export async function deleteSocialAccount(id: string): Promise<void> {
+export async function deleteSocialAccount(teamId: string, id: string): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase
     .from("social_accounts")
     .delete()
+    .eq("team_id", teamId)
     .eq("id", id);
 
   if (error) throw error;
