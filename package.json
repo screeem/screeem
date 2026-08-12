@@ -11,9 +11,6 @@
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.12.1",
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "supabase"]
-  },
   "devDependencies": {
     "supabase": "^2.76.14"
   }
