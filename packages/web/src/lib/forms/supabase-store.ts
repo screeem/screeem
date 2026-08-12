@@ -7,15 +7,19 @@ import {
   FormRevisionConflictError,
   FormsError,
   FormUnavailableError,
+  compileFormRoutingDefinition,
   InvalidSubmissionError,
   PublishedFormNotFoundError,
   SubmissionAlreadyExistsError,
   snapshotFormDefinition,
+  snapshotFormRoutingDefinition,
   type FormAvailability,
   type FormDefinition,
   type FormDefinitionStore,
   type FormDraft,
   type FormRecord,
+  type FormRoutingCompiler,
+  type FormRoutingDefinition,
   type FormSubmissionStore,
   type PublishedAvailability,
   type PublishedForm,
@@ -33,6 +37,7 @@ type FormRow = {
   id: string
   definition_availability: string
   draft_definition: unknown
+  routing_draft: unknown
   draft_revision: number | string
   published_version: number | string | null
 }
@@ -41,6 +46,7 @@ type PublishedRow = {
   form_id: string
   version: number | string
   definition: unknown
+  routing_definition: unknown
   published_at: string
 }
 
@@ -64,6 +70,10 @@ export function mapFormRecord(row: FormRow): FormRecord {
       formId: row.id,
       revision,
       definition: snapshotFormDefinition(row.draft_definition),
+      routing:
+        row.routing_draft === null
+          ? null
+          : snapshotFormRoutingDefinition(row.routing_draft),
     }),
     publishedVersion:
       row.published_version === null
@@ -78,6 +88,10 @@ export function mapPublishedForm(row: PublishedRow): PublishedForm {
     formId: row.form_id,
     version: parseInteger(row.version, "published version"),
     definition: snapshotFormDefinition(row.definition, { publishable: true }),
+    routing:
+      row.routing_definition === null
+        ? null
+        : snapshotFormRoutingDefinition(row.routing_definition),
     publishedAt: row.published_at,
   })
 }
@@ -100,6 +114,7 @@ export class SupabaseFormDefinitionStore implements FormDefinitionStore {
   constructor(
     private readonly client: SupabaseClient,
     private readonly teamId: string,
+    private readonly compileRouting: FormRoutingCompiler = compileFormRoutingDefinition,
   ) {}
 
   async create(formId: string, definition: FormDefinition): Promise<FormRecord> {
@@ -140,6 +155,31 @@ export class SupabaseFormDefinitionStore implements FormDefinitionStore {
       formId: readString(result, "form_id"),
       revision: parseInteger(result.revision, "draft revision"),
       definition: snapshotFormDefinition(result.definition),
+      routing:
+        result.routing === null ? null : snapshotFormRoutingDefinition(result.routing),
+    })
+  }
+
+  async saveRoutingDraft(
+    formId: string,
+    expectedRevision: number,
+    routing: FormRoutingDefinition | null,
+  ): Promise<FormDraft> {
+    const safeRouting = routing === null ? null : snapshotFormRoutingDefinition(routing)
+    const { data, error } = await this.client.rpc("save_form_routing_draft", {
+      target_team_id: this.teamId,
+      target_form_id: formId,
+      expected_revision: expectedRevision,
+      new_routing: safeRouting,
+    })
+    if (error) throw mapDatabaseError(error, formId, expectedRevision)
+    const result = requireObject(data, "save routing draft result")
+    return Object.freeze({
+      formId: readString(result, "form_id"),
+      revision: parseInteger(result.revision, "draft revision"),
+      definition: snapshotFormDefinition(result.definition),
+      routing:
+        result.routing === null ? null : snapshotFormRoutingDefinition(result.routing),
     })
   }
 
@@ -153,6 +193,9 @@ export class SupabaseFormDefinitionStore implements FormDefinitionStore {
       throw new FormRevisionConflictError(formId, expectedRevision, current.revision)
     }
     snapshotFormDefinition(current.definition, { publishable: true })
+    if (current.routing !== null) {
+      await this.compileRouting(current.definition, current.routing)
+    }
 
     const { data, error } = await this.client.rpc("publish_form_definition", {
       target_team_id: this.teamId,
@@ -166,6 +209,7 @@ export class SupabaseFormDefinitionStore implements FormDefinitionStore {
       form_id: readString(result, "form_id"),
       version: parseInteger(result.version, "published version"),
       definition: result.definition,
+      routing_definition: result.routing,
       published_at: readString(result, "published_at"),
     })
   }
@@ -183,7 +227,7 @@ export class SupabaseFormDefinitionStore implements FormDefinitionStore {
     await this.requireTeamForm(formId)
     const { data, error } = await this.client
       .from("form_definition_versions")
-      .select("form_id, version, definition, published_at")
+      .select("form_id, version, definition, routing_definition, published_at")
       .eq("team_id", this.teamId)
       .eq("form_id", formId)
       .eq("version", version)
@@ -290,7 +334,7 @@ export class SupabaseFormSubmissionStore implements FormSubmissionStore {
 }
 
 const FORM_COLUMNS =
-  "id, definition_availability, draft_definition, draft_revision, published_version"
+  "id, definition_availability, draft_definition, routing_draft, draft_revision, published_version"
 const SUBMISSION_COLUMNS = "id, form_id, publication_version, payload, created_at"
 
 function mapDatabaseError(
