@@ -1,11 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validateSubmission, type SubmissionSchema } from "@/lib/forms/schema";
 
 const MAX_BYTES = 64 * 1024;
+const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 function cors(origin: string | null, allowed: string | null): Record<string, string> {
   if (!allowed) return { "Access-Control-Allow-Origin": "*" };
   return origin === allowed ? { "Access-Control-Allow-Origin": allowed, Vary: "Origin" } : {};
+}
+
+async function verifyTurnstile(token: unknown, request: NextRequest) {
+  const secret = process.env.TURNSTILE_SECRET_KEY;
+  if (!secret) return { ok: false, configurationError: true };
+  if (typeof token !== "string" || !token || token.length > 2048) {
+    return { ok: false, configurationError: false };
+  }
+
+  const remoteIp = request.headers.get("cf-connecting-ip")
+    ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const response = await fetch(TURNSTILE_VERIFY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ secret, response: token, ...(remoteIp ? { remoteip: remoteIp } : {}) }),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!response.ok) throw new Error("Turnstile verification failed");
+  const result = await response.json() as { success?: boolean };
+  return { ok: result.success === true, configurationError: false };
 }
 
 export async function OPTIONS(request: NextRequest, context: { params: Promise<{ endpointKey: string }> }) {
@@ -27,7 +49,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
   const length = Number(request.headers.get("content-length"));
   if (length > MAX_BYTES) return NextResponse.json({ error: "Submission is too large" }, { status: 413 });
   const admin = createAdminClient();
-  const { data: form } = await admin.from("forms").select("id, allowed_origin, success_url, is_active").eq("endpoint_key", endpointKey).maybeSingle();
+  const { data: form } = await admin.from("forms").select("id, allowed_origin, success_url, is_active, requires_turnstile, submission_schema").eq("endpoint_key", endpointKey).maybeSingle();
   if (!form?.is_active) return NextResponse.json({ error: "Form not found" }, { status: 404 });
   if (form.allowed_origin && origin !== form.allowed_origin) return NextResponse.json({ error: "Origin is not allowed" }, { status: 403 });
 
@@ -56,6 +78,44 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
   const headers = cors(origin, form.allowed_origin);
   if (payload._gotcha) return NextResponse.json({ ok: true }, { status: 202, headers });
   delete payload._gotcha;
+
+  const turnstileToken = payload["cf-turnstile-response"] ?? payload.turnstileToken;
+  delete payload["cf-turnstile-response"];
+  delete payload.turnstileToken;
+  if (form.requires_turnstile) {
+    try {
+      const verification = await verifyTurnstile(turnstileToken, request);
+      if (verification.configurationError) {
+        return NextResponse.json(
+          { error: "Bot protection is not configured" },
+          { status: 503, headers }
+        );
+      }
+      if (!verification.ok) {
+        return NextResponse.json(
+          { error: "Bot verification failed" },
+          { status: 403, headers }
+        );
+      }
+    } catch {
+      return NextResponse.json(
+        { error: "Bot verification is temporarily unavailable" },
+        { status: 502, headers }
+      );
+    }
+  }
+  if (form.submission_schema) {
+    const validationErrors = validateSubmission(
+      form.submission_schema as SubmissionSchema,
+      payload
+    );
+    if (validationErrors.length) {
+      return NextResponse.json(
+        { error: "Submission does not match the form schema", details: validationErrors },
+        { status: 422, headers }
+      );
+    }
+  }
   const { error } = await admin.from("form_submissions").insert({
     form_id: form.id, payload, origin, user_agent: request.headers.get("user-agent")?.slice(0, 500),
   });

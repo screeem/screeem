@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-type FormView = { id: string; name: string; endpoint_key: string; allowed_origin: string | null; success_url: string | null; is_active: boolean; created_at: string };
+type FormView = { id: string; name: string; endpoint_key: string; allowed_origin: string | null; success_url: string | null; is_active: boolean; requires_turnstile: boolean; submission_schema: Record<string, unknown> | null; created_at: string };
 type Submission = { id: string; payload: Record<string, unknown>; origin: string | null; created_at: string };
 
 export function Forms({ teamId, canManage }: { teamId: string; canManage: boolean }) {
@@ -12,6 +12,10 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
   const [name, setName] = useState("");
   const [allowedOrigin, setAllowedOrigin] = useState("");
   const [successUrl, setSuccessUrl] = useState("");
+  const [requiresTurnstile, setRequiresTurnstile] = useState(false);
+  const [submissionSchema, setSubmissionSchema] = useState("");
+  const [schemaDrafts, setSchemaDrafts] = useState<Record<string, string>>({});
+  const [copiedExportId, setCopiedExportId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -26,10 +30,10 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
 
   async function createForm(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
-    const response = await fetch(`/api/teams/${teamId}/forms`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, allowedOrigin, successUrl }) });
+    const response = await fetch(`/api/teams/${teamId}/forms`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, allowedOrigin, successUrl, requiresTurnstile, submissionSchema }) });
     const body = await response.json();
     if (!response.ok) setError(body.error ?? "Could not create form");
-    else { setForms((current) => [body.form, ...current]); setName(""); setAllowedOrigin(""); setSuccessUrl(""); }
+    else { setForms((current) => [body.form, ...current]); setName(""); setAllowedOrigin(""); setSuccessUrl(""); setRequiresTurnstile(false); setSubmissionSchema(""); }
     setBusy(false);
   }
 
@@ -46,6 +50,22 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
     else setError("Could not update form");
   }
 
+  async function toggleTurnstile(form: FormView) {
+    const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requiresTurnstile: !form.requires_turnstile }) });
+    if (response.ok) setForms((items) => items.map((item) => item.id === form.id ? { ...item, requires_turnstile: !item.requires_turnstile } : item));
+    else setError("Could not update bot protection");
+  }
+
+  async function saveSchema(form: FormView) {
+    setError("");
+    const draft = schemaDrafts[form.id] ?? (form.submission_schema ? JSON.stringify(form.submission_schema, null, 2) : "");
+    const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ submissionSchema: draft }) });
+    const body = await response.json();
+    if (!response.ok) return setError(body.error ?? "Could not update submission schema");
+    setForms((items) => items.map((item) => item.id === form.id ? { ...item, submission_schema: body.form.submission_schema } : item));
+    setSchemaDrafts((drafts) => ({ ...drafts, [form.id]: body.form.submission_schema ? JSON.stringify(body.form.submission_schema, null, 2) : "" }));
+  }
+
   async function remove(form: FormView) {
     if (!window.confirm(`Delete ${form.name} and all of its submissions?`)) return;
     const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, { method: "DELETE" });
@@ -55,6 +75,35 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
   }
 
   const endpoint = (key: string) => `${typeof window === "undefined" ? "" : window.location.origin}/api/forms/${key}/submissions`;
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "<your-turnstile-site-key>";
+
+  function embedCode(form: FormView) {
+    const turnstile = form.requires_turnstile
+      ? `\n  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>\n  <div class="cf-turnstile" data-sitekey="${turnstileSiteKey}"></div>`
+      : "";
+    return `<form action="${endpoint(form.endpoint_key)}" method="POST">\n  <input name="email" type="email" required>\n  <input name="_gotcha" style="display:none">${turnstile}\n  <button type="submit">Send</button>\n</form>`;
+  }
+
+  function formExport(form: FormView) {
+    return JSON.stringify({
+      name: form.name,
+      submission: {
+        url: endpoint(form.endpoint_key),
+        method: "POST",
+        contentTypes: ["application/json", "multipart/form-data", "application/x-www-form-urlencoded"],
+      },
+      allowedOrigin: form.allowed_origin,
+      successUrl: form.success_url,
+      requiresTurnstile: form.requires_turnstile,
+      submissionSchema: form.submission_schema,
+    }, null, 2);
+  }
+
+  function copyExport(form: FormView) {
+    navigator.clipboard.writeText(formExport(form));
+    setCopiedExportId(form.id);
+    setTimeout(() => setCopiedExportId((current) => current === form.id ? null : current), 2000);
+  }
 
   return <section className="mt-6 rounded-lg border border-gray-200 bg-white p-6">
     <h2 className="text-lg font-semibold text-gray-900">Forms</h2>
@@ -64,6 +113,21 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
       <input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} placeholder="Contact form" className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
       <input type="url" value={allowedOrigin} onChange={(event) => setAllowedOrigin(event.target.value)} placeholder="Allowed origin (optional)" className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
       <input type="url" value={successUrl} onChange={(event) => setSuccessUrl(event.target.value)} placeholder="Success redirect (optional)" className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
+      <label className="flex items-center gap-2 text-sm text-gray-700 md:col-span-3">
+        <input type="checkbox" checked={requiresTurnstile} onChange={(event) => setRequiresTurnstile(event.target.checked)} />
+        Require Cloudflare Turnstile bot verification
+      </label>
+      <label className="md:col-span-3">
+        <span className="mb-1 block text-sm text-gray-700">Submission JSON Schema (optional)</span>
+        <textarea
+          value={submissionSchema}
+          onChange={(event) => setSubmissionSchema(event.target.value)}
+          rows={7}
+          spellCheck={false}
+          placeholder={'{\n  "type": "object",\n  "properties": { "email": { "type": "string", "format": "email" } },\n  "required": ["email"],\n  "additionalProperties": false\n}'}
+          className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs"
+        />
+      </label>
       <button disabled={busy} className="w-fit rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Create form</button>
     </form>}
     {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -72,16 +136,43 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
       {forms.length === 0 && <p className="text-sm text-gray-500">No forms yet.</p>}
       {forms.map((form) => <div key={form.id} className="rounded-md border border-gray-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div><span className="font-medium text-gray-900">{form.name}</span><span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${form.is_active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>{form.is_active ? "Active" : "Paused"}</span></div>
+          <div><span className="font-medium text-gray-900">{form.name}</span><span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${form.is_active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>{form.is_active ? "Active" : "Paused"}</span>{form.requires_turnstile && <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">Bot check</span>}{form.submission_schema && <span className="ml-2 rounded-full bg-purple-50 px-2 py-0.5 text-xs text-purple-700">Schema</span>}</div>
           <div className="flex gap-2 text-sm">
             <button onClick={() => loadSubmissions(form.id)} className="rounded border border-gray-200 px-2 py-1 hover:bg-gray-50">Submissions</button>
+            {canManage && <button onClick={() => toggleTurnstile(form)} className="rounded border border-gray-200 px-2 py-1 hover:bg-gray-50">{form.requires_turnstile ? "Disable bot check" : "Require bot check"}</button>}
             {canManage && <button onClick={() => toggle(form)} className="rounded border border-gray-200 px-2 py-1 hover:bg-gray-50">{form.is_active ? "Pause" : "Resume"}</button>}
             {canManage && <button onClick={() => remove(form)} className="rounded border border-red-200 px-2 py-1 text-red-600 hover:bg-red-50">Delete</button>}
           </div>
         </div>
         <div className="mt-3 flex gap-2"><code className="min-w-0 flex-1 truncate rounded bg-gray-50 px-3 py-2 text-xs">{endpoint(form.endpoint_key)}</code><button onClick={() => navigator.clipboard.writeText(endpoint(form.endpoint_key))} className="rounded border border-gray-200 px-3 text-xs">Copy</button></div>
-        <pre className="mt-2 overflow-x-auto rounded bg-gray-900 p-3 text-xs text-gray-100">{`<form action="${endpoint(form.endpoint_key)}" method="POST">\n  <input name="email" type="email" required>\n  <input name="_gotcha" style="display:none">\n  <button type="submit">Send</button>\n</form>`}</pre>
+        <pre className="mt-2 overflow-x-auto rounded bg-gray-900 p-3 text-xs text-gray-100">{embedCode(form)}</pre>
         {form.allowed_origin && <p className="mt-2 text-xs text-gray-500">Accepting requests from {form.allowed_origin}</p>}
+        <details className="mt-3 rounded border border-gray-200 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-gray-700">Export form definition</summary>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-xs text-gray-500">Portable JSON containing this form&apos;s public submission contract.</p>
+            <button onClick={() => copyExport(form)} className="shrink-0 rounded border border-gray-200 px-3 py-1.5 text-xs hover:bg-gray-50">
+              {copiedExportId === form.id ? "Copied!" : "Copy export"}
+            </button>
+          </div>
+          <pre className="mt-2 max-h-80 overflow-auto rounded bg-gray-900 p-3 text-xs text-gray-100">{formExport(form)}</pre>
+        </details>
+        {canManage && <details className="mt-3 rounded border border-gray-200 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-gray-700">Submission schema</summary>
+          <p className="mt-2 text-xs text-gray-500">Use JSON Schema to define required fields, types, formats, and whether extra fields are allowed.</p>
+          <textarea
+            value={schemaDrafts[form.id] ?? (form.submission_schema ? JSON.stringify(form.submission_schema, null, 2) : "")}
+            onChange={(event) => setSchemaDrafts((drafts) => ({ ...drafts, [form.id]: event.target.value }))}
+            rows={9}
+            spellCheck={false}
+            placeholder="No schema — all payloads are accepted"
+            className="mt-3 w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs"
+          />
+          <div className="mt-2 flex items-center gap-3">
+            <button onClick={() => saveSchema(form)} className="rounded bg-gray-900 px-3 py-1.5 text-xs text-white hover:bg-gray-700">Save schema</button>
+            <span className="text-xs text-gray-500">Leave empty to remove validation.</span>
+          </div>
+        </details>}
       </div>)}
     </div>
 
