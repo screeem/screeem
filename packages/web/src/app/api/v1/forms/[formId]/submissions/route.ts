@@ -26,6 +26,7 @@ export async function GET(
   const { data, error } = await admin
     .from("form_submissions")
     .select("id, payload, origin, user_agent, created_at")
+    .eq("team_id", auth.teamId)
     .eq("form_id", formId)
     .order("created_at", { ascending: false })
     .limit(limit);

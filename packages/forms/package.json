@@ -1,0 +1,46 @@
+{
+  "name": "@screeem/forms",
+  "version": "0.1.0",
+  "description": "Headless form definitions, stores, and submission validation for Screeem",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./effect": {
+      "types": "./dist/effect.d.ts",
+      "import": "./dist/effect.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@screeem/routing": "workspace:*",
+    "effect": "^3.17.7",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "effect": "^3.17.7"
+  },
+  "peerDependenciesMeta": {
+    "effect": {
+      "optional": true
+    }
+  },
+  "license": "ISC"
+}

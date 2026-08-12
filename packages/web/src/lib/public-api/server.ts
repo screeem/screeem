@@ -51,6 +51,7 @@ export async function authenticatePublicApi(request: NextRequest) {
   await admin
     .from("public_api_keys")
     .update({ last_used_at: new Date().toISOString() })
+    .eq("team_id", data.team_id)
     .eq("id", data.id);
 
   return { keyId: data.id as string, teamId: data.team_id as string };

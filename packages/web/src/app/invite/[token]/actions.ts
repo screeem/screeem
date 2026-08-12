@@ -19,7 +19,11 @@ export async function acceptInvitation(formData: FormData) {
 
   const { error } = await admin.from("team_members").upsert({ team_id: invitation.team_id, user_id: user.id, role: invitation.role }, { onConflict: "team_id,user_id", ignoreDuplicates: true });
   if (error) throw new Error(error.message);
-  await admin.from("team_invitations").delete().eq("id", invitation.id);
+  await admin
+    .from("team_invitations")
+    .delete()
+    .eq("team_id", invitation.team_id)
+    .eq("id", invitation.id);
   const cookieStore = await cookies();
   cookieStore.set(ACTIVE_TEAM_COOKIE, invitation.team_id, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 });
   redirect("/dashboard");
