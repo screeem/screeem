@@ -27,11 +27,13 @@ export {
   FormNotFoundError,
   FormRevisionConflictError,
   InvalidFormDefinitionError,
+  InvalidFormRoutingError,
   InvalidSubmissionError,
   PublishedFormNotFoundError,
 } from "./errors.js"
 export {
   FORM_DEFINITION_FORMAT_VERSION,
+  FORM_ROUTING_FORMAT_VERSION,
   type BooleanFieldDefinition,
   type EnumFieldDefinition,
   type FieldControl,
@@ -41,6 +43,8 @@ export {
   type FormFieldDefinition,
   type FormIssue,
   type FormRecord,
+  type FormRoutingDefinition,
+  type FormRoutingIssue,
   type NumberFieldDefinition,
   type NumberValidation,
   type PublishedForm,
@@ -50,5 +54,10 @@ export {
   type SubmissionIssue,
   type SubmissionMode,
 } from "./model.js"
+export {
+  compileFormRoutingDefinition,
+  snapshotFormRoutingDefinition,
+  type FormRoutingCompiler,
+} from "./routing.js"
 export * from "./stores.js"
 export * from "./submission.js"

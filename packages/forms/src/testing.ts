@@ -3,10 +3,11 @@ import {
   FormNotFoundError,
   FormRevisionConflictError,
   InvalidFormDefinitionError,
+  InvalidFormRoutingError,
   InvalidSubmissionError,
   PublishedFormNotFoundError,
 } from "./errors.js"
-import type { FormDefinition, StoredSubmission } from "./model.js"
+import type { FormDefinition, FormRoutingDefinition, StoredSubmission } from "./model.js"
 import {
   FormAlreadyExistsError,
   FormDraftAlreadyPublishedError,
@@ -51,6 +52,7 @@ export function formDefinitionStoreContractCases(
       assertEqual(created.formId, "contract-create", "created form id")
       assertEqual(created.availability, "draft", "new form availability")
       assertEqual(created.draft.revision, 0, "initial draft revision")
+      assertEqual(created.draft.routing, null, "initial routing draft")
       assertEqual(created.publishedVersion, null, "initial published version")
       await assertRejects(() => store.create("contract-create", definition), FormAlreadyExistsError)
     }),
@@ -89,6 +91,34 @@ export function formDefinitionStoreContractCases(
         (await store.getDraft("contract-revision")).definition.title,
         "Revision one",
         "stale save must not change the draft",
+      )
+    }),
+    contractCase("shares revisions between form and routing drafts", factory, async (store) => {
+      await store.create("contract-routing-revision", definitionWithTitle("Routing revision"))
+      const routing = routingDefinition(
+        "exists(submission.name) && submission.name === \"Ada\"",
+      )
+      const saved = await store.saveRoutingDraft("contract-routing-revision", 0, routing)
+
+      assertEqual(saved.revision, 1, "routing save revision")
+      assertEqual(saved.routing?.fallback, "review", "saved routing fallback")
+      await assertRejects(
+        () =>
+          store.saveDraft(
+            "contract-routing-revision",
+            0,
+            definitionWithTitle("Stale form edit"),
+          ),
+        FormRevisionConflictError,
+      )
+      await assertRejects(
+        () => store.saveRoutingDraft("contract-routing-revision", 0, null),
+        FormRevisionConflictError,
+      )
+      assertEqual(
+        (await store.getDraft("contract-routing-revision")).routing?.rules[0]?.id,
+        "qualified",
+        "stale writes preserve routing",
       )
     }),
     contractCase("rejects invalid drafts before persistence", factory, async (store) => {
@@ -134,6 +164,55 @@ export function formDefinitionStoreContractCases(
         assertEqual(active.definition.title, "Published one", "active definition after failure")
         await assertRejects(
           () => store.getPublished("contract-atomic", 2),
+          PublishedFormNotFoundError,
+        )
+      },
+    ),
+    contractCase(
+      "compiles routing before atomically publishing a version",
+      factory,
+      async (store) => {
+        await store.create("contract-routing-publish", definitionWithTitle("Routing publish"))
+        const validDraft = await store.saveRoutingDraft(
+          "contract-routing-publish",
+          0,
+          routingDefinition("exists(submission.name) && submission.name === \"Ada\""),
+        )
+        const first = await store.publish(
+          "contract-routing-publish",
+          validDraft.revision,
+          "2026-01-01T00:00:00.000Z",
+        )
+        assertEqual(first.routing?.rules[0]?.route, "sales", "published routing snapshot")
+        attemptMutation(first.routing!.rules[0]!, "route", "mutated")
+        assertEqual(
+          (await store.getPublished("contract-routing-publish", 1)).routing?.rules[0]?.route,
+          "sales",
+          "published routing defensive copy",
+        )
+
+        const invalidDraft = await store.saveRoutingDraft(
+          "contract-routing-publish",
+          validDraft.revision,
+          routingDefinition("submission.removed === true"),
+        )
+        const error = await assertRejects(
+          () =>
+            store.publish(
+              "contract-routing-publish",
+              invalidDraft.revision,
+              "2026-01-02T00:00:00.000Z",
+            ),
+          InvalidFormRoutingError,
+        )
+        assertEqual(error.issues[0]?.ruleId, "qualified", "routing diagnostic rule id")
+        assertEqual(
+          (await store.getActive("contract-routing-publish")).version,
+          1,
+          "failed routing publication preserves active version",
+        )
+        await assertRejects(
+          () => store.getPublished("contract-routing-publish", 2),
           PublishedFormNotFoundError,
         )
       },
@@ -410,6 +489,14 @@ function submission(
     publicationVersion,
     values,
     createdAt: "2026-01-01T00:00:00.000Z",
+  }
+}
+
+function routingDefinition(when: string): FormRoutingDefinition {
+  return {
+    version: 1,
+    rules: [{ id: "qualified", when, route: "sales" }],
+    fallback: "review",
   }
 }
 

@@ -6,6 +6,7 @@ import type {
   FormDraft,
   FormRecord,
   PublishedForm,
+  FormRoutingDefinition,
   StoredSubmission,
 } from "./model.js"
 import {
@@ -48,6 +49,11 @@ export interface EffectFormDefinitionStore {
     expectedRevision: number,
     definition: FormDefinition,
   ): Effect.Effect<FormDraft, FormsError>
+  saveRoutingDraft(
+    formId: string,
+    expectedRevision: number,
+    routing: FormRoutingDefinition | null,
+  ): Effect.Effect<FormDraft, FormsError>
   publish(
     formId: string,
     expectedRevision: number,
@@ -74,6 +80,8 @@ export function toEffectFormDefinitionStore(store: FormDefinitionStore): EffectF
     getDraft: (formId) => storeOperation(() => store.getDraft(formId)),
     saveDraft: (formId, expectedRevision, definition) =>
       storeOperation(() => store.saveDraft(formId, expectedRevision, definition)),
+    saveRoutingDraft: (formId, expectedRevision, routing) =>
+      storeOperation(() => store.saveRoutingDraft(formId, expectedRevision, routing)),
     publish: (formId, expectedRevision, publishedAt) =>
       storeOperation(() => store.publish(formId, expectedRevision, publishedAt)),
     getActive: (formId) => storeOperation(() => store.getActive(formId)),

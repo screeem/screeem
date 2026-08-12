@@ -4,9 +4,11 @@ Headless form definitions, editing operations, submission validation, and plugga
 
 The package contains no React, browser, network, or database dependency. A form definition is plain data and is compatible with `schemaFromForm` from `@screeem/routing`.
 
+Routing drafts are plain, schema-free data stored beside the form draft. Form and routing edits share one optimistic revision. Publishing compiles configured rules against the current fields and snapshots both into the same immutable version. Forms without routing remain valid.
+
 ## Stores
 
-Use the included in-memory stores for tests and prototypes, or implement the public store interfaces for your infrastructure. The `@screeem/forms/testing` export provides contract runners that check custom adapters against the same publication and immutability behavior as the in-memory stores.
+Use the included in-memory stores for tests and prototypes, or implement the public store interfaces for your infrastructure. The `@screeem/forms/testing` export provides contract runners that check custom adapters against the same revision, routing compilation, publication, and immutability behavior as the in-memory stores.
 
 ## Supported controls
 

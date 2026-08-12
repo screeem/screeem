@@ -1,4 +1,7 @@
+import type { Rule } from "@screeem/routing"
+
 export const FORM_DEFINITION_FORMAT_VERSION = 1 as const
+export const FORM_ROUTING_FORMAT_VERSION = 1 as const
 
 export type FieldControl = "text" | "email" | "textarea" | "number" | "checkbox" | "select"
 
@@ -67,16 +70,34 @@ export interface FormIssue {
   readonly path: string
 }
 
+/** Schema-free routing data stored with a form draft and compiled against its fields. */
+export interface FormRoutingDefinition {
+  readonly version: typeof FORM_ROUTING_FORMAT_VERSION
+  readonly rules: readonly Rule[]
+  readonly fallback: string
+}
+
+export interface FormRoutingIssue {
+  readonly code: string
+  readonly message: string
+  readonly path?: string
+  readonly ruleId?: string
+  readonly start?: number
+  readonly end?: number
+}
+
 export interface FormDraft {
   readonly formId: string
   readonly revision: number
   readonly definition: FormDefinition
+  readonly routing: FormRoutingDefinition | null
 }
 
 export interface PublishedForm {
   readonly formId: string
   readonly version: number
   readonly definition: FormDefinition
+  readonly routing: FormRoutingDefinition | null
   readonly publishedAt: string
 }
 

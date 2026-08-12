@@ -5,8 +5,11 @@ import {
   addField,
   createField,
   createFormDefinition,
+  compileFormRoutingDefinition,
+  InvalidFormRoutingError,
   normalizeSubmission,
   type FormDefinition,
+  snapshotFormRoutingDefinition,
   updateField,
 } from "../src/index.js"
 
@@ -88,5 +91,97 @@ describe("routing integration", () => {
       route: "sales",
       matchedRule: "uk-enterprise",
     })
+  })
+
+  it("returns rule diagnostics when a persisted condition does not match the form schema", async () => {
+    const definition = addField(
+      createFormDefinition("No removed field"),
+      createField("text", { id: "name", name: "name", label: "Name" }),
+    )
+
+    await expect(
+      compileFormRoutingDefinition(definition, {
+        version: 1,
+        rules: [{ id: "removed-field", when: "submission.removed === true", route: "sales" }],
+        fallback: "review",
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_form_routing",
+      issues: [expect.objectContaining({ code: "UnknownField", ruleId: "removed-field" })],
+    })
+  })
+
+  it("rejects non-data and unknown routing properties before persistence", () => {
+    const routing = {
+      version: 1,
+      rules: [{ id: "one", when: "true", route: "sales", extra: "unsafe" }],
+      fallback: "review",
+    }
+    expect(() => snapshotFormRoutingDefinition(routing)).toThrow(InvalidFormRoutingError)
+
+    const accessor = Object.create(null) as Record<string, unknown>
+    Object.defineProperties(accessor, {
+      version: { value: 1, enumerable: true },
+      rules: { get: () => [], enumerable: true },
+      fallback: { value: "review", enumerable: true },
+    })
+    expect(() => snapshotFormRoutingDefinition(accessor)).toThrow(InvalidFormRoutingError)
+  })
+
+  it("accepts routing strings at their persistence boundaries", () => {
+    expect(() =>
+      snapshotFormRoutingDefinition({
+        version: 1,
+        rules: [
+          {
+            id: "i".repeat(128),
+            when: "w".repeat(4_096),
+            route: "r".repeat(256),
+            actions: [{ use: "a".repeat(128), with: "x".repeat(4_096) }],
+          },
+        ],
+        fallback: "f".repeat(256),
+      }),
+    ).not.toThrow()
+  })
+
+  it.each([
+    ["rule IDs", { id: "i".repeat(129) }, "routing_rule_id_limit"],
+    ["conditions", { when: "w".repeat(4_097) }, "routing_expression_limit"],
+    ["rule routes", { route: "r".repeat(257) }, "routing_route_limit"],
+    ["action names", { actions: [{ use: "a".repeat(129) }] }, "routing_action_name_limit"],
+    [
+      "action inputs",
+      { actions: [{ use: "notify", with: "x".repeat(4_097) }] },
+      "routing_expression_limit",
+    ],
+  ])("rejects overlong %s", (_label, ruleOverride, code) => {
+    const rule = {
+      id: "qualified",
+      when: "true",
+      route: "sales",
+      ...ruleOverride,
+    }
+    expect(() =>
+      snapshotFormRoutingDefinition({
+        version: 1,
+        rules: [rule],
+        fallback: "review",
+      }),
+    ).toThrow(expect.objectContaining({ issues: [expect.objectContaining({ code })] }))
+  })
+
+  it("rejects an overlong fallback route", () => {
+    expect(() =>
+      snapshotFormRoutingDefinition({
+        version: 1,
+        rules: [],
+        fallback: "f".repeat(257),
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        issues: [expect.objectContaining({ code: "routing_route_limit", path: "fallback" })],
+      }),
+    )
   })
 })

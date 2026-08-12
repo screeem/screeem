@@ -11,9 +11,15 @@ import type {
   FormDefinition,
   FormDraft,
   FormRecord,
+  FormRoutingDefinition,
   PublishedForm,
   StoredSubmission,
 } from "./model.js"
+import {
+  compileFormRoutingDefinition,
+  snapshotFormRoutingDefinition,
+  type FormRoutingCompiler,
+} from "./routing.js"
 
 export type PublishedAvailability = Extract<FormAvailability, "active" | "paused">
 
@@ -59,6 +65,12 @@ export interface FormDefinitionStore {
     expectedRevision: number,
     definition: FormDefinition,
   ): Promise<FormDraft>
+  /** Saves routing against the same optimistic revision used by form edits. */
+  saveRoutingDraft(
+    formId: string,
+    expectedRevision: number,
+    routing: FormRoutingDefinition | null,
+  ): Promise<FormDraft>
   /** Atomically publishes a draft revision, which may be published only once. */
   publish(formId: string, expectedRevision: number, publishedAt: string): Promise<PublishedForm>
   /** Returns the current publication only while the form is active. */
@@ -90,12 +102,16 @@ interface StoredFormState {
 export class MemoryFormDefinitionStore implements FormDefinitionStore {
   readonly #forms = new Map<string, StoredFormState>()
 
+  constructor(
+    private readonly compileRouting: FormRoutingCompiler = compileFormRoutingDefinition,
+  ) {}
+
   async create(formId: string, definition: FormDefinition): Promise<FormRecord> {
     if (this.#forms.has(formId)) {
       throw new FormAlreadyExistsError(formId)
     }
 
-    const draft = snapshotDraft(formId, 0, definition)
+    const draft = snapshotDraft(formId, 0, definition, null)
     const state: StoredFormState = {
       formId,
       availability: "draft",
@@ -124,7 +140,29 @@ export class MemoryFormDefinitionStore implements FormDefinitionStore {
     const state = this.#requireForm(formId)
     assertRevision(state, expectedRevision)
 
-    const draft = snapshotDraft(formId, expectedRevision + 1, definition)
+    const draft = snapshotDraft(
+      formId,
+      expectedRevision + 1,
+      definition,
+      state.draft.routing,
+    )
+    state.draft = draft
+    return snapshotDraftValue(draft)
+  }
+
+  async saveRoutingDraft(
+    formId: string,
+    expectedRevision: number,
+    routing: FormRoutingDefinition | null,
+  ): Promise<FormDraft> {
+    const state = this.#requireForm(formId)
+    assertRevision(state, expectedRevision)
+    const draft = snapshotDraft(
+      formId,
+      expectedRevision + 1,
+      state.draft.definition,
+      routing,
+    )
     state.draft = draft
     return snapshotDraftValue(draft)
   }
@@ -136,16 +174,27 @@ export class MemoryFormDefinitionStore implements FormDefinitionStore {
   ): Promise<PublishedForm> {
     const state = this.#requireForm(formId)
     assertRevision(state, expectedRevision)
-    if (state.lastPublishedDraftRevision === expectedRevision) {
-      throw new FormDraftAlreadyPublishedError(formId, expectedRevision)
-    }
+    assertDraftNotPublished(state, expectedRevision)
 
     // Build and validate the complete immutable version before changing state.
     // If validation throws, the current pointer and history remain untouched.
+    const draft = snapshotDraftValue(state.draft)
+    const definition = snapshotFormDefinition(draft.definition, { publishable: true })
+    const routing =
+      draft.routing === null
+        ? null
+        : await this.compileRouting(definition, draft.routing)
+
+    // Compilation may be asynchronous. Revalidate the shared revision and the
+    // publication marker immediately before mutating state so a concurrent
+    // edit or publication cannot make this snapshot stale.
+    assertRevision(state, expectedRevision)
+    assertDraftNotPublished(state, expectedRevision)
     const published = snapshotPublished({
       formId,
       version: (state.publishedVersion ?? 0) + 1,
-      definition: snapshotFormDefinition(state.draft.definition, { publishable: true }),
+      definition,
+      routing,
       publishedAt,
     })
 
@@ -221,16 +270,28 @@ function assertRevision(state: StoredFormState, expectedRevision: number): void 
   }
 }
 
-function snapshotDraft(formId: string, revision: number, definition: FormDefinition): FormDraft {
+function assertDraftNotPublished(state: StoredFormState, expectedRevision: number): void {
+  if (state.lastPublishedDraftRevision === expectedRevision) {
+    throw new FormDraftAlreadyPublishedError(state.formId, expectedRevision)
+  }
+}
+
+function snapshotDraft(
+  formId: string,
+  revision: number,
+  definition: FormDefinition,
+  routing: FormRoutingDefinition | null,
+): FormDraft {
   return Object.freeze({
     formId,
     revision,
     definition: snapshotFormDefinition(definition),
+    routing: routing === null ? null : snapshotFormRoutingDefinition(routing),
   })
 }
 
 function snapshotDraftValue(draft: FormDraft): FormDraft {
-  return snapshotDraft(draft.formId, draft.revision, draft.definition)
+  return snapshotDraft(draft.formId, draft.revision, draft.definition, draft.routing)
 }
 
 function snapshotPublished(published: PublishedForm): PublishedForm {
@@ -238,6 +299,8 @@ function snapshotPublished(published: PublishedForm): PublishedForm {
     formId: published.formId,
     version: published.version,
     definition: snapshotFormDefinition(published.definition, { publishable: true }),
+    routing:
+      published.routing === null ? null : snapshotFormRoutingDefinition(published.routing),
     publishedAt: published.publishedAt,
   })
 }
