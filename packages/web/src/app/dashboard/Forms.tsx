@@ -61,7 +61,9 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
           setError(readError(body, "Could not load forms"))
           return
         }
-        setForms(Array.isArray(body.forms) ? body.forms : [])
+        const loadedForms = Array.isArray(body.forms) ? body.forms : []
+        setForms(loadedForms)
+        if (canManage && loadedForms.length === 0) setShowCreate(true)
       } catch {
         if (!isCancelled) setError("Could not load forms")
       }
@@ -71,7 +73,7 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
     return () => {
       isCancelled = true
     }
-  }, [teamId])
+  }, [teamId, canManage])
 
   async function createForm(event: React.FormEvent) {
     event.preventDefault()

@@ -130,6 +130,7 @@ async function structuredSubmission(
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
   )
   if (saved === "unavailable") return unavailable(headers)
+  if (saved === "rate-limited") return rateLimited(headers)
   if (saved === "failed") return saveFailure(headers)
   return success(request, form.successUrl, headers, published.version)
 }
@@ -172,6 +173,7 @@ async function legacySubmission(
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
   )
   if (saved === "unavailable") return unavailable(headers)
+  if (saved === "rate-limited") return rateLimited(headers)
   if (saved === "failed") return saveFailure(headers)
   return success(request, form.successUrl, headers)
 }
@@ -353,6 +355,13 @@ function saveFailure(headers: Record<string, string>) {
   return NextResponse.json({ error: "Could not save submission" }, { status: 500, headers })
 }
 
+function rateLimited(headers: Record<string, string>) {
+  return NextResponse.json(
+    { error: "This form has reached its submission limit. Please try again shortly." },
+    { status: 429, headers: { ...headers, "Retry-After": "60" } },
+  )
+}
+
 function unavailable(headers: Record<string, string>) {
   return NextResponse.json({ error: "Form not found" }, { status: 404, headers })
 }
@@ -364,7 +373,7 @@ async function saveActiveSubmission(
   payload: unknown,
   origin: string | null,
   userAgent: string | null,
-): Promise<"saved" | "unavailable" | "failed"> {
+): Promise<"saved" | "unavailable" | "rate-limited" | "failed"> {
   const { error } = await admin.rpc("save_form_submission_if_active", {
     target_form_id: formId,
     expected_publication_version: publicationVersion,
@@ -379,6 +388,7 @@ async function saveActiveSubmission(
   ) {
     return "unavailable"
   }
+  if (error.message.includes("form_rate_limited")) return "rate-limited"
   return "failed"
 }
 
