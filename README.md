@@ -67,3 +67,26 @@ supabase/
 - **Model Context Protocol** — MCP SDK for tool and resource registration
 - **Vite + vite-plugin-singlefile** — bundles the preview UI into a single inline HTML file
 - **Drizzle** — database schema management
+## Local Docker stack
+
+The local stack runs the production Next.js image against Supabase's Dockerized PostgreSQL, Auth, and REST services. Docker host networking is used so the browser and server resolve the same local Supabase URL; this workflow currently targets Linux.
+
+Start the migrated database and web app:
+
+```bash
+pnpm docker:up
+```
+
+Open `http://localhost:3000`. Supabase Studio remains available at `http://localhost:54323`.
+
+Reset the database, apply every migration, run the pgTAP database tests, and run the web TypeScript/Vitest suite inside the test image:
+
+```bash
+pnpm docker:test
+```
+
+Stop the app and local Supabase containers:
+
+```bash
+pnpm docker:down
+```

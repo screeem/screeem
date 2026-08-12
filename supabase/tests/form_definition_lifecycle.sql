@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(20);
+SELECT plan(23);
 
 INSERT INTO auth.users (
   id,
@@ -213,6 +213,50 @@ SELECT is(
   ),
   (SELECT team_id FROM forms WHERE id = '20000000-0000-0000-0000-000000000001'),
   'the submission carries the same team as its form'
+);
+
+SELECT lives_ok(
+  $$
+    DO $rate_limit$
+    BEGIN
+      FOR submission_number IN 1..59 LOOP
+        PERFORM save_form_submission_if_active(
+          '20000000-0000-0000-0000-000000000001',
+          2,
+          jsonb_build_object('age', 21, 'submission', submission_number),
+          'https://example.com',
+          'form-rate-limit-test'
+        );
+      END LOOP;
+    END
+    $rate_limit$
+  $$,
+  'the first 60 submissions in a minute are accepted'
+);
+
+SELECT is(
+  (
+    SELECT count(*)
+    FROM form_submissions
+    WHERE form_id = '20000000-0000-0000-0000-000000000001'
+  ),
+  60::bigint,
+  'the accepted submissions are stored'
+);
+
+SELECT throws_ok(
+  $$
+    SELECT save_form_submission_if_active(
+      '20000000-0000-0000-0000-000000000001',
+      2,
+      '{"age": 21}'::jsonb,
+      'https://example.com',
+      'form-rate-limit-test'
+    )
+  $$,
+  'P0001',
+  'form_rate_limited',
+  'the sixty-first submission in a minute is rejected'
 );
 
 SELECT has_index('forms', 'forms_team_created_idx', 'team form lists have a tenant-first index');

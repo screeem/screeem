@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "ci": "pnpm -r run build"
+    "ci": "pnpm -r run build",
+    "docker:up": "sh scripts/docker-local.sh up",
+    "docker:test": "sh scripts/docker-local.sh test",
+    "docker:down": "sh scripts/docker-local.sh down"
   },
   "keywords": [],
   "author": "",

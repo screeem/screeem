@@ -1,0 +1,37 @@
+services:
+  web:
+    image: screeem-web:local
+    build:
+      context: .
+      target: runner
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${API_URL}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+        NEXT_PUBLIC_SITE_URL: http://localhost:3000
+    network_mode: host
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${API_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      DATABASE_URL: ${DB_URL}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  test:
+    image: screeem-test:local
+    build:
+      context: .
+      target: test
+    network_mode: host
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${API_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      DATABASE_URL: ${DB_URL}
+    profiles: ["test"]
