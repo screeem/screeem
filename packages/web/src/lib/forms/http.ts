@@ -5,6 +5,7 @@ import {
   FormRevisionConflictError,
   FormUnavailableError,
   InvalidFormDefinitionError,
+  InvalidFormRoutingError,
   PublishedFormNotFoundError,
 } from "@screeem/forms"
 import { NextResponse } from "next/server"
@@ -12,6 +13,9 @@ import { FormDefinitionNotFoundError } from "./supabase-store"
 
 export function formErrorResponse(error: unknown): NextResponse {
   if (error instanceof InvalidFormDefinitionError) {
+    return NextResponse.json({ error: error.message, issues: error.issues }, { status: 400 })
+  }
+  if (error instanceof InvalidFormRoutingError) {
     return NextResponse.json({ error: error.message, issues: error.issues }, { status: 400 })
   }
   if (error instanceof FormRevisionConflictError) {
