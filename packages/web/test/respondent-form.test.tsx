@@ -27,6 +27,8 @@ describe("RespondentForm", () => {
     const employees = screen.getByRole("spinbutton", { name: "Employees" })
     expect(name.hasAttribute("disabled")).toBe(false)
     expect(employees.hasAttribute("disabled")).toBe(false)
+    expect(name.getAttribute("aria-required")).toBe("true")
+    expect(employees.getAttribute("aria-required")).toBe("true")
 
     await user.type(name, "Ada Lovelace")
     await user.tab()
@@ -65,6 +67,35 @@ describe("FormEditor", () => {
 
     expect(await screen.findByRole("heading", { name: "Enterprise qualification" })).toBeTruthy()
     expect(screen.getByText("New structured draft")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Save draft" }).hasAttribute("disabled")).toBe(false)
+  })
+
+  it("recovers from a failed draft request without leaving the editor busy", async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            draft: { revision: 0, definition },
+            legacy: false,
+            availability: "draft",
+            publishedVersion: null,
+            lastPublishedDraftRevision: null,
+          }),
+        })
+        .mockRejectedValueOnce(new TypeError("network unavailable")),
+    )
+
+    render(<FormEditor teamId="team-one" formId="form-one" />)
+
+    expect(await screen.findByRole("heading", { name: "Qualification" })).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: "+ Short text" }))
+    await user.click(screen.getByRole("button", { name: "Save draft" }))
+
+    expect(await screen.findByText("Could not save the draft")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Save draft" }).hasAttribute("disabled")).toBe(false)
   })
 })

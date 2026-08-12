@@ -53,14 +53,18 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
     let isCancelled = false
 
     async function loadForms() {
-      const response = await fetch(`/api/teams/${teamId}/forms`)
-      const body = await readBody(response)
-      if (isCancelled) return
-      if (!response.ok) {
-        setError(readError(body, "Could not load forms"))
-        return
+      try {
+        const response = await fetch(`/api/teams/${teamId}/forms`)
+        const body = await readBody(response)
+        if (isCancelled) return
+        if (!response.ok) {
+          setError(readError(body, "Could not load forms"))
+          return
+        }
+        setForms(Array.isArray(body.forms) ? body.forms : [])
+      } catch {
+        if (!isCancelled) setError("Could not load forms")
       }
-      setForms(Array.isArray(body.forms) ? body.forms : [])
     }
 
     void loadForms()
@@ -73,24 +77,29 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
     event.preventDefault()
     setBusy(true)
     setError("")
-    const response = await fetch(`/api/teams/${teamId}/forms`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, allowedOrigin, successUrl, requiresTurnstile }),
-    })
-    const body = await readBody(response)
-    if (!response.ok) {
-      setError(readError(body, "Could not create form"))
-    } else if (body.form) {
-      setForms((current) => [body.form as FormView, ...current])
-      setName("")
-      setAllowedOrigin("")
-      setSuccessUrl("")
-      setRequiresTurnstile(false)
-      setShowCreate(false)
-      router.push(`/dashboard/forms/${body.form.id}?name=${encodeURIComponent(body.form.name)}`)
+    try {
+      const response = await fetch(`/api/teams/${teamId}/forms`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, allowedOrigin, successUrl, requiresTurnstile }),
+      })
+      const body = await readBody(response)
+      if (!response.ok) {
+        setError(readError(body, "Could not create form"))
+      } else if (body.form) {
+        setForms((current) => [body.form as FormView, ...current])
+        setName("")
+        setAllowedOrigin("")
+        setSuccessUrl("")
+        setRequiresTurnstile(false)
+        setShowCreate(false)
+        router.push(`/dashboard/forms/${body.form.id}?name=${encodeURIComponent(body.form.name)}`)
+      }
+    } catch {
+      setError("Could not create form")
+    } finally {
+      setBusy(false)
     }
-    setBusy(false)
   }
 
   async function loadSubmissions(formId: string) {
@@ -100,59 +109,75 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
     }
     setSelected(formId)
     setError("")
-    const response = await fetch(`/api/teams/${teamId}/forms/${formId}/submissions`)
-    const body = await readBody(response)
-    if (!response.ok) return setError(readError(body, "Could not load submissions"))
-    setSubmissions(Array.isArray(body.submissions) ? body.submissions : [])
+    try {
+      const response = await fetch(`/api/teams/${teamId}/forms/${formId}/submissions`)
+      const body = await readBody(response)
+      if (!response.ok) return setError(readError(body, "Could not load submissions"))
+      setSubmissions(Array.isArray(body.submissions) ? body.submissions : [])
+    } catch {
+      setError("Could not load submissions")
+    }
   }
 
   async function toggle(form: FormView) {
     const nextActive = form.availability === "paused" || !form.is_active
     const isStructured = form.legacy_unstructured === false
-    const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        isStructured
-          ? { availability: nextActive ? "active" : "paused" }
-          : { isActive: nextActive },
-      ),
-    })
-    const body = await readBody(response)
-    if (!response.ok) return setError(readError(body, "Could not update form"))
-    setForms((items) =>
-      items.map((item) =>
-        item.id === form.id
-          ? { ...item, is_active: nextActive, availability: nextActive ? "active" : "paused" }
-          : item,
-      ),
-    )
+    try {
+      const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          isStructured
+            ? { availability: nextActive ? "active" : "paused" }
+            : { isActive: nextActive },
+        ),
+      })
+      const body = await readBody(response)
+      if (!response.ok) return setError(readError(body, "Could not update form"))
+      setForms((items) =>
+        items.map((item) =>
+          item.id === form.id
+            ? { ...item, is_active: nextActive, availability: nextActive ? "active" : "paused" }
+            : item,
+        ),
+      )
+    } catch {
+      setError("Could not update form")
+    }
   }
 
   async function remove(form: FormView) {
     if (!window.confirm(`Delete ${form.name} and all of its submissions?`)) return
-    const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, { method: "DELETE" })
-    if (!response.ok) return setError("Could not delete form")
-    setForms((items) => items.filter((item) => item.id !== form.id))
-    if (selected === form.id) {
-      setSelected(null)
-      setSubmissions([])
+    try {
+      const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, { method: "DELETE" })
+      if (!response.ok) return setError("Could not delete form")
+      setForms((items) => items.filter((item) => item.id !== form.id))
+      if (selected === form.id) {
+        setSelected(null)
+        setSubmissions([])
+      }
+    } catch {
+      setError("Could not delete form")
     }
   }
 
   async function toggleTurnstile(form: FormView) {
-    const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requiresTurnstile: !form.requires_turnstile }),
-    })
-    const body = await readBody(response)
-    if (!response.ok) return setError(readError(body, "Could not update bot protection"))
-    setForms((items) =>
-      items.map((item) =>
-        item.id === form.id ? { ...item, requires_turnstile: !form.requires_turnstile } : item,
-      ),
-    )
+    try {
+      const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requiresTurnstile: !form.requires_turnstile }),
+      })
+      const body = await readBody(response)
+      if (!response.ok) return setError(readError(body, "Could not update bot protection"))
+      setForms((items) =>
+        items.map((item) =>
+          item.id === form.id ? { ...item, requires_turnstile: !form.requires_turnstile } : item,
+        ),
+      )
+    } catch {
+      setError("Could not update bot protection")
+    }
   }
 
   async function saveSchema(form: FormView) {
@@ -163,20 +188,24 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
     } catch {
       return setError("Submission schema must be valid JSON")
     }
-    const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submissionSchema }),
-    })
-    const body = await readBody(response)
-    if (!response.ok) return setError(readError(body, "Could not update submission schema"))
-    setForms((items) =>
-      items.map((item) =>
-        item.id === form.id
-          ? { ...item, submission_schema: submissionSchema as Record<string, unknown> | null }
-          : item,
-      ),
-    )
+    try {
+      const response = await fetch(`/api/teams/${teamId}/forms/${form.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submissionSchema }),
+      })
+      const body = await readBody(response)
+      if (!response.ok) return setError(readError(body, "Could not update submission schema"))
+      setForms((items) =>
+        items.map((item) =>
+          item.id === form.id
+            ? { ...item, submission_schema: submissionSchema as Record<string, unknown> | null }
+            : item,
+        ),
+      )
+    } catch {
+      setError("Could not update submission schema")
+    }
   }
 
   const submissionEndpoint = (key: string) =>
@@ -245,7 +274,7 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
           </label>
           <button
             disabled={busy}
-            className="w-fit rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="w-fit rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             {busy ? "Creating…" : "Create and edit"}
           </button>
@@ -322,10 +351,7 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
                     </button>
                   ) : null}
                   {canManage ? (
-                    <button
-                      onClick={() => void toggleTurnstile(form)}
-                      className={secondaryButton}
-                    >
+                    <button onClick={() => void toggleTurnstile(form)} className={secondaryButton}>
                       {form.requires_turnstile ? "Disable bot check" : "Require bot check"}
                     </button>
                   ) : null}
@@ -428,7 +454,7 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
 }
 
 const inputClass =
-  "w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+  "w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
 const secondaryButton =
   "rounded-md border border-gray-200 px-3 py-1.5 text-gray-700 hover:bg-gray-50"
 
@@ -481,7 +507,7 @@ function CopyRow({
         <button
           type="button"
           onClick={() => void navigator.clipboard.writeText(value)}
-          className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+          className="text-xs font-medium text-teal-600 hover:text-teal-800"
         >
           Copy
         </button>

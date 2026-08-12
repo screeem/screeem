@@ -21,7 +21,7 @@ export default async function FormEditorPage({
         <p className="mt-2 text-sm text-gray-600">Only team managers can edit and publish forms.</p>
         <Link
           href="/dashboard/forms"
-          className="mt-5 inline-flex text-sm font-medium text-indigo-600"
+          className="mt-5 inline-flex text-sm font-medium text-teal-600"
         >
           Back to forms
         </Link>

@@ -100,7 +100,7 @@ export function HostedForm({ endpointKey }: { readonly endpointKey: string }) {
     <main className="min-h-screen bg-[#ebe9e4] px-4 py-8 sm:py-14">
       <div className="mx-auto max-w-xl rounded-2xl bg-white px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10 sm:py-10">
         <div className="mb-8 border-b border-gray-100 pb-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-600">
             Screeem form
           </p>
           <h1 className="mt-3 text-2xl font-semibold tracking-tight text-gray-950">

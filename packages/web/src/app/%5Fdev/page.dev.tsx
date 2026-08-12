@@ -5,16 +5,14 @@ export default function DevelopmentPlaygroundPage() {
   if (process.env.NODE_ENV === "production") notFound()
 
   return (
-    <div className="space-y-10">
+    <div className="mx-auto w-full max-w-6xl space-y-10 px-4 py-8 sm:px-6 lg:px-8">
       <header className="max-w-2xl space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-600">
           Development playground
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight text-gray-950">
-          Product directions, before production
-        </h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Product playgrounds</h1>
         <p className="text-sm leading-6 text-gray-600">
-          Interactive, in-memory prototypes for comparing complete workflows. Nothing here writes to
+          Interactive, in-memory prototypes for testing complete workflows. Nothing here writes to
           an API or database.
         </p>
       </header>
@@ -30,10 +28,10 @@ export default function DevelopmentPlaygroundPage() {
           <span className="space-y-1">
             <span className="block text-base font-semibold text-gray-950">Form builder</span>
             <span className="block max-w-xl text-sm leading-6 text-gray-600">
-              Compare three headless builder layouts using one realistic lead-qualification form.
+              Build and preview a headless form using a realistic lead-qualification fixture.
             </span>
           </span>
-          <span className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600">
+          <span className="inline-flex items-center gap-2 text-sm font-medium text-teal-600">
             Open playground
             <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">
               →

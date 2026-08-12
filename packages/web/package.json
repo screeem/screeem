@@ -13,6 +13,8 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@atlaskit/pragmatic-drag-and-drop": "^2.0.2",
+    "@atlaskit/pragmatic-drag-and-drop-hitbox": "^2.0.0",
     "@screeem/forms": "workspace:*",
     "@screeem/forms-react": "workspace:*",
     "@supabase/ssr": "^0.6.1",

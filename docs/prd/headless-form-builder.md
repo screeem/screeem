@@ -8,7 +8,7 @@ The routing package now accepts a plain form definition and can safely compile b
 
 Adopting an existing visual builder would introduce a second schema format, styling framework, and adapter layer. The supported initial field set is deliberately small, so that integration cost could be greater than building the product-specific experience. At the same time, the builder must not be tied to Screeem's React UI, Supabase, or any single storage technology. Developers need to use the form model with their own interfaces and provide a store backed by PostgreSQL, DynamoDB, an HTTP service, memory, or another system.
 
-The team also needs to review the form-building experience before it is placed in the product. The established Yul approach is to put realistic, interactive UI directions in a development-only playground, compare them using mock data, choose a direction, and only then integrate the chosen components into the production surface.
+The team also needs to review the form-building experience before it is placed in the product. The established Yul approach is to put a realistic, interactive UI in a development-only playground, test it with mock data, and then integrate the chosen components into the production surface.
 
 ## Solution
 
@@ -27,7 +27,7 @@ The headless core will contain form-definition types, validation, pure editing o
 
 Form authors will edit a draft and explicitly publish it. Publishing will atomically create an immutable numbered version. The previously published version will continue serving respondents until publishing succeeds. Every accepted submission will record the published definition version used to parse and validate it.
 
-Before production integration, a development-only playground shows multiple fully interactive builder directions with realistic mock forms, an in-memory store, live respondent previews, and definition inspection. Playground submissions are inert and do not write to application APIs or databases. The Canvas direction was selected and productionised using the same headless modules and React components; the rejected alternatives remain labelled in the playground.
+Before production integration, a development-only playground shows the selected builder with realistic mock forms, an in-memory store, live respondent previews, and definition inspection. Playground submissions are inert and do not write to application APIs or databases. The playground and production editor use the same headless modules and React components.
 
 ### MVP success criteria
 
@@ -109,11 +109,11 @@ Before production integration, a development-only playground shows multiple full
 
 ### Product and design reviewers
 
-54. As a product reviewer, I want several interactive builder directions in a development playground, so that I can choose the experience before it is integrated.
-55. As a design reviewer, I want every playground direction to use the same realistic fixtures and capabilities, so that comparisons are about interaction and layout rather than missing functionality.
+54. As a product reviewer, I want an interactive builder in a development playground, so that I can test the experience before it is integrated.
+55. As a design reviewer, I want the playground to use realistic fixtures and the production capabilities, so that feedback applies to the real experience.
 56. As a product reviewer, I want to switch between builder, respondent preview, and definition views, so that I can assess the whole author-to-submission loop.
 57. As a developer, I want playground interactions to use in-memory state and inert submissions, so that design review cannot mutate production-like data.
-58. As a maintainer, I want the chosen and rejected directions labelled after selection, so that future changes preserve the reasoning behind the decision.
+58. As a maintainer, I want the playground to show only the selected direction, so that design scaffolding is not confused with product functionality.
 59. As a security reviewer, I want development playground routes unavailable in production, so that experimental surfaces cannot be discovered or used by customers.
 
 ## Implementation Decisions
@@ -176,18 +176,18 @@ Before production integration, a development-only playground shows multiple full
 - The builder shows errors near the affected field and also provides a publication summary when multiple issues exist.
 - Live preview renders from the current unsaved draft, not the published definition, and never sends its test values to the production submission endpoint.
 - The author can view the normalized plain-data definition in the development playground. A raw schema editor is not part of the business-user production experience.
-- The production editor uses the selected Canvas direction: a compact field palette, central form canvas, and focused property inspector.
+- The production editor uses the selected canvas layout: a compact field palette, central form canvas, and focused property inspector.
 
 ### Development playground and design gate
 
 - The playground follows the established Yul pattern: isolated development-only routes, a central playground index, lazily loaded option pages, realistic fixtures, and no production navigation. It does not require application services or credentials to render.
 - Production builds must not expose a usable playground route. Requests to a development-only URL in production return not found, and experimental controls are not included in customer navigation.
-- The form-builder option page presents at least three interaction directions using the same headless controller, field capabilities, fixtures, and validation rules.
-- Each direction is fully interactive: authors can add, edit, duplicate, remove, reorder, undo, redo, preview, and attempt publication against an in-memory store.
+- The form-builder page presents the selected layout using the same headless controller, field capabilities, fixtures, and validation rules as production.
+- The playground is fully interactive: authors can add, edit, duplicate, remove, reorder, undo, redo, preview, and attempt publication against an in-memory store.
 - The playground includes realistic lead-qualification, contact, and eligibility forms covering all initial field types, optional fields, validation failures, and enum choices.
 - Reviewers can switch among builder view, respondent preview, normalized definition, and sample normalized submission output.
 - Playground submission and publication actions are visibly marked as development behavior and never call production APIs or persist to Supabase.
-- After review, one direction is marked selected and the others are retained as rejected alternatives with short reasons. The chosen components are then integrated into the product rather than recreated separately.
+- Design alternatives are removed after review. The chosen components are integrated into the product rather than recreated separately.
 
 ### React respondent runtime
 
@@ -242,7 +242,7 @@ Before production integration, a development-only playground shows multiple full
 - Submission service and endpoint tests cover JSON strictness, form-data coercion, required and optional fields, numeric bounds, email and length validation, enum membership, unknown keys, unsafe payloads, size limits, origins, honeypot handling, paused forms, concurrent publication, redirects, and store failures.
 - Routing integration tests prove that a realistic published definition compiles through `schemaFromForm`, that a normalized submission such as age greater than 18 can match a rule, and that invalid submissions never reach routing.
 - Browser tests cover the critical business journey: create a draft, add and reorder fields, preview it, publish it, open the hosted form, submit it, and view the versioned submission. A second journey covers editing while an older published version remains live and then publishing the replacement.
-- A production-build test verifies that development playground navigation and routes are unavailable. Development smoke tests verify that playground fixtures and each design direction render without external services.
+- Production-build verification confirms that development playground navigation and routes are unavailable. Development smoke tests verify that playground fixtures render without external services.
 - Existing routing tests provide the prior art for safe schema snapshots, plain-data submissions, type-level behavior, security boundaries, and shuffled execution. Existing form API behavior provides regression cases for request limits, origin checks, honeypots, redirects, and form availability.
 - Test fixtures use explicit clocks and deterministic identifier generators. No core test depends on wall-clock time, random UUIDs, network access, or a running database.
 
@@ -263,8 +263,8 @@ Before production integration, a development-only playground shows multiple full
 ## Further Notes
 
 - The visual interaction research should use Ginkgo's React JSON Schema Form Builder as inspiration for a ready-made toolbox, sortable canvas, and property editor, and Coltor Builder as inspiration for separating typed builder state from UI and rendering. Neither schema becomes a runtime dependency or canonical format.
-- The development review workflow follows Yul's established pattern: isolated development-only pages, realistic mock data, live controls, multiple labelled directions, inert writes, and preservation of rejected alternatives after selection.
+- The development review workflow follows Yul's established pattern: isolated development-only pages, realistic mock data, live controls, and inert writes.
 - The initial scope is intentionally narrow because it covers the go-to-market qualification example: a form can collect name, email, employee count, country, and consent, then routing can evaluate conditions such as employee thresholds and country equality against validated values.
 - Headless means the definition model, operations, persistence contracts, and publishing semantics do not choose a UI or infrastructure. It does not mean Screeem avoids delivering a polished visual editor for business users.
 - The public store contracts are a first-class product requirement rather than a testing convenience. The in-memory implementation makes tests and prototypes easy; the contract suite makes third-party persistence implementations credible.
-- The playground review selected Canvas for its direct field manipulation and persistent inspector. Outline and Focus remain labelled as rejected alternatives for future reference.
+- The playground uses the selected canvas layout with direct field manipulation and a persistent inspector.

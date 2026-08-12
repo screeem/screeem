@@ -23,48 +23,18 @@ import {
 } from "@screeem/forms"
 import Link from "next/link"
 import { useMemo, useRef, useState } from "react"
+import { DraggableField } from "../../../components/forms/DraggableField"
 
-type Direction = "canvas" | "outline" | "focus"
 type View = "builder" | "preview" | "definition"
 type Fixture = "lead" | "contact" | "eligibility"
 
-const controls: readonly { control: FieldControl; label: string; detail: string }[] = [
-  { control: "text", label: "Short text", detail: "Name or company" },
-  { control: "email", label: "Email", detail: "Work email" },
-  { control: "textarea", label: "Long answer", detail: "Notes or context" },
-  { control: "number", label: "Number", detail: "Age or employees" },
-  { control: "checkbox", label: "Checkbox", detail: "Yes or no" },
-  { control: "select", label: "Single select", detail: "One fixed option" },
-]
-
-const directions: readonly {
-  id: Direction
-  label: string
-  description: string
-  verdict: "Selected" | "Rejected"
-  reason: string
-}[] = [
-  {
-    id: "canvas",
-    label: "Canvas",
-    description: "Palette, form canvas and inspector",
-    verdict: "Selected",
-    reason: "Best balance of discoverability, direct manipulation and field context.",
-  },
-  {
-    id: "outline",
-    label: "Outline",
-    description: "Compact field index with a wide editor",
-    verdict: "Rejected",
-    reason: "Efficient for experts, but hides too much of the respondent experience.",
-  },
-  {
-    id: "focus",
-    label: "Focus",
-    description: "One question at a time with a sequence strip",
-    verdict: "Rejected",
-    reason: "Clear per question, but slower for scanning and reorganising a whole form.",
-  },
+const controls: readonly { control: FieldControl; label: string }[] = [
+  { control: "text", label: "Short text" },
+  { control: "email", label: "Email" },
+  { control: "textarea", label: "Long answer" },
+  { control: "number", label: "Number" },
+  { control: "checkbox", label: "Checkbox" },
+  { control: "select", label: "Single select" },
 ]
 
 const fixtures: readonly { id: Fixture; label: string }[] = [
@@ -202,7 +172,6 @@ export function FormBuilderPlayground() {
   const [builder, setBuilder] = useState(() =>
     selectBuilderField(createBuilderState(createLeadQualificationFixture()), "full-name"),
   )
-  const [direction, setDirection] = useState<Direction>("canvas")
   const [view, setView] = useState<View>("builder")
   const [fixture, setFixture] = useState<Fixture>("lead")
   const [message, setMessage] = useState<string | null>(null)
@@ -284,6 +253,10 @@ export function FormBuilderPlayground() {
     )
   }
 
+  function reorderField(fieldId: string, targetIndex: number) {
+    commit((definition) => moveField(definition, fieldId, targetIndex), fieldId)
+  }
+
   function changeFixture(nextFixture: Fixture) {
     const definition = createFixture(nextFixture)
     setFixture(nextFixture)
@@ -346,10 +319,11 @@ export function FormBuilderPlayground() {
     onDuplicate: duplicateSelected,
     onRemove: removeSelected,
     onMove: moveSelected,
+    onReorder: reorderField,
   }
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="mx-auto w-full max-w-[1680px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <header className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
@@ -366,8 +340,7 @@ export function FormBuilderPlayground() {
               </span>
             </div>
             <p className="max-w-2xl text-sm leading-6 text-gray-600">
-              Compare layout directions against one headless definition. Changes carry across every
-              direction and never leave this page.
+              Build, preview and inspect a headless form definition. Changes stay in this page.
             </p>
           </div>
 
@@ -388,7 +361,7 @@ export function FormBuilderPlayground() {
               <button
                 type="button"
                 onClick={() => void publishSimulation()}
-                className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700"
+                className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-teal-700"
               >
                 Publish
               </button>
@@ -421,14 +394,14 @@ export function FormBuilderPlayground() {
         </div>
       </header>
 
-      <nav aria-label="Playground views" className="flex flex-wrap justify-between gap-3">
+      <nav aria-label="Playground views" className="flex flex-wrap gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-xs font-medium text-gray-500">
             Fixture
             <select
               value={fixture}
               onChange={(event) => changeFixture(event.target.value as Fixture)}
-              className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-gray-800 outline-none focus:border-indigo-500"
+              className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-gray-800 outline-none focus:border-teal-500"
             >
               {fixtures.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -454,26 +427,6 @@ export function FormBuilderPlayground() {
             ))}
           </div>
         </div>
-
-        {view === "builder" ? (
-          <div className="flex flex-wrap gap-1" aria-label="Builder layout direction">
-            {directions.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                title={item.description}
-                onClick={() => setDirection(item.id)}
-                className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                  direction === item.id
-                    ? "bg-indigo-600 font-medium text-white"
-                    : "bg-white text-gray-600 ring-1 ring-inset ring-gray-200 hover:text-gray-950"
-                }`}
-              >
-                {item.label} · {item.verdict}
-              </button>
-            ))}
-          </div>
-        ) : null}
       </nav>
 
       {message ? (
@@ -485,9 +438,7 @@ export function FormBuilderPlayground() {
         </div>
       ) : null}
 
-      {view === "builder" && direction === "canvas" ? <CanvasDirection {...shared} /> : null}
-      {view === "builder" && direction === "outline" ? <OutlineDirection {...shared} /> : null}
-      {view === "builder" && direction === "focus" ? <FocusDirection {...shared} /> : null}
+      {view === "builder" ? <BuilderCanvas {...shared} /> : null}
       {view === "preview" ? <RespondentPreview definition={builder.definition} /> : null}
       {view === "definition" ? <DefinitionView definition={builder.definition} /> : null}
     </div>
@@ -503,31 +454,26 @@ interface BuilderLayoutProps {
   readonly onDuplicate: () => void
   readonly onRemove: () => void
   readonly onMove: (offset: number) => void
+  readonly onReorder: (fieldId: string, targetIndex: number) => void
 }
 
-function CanvasDirection(props: BuilderLayoutProps) {
+function BuilderCanvas(props: BuilderLayoutProps) {
   return (
     <section
-      aria-label="Canvas direction"
+      aria-label="Form builder"
       className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
     >
-      <DirectionHeader
-        name="Canvas"
-        description="Persistent field palette and property inspector around a visual form canvas."
-        verdict="Selected"
-        reason="Best balance of discoverability, direct manipulation and field context."
-      />
       <div className="grid min-h-[620px] lg:grid-cols-[180px_minmax(300px,1fr)_260px]">
         <aside className="border-b border-gray-200 bg-gray-50/80 p-4 lg:border-b-0 lg:border-r">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
             Add field
           </p>
-          <ControlPalette onAdd={props.onAdd} compact />
+          <ControlPalette onAdd={props.onAdd} />
         </aside>
 
         <main className="bg-[#f4f5f7] p-4 sm:p-7">
           <div className="mx-auto max-w-xl rounded-xl bg-white px-5 py-7 shadow-[0_12px_36px_rgba(15,23,42,0.08)] sm:px-8">
-            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">
+            <p className="text-xs font-semibold uppercase tracking-wider text-teal-600">
               Form canvas
             </p>
             <h2 className="mt-3 text-xl font-semibold text-gray-950">
@@ -548,249 +494,17 @@ function CanvasDirection(props: BuilderLayoutProps) {
   )
 }
 
-function OutlineDirection(props: BuilderLayoutProps) {
+function ControlPalette({ onAdd }: { readonly onAdd: (control: FieldControl) => void }) {
   return (
-    <section
-      aria-label="Outline direction"
-      className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950 text-white shadow-sm"
-    >
-      <DirectionHeader
-        dark
-        name="Outline"
-        description="A dense field index for teams that manage longer operational forms."
-        verdict="Rejected"
-        reason="Efficient for experts, but hides too much of the respondent experience."
-      />
-      <div className="border-b border-slate-800 px-5 py-4">
-        <ControlPalette onAdd={props.onAdd} horizontal dark />
-      </div>
-      <div className="grid min-h-[560px] md:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="border-b border-slate-800 md:border-b-0 md:border-r">
-          <div className="flex items-center justify-between px-4 py-3 text-xs text-slate-400">
-            <span>Field outline</span>
-            <span>{props.builder.definition.fields.length} total</span>
-          </div>
-          <div className="space-y-px px-2 pb-4">
-            {props.builder.definition.fields.map((field, index) => (
-              <button
-                key={field.id}
-                type="button"
-                onClick={() => props.onSelect(field.id)}
-                className={`grid w-full grid-cols-[24px_1fr_auto] items-center gap-2 rounded-md px-2 py-2.5 text-left transition-colors ${
-                  props.builder.selectedFieldId === field.id
-                    ? "bg-indigo-500/20 text-white"
-                    : "text-slate-300 hover:bg-slate-900"
-                }`}
-              >
-                <span className="font-mono text-xs text-slate-500">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <span className="truncate text-sm font-medium">{field.label}</span>
-                <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                  {field.control}
-                </span>
-              </button>
-            ))}
-          </div>
-        </aside>
-        <main className="bg-white p-6 text-gray-950 sm:p-8">
-          <div className="mx-auto max-w-2xl">
-            <FieldInspector {...props} expanded />
-          </div>
-        </main>
-      </div>
-    </section>
-  )
-}
-
-function FocusDirection(props: BuilderLayoutProps) {
-  const currentIndex = props.selectedField
-    ? props.builder.definition.fields.findIndex((field) => field.id === props.selectedField?.id)
-    : -1
-
-  return (
-    <section
-      aria-label="Focus direction"
-      className="overflow-hidden rounded-xl border border-gray-200 bg-[#fbfaf7] shadow-sm"
-    >
-      <DirectionHeader
-        name="Focus"
-        description="A guided question editor that keeps attention on one field at a time."
-        verdict="Rejected"
-        reason="Clear per question, but slower for scanning and reorganising a whole form."
-      />
-      <div className="border-b border-gray-200 bg-white px-5 py-4">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          {props.builder.definition.fields.map((field, index) => (
-            <button
-              key={field.id}
-              type="button"
-              aria-label={`Edit ${field.label}`}
-              onClick={() => props.onSelect(field.id)}
-              className={`h-2.5 min-w-10 flex-1 rounded-full transition-all ${
-                props.builder.selectedFieldId === field.id
-                  ? "bg-indigo-600 ring-4 ring-indigo-100"
-                  : index < currentIndex
-                    ? "bg-indigo-200 hover:bg-indigo-300"
-                    : "bg-gray-200 hover:bg-gray-300"
-              }`}
-            />
-          ))}
-        </div>
-        <p className="mt-3 text-xs text-gray-500">
-          {currentIndex >= 0
-            ? `Question ${currentIndex + 1} of ${props.builder.definition.fields.length}`
-            : "Select a question"}
-        </p>
-      </div>
-
-      <div className="grid min-h-[520px] lg:grid-cols-[minmax(0,1fr)_300px]">
-        <main className="flex items-center justify-center p-6 sm:p-12">
-          <div className="w-full max-w-xl">
-            {props.selectedField ? (
-              <>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">
-                  {controlLabel(props.selectedField.control)}
-                </p>
-                <h2 className="mt-4 text-3xl font-semibold tracking-tight text-gray-950">
-                  {props.selectedField.label}
-                  {props.selectedField.required ? (
-                    <span className="text-indigo-600"> *</span>
-                  ) : null}
-                </h2>
-                {props.selectedField.description ? (
-                  <p className="mt-2 text-base leading-7 text-gray-600">
-                    {props.selectedField.description}
-                  </p>
-                ) : null}
-                <div className="mt-8">
-                  <PreviewInput
-                    field={props.selectedField}
-                    value=""
-                    onChange={() => undefined}
-                    large
-                  />
-                </div>
-                <div className="mt-9 flex items-center justify-between border-t border-gray-200 pt-5">
-                  <ActionButton
-                    label="← Previous"
-                    disabled={currentIndex <= 0}
-                    onClick={() => {
-                      const previous = props.builder.definition.fields[currentIndex - 1]
-                      if (previous) props.onSelect(previous.id)
-                    }}
-                  />
-                  <span className="text-xs text-gray-500">
-                    Use the sequence strip to change questions
-                  </span>
-                  <ActionButton
-                    label="Next →"
-                    disabled={
-                      currentIndex < 0 || currentIndex >= props.builder.definition.fields.length - 1
-                    }
-                    onClick={() => {
-                      const next = props.builder.definition.fields[currentIndex + 1]
-                      if (next) props.onSelect(next.id)
-                    }}
-                  />
-                </div>
-              </>
-            ) : (
-              <EmptySelection />
-            )}
-          </div>
-        </main>
-        <aside className="border-t border-gray-200 bg-white p-5 lg:border-l lg:border-t-0">
-          <FieldInspector {...props} />
-          <div className="mt-6 border-t border-gray-200 pt-5">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Add question
-            </p>
-            <ControlPalette onAdd={props.onAdd} compact />
-          </div>
-        </aside>
-      </div>
-    </section>
-  )
-}
-
-function DirectionHeader({
-  name,
-  description,
-  dark = false,
-  verdict,
-  reason,
-}: {
-  readonly name: string
-  readonly description: string
-  readonly dark?: boolean
-  readonly verdict: "Selected" | "Rejected"
-  readonly reason: string
-}) {
-  return (
-    <div
-      className={`flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4 ${
-        dark ? "border-slate-800" : "border-gray-200"
-      }`}
-    >
-      <div>
-        <h2 className={`text-sm font-semibold ${dark ? "text-white" : "text-gray-950"}`}>{name}</h2>
-        <p className={`mt-0.5 text-xs ${dark ? "text-slate-400" : "text-gray-500"}`}>
-          {description}
-        </p>
-        <p
-          className={`mt-1 text-xs ${verdict === "Selected" ? "text-emerald-600" : dark ? "text-slate-500" : "text-gray-400"}`}
-        >
-          {reason}
-        </p>
-      </div>
-      <span
-        className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
-          dark ? "bg-slate-900 text-slate-400" : "bg-gray-100 text-gray-600"
-        }`}
-      >
-        {verdict}
-      </span>
-    </div>
-  )
-}
-
-function ControlPalette({
-  onAdd,
-  compact = false,
-  horizontal = false,
-  dark = false,
-}: {
-  readonly onAdd: (control: FieldControl) => void
-  readonly compact?: boolean
-  readonly horizontal?: boolean
-  readonly dark?: boolean
-}) {
-  return (
-    <div className={horizontal ? "flex flex-wrap gap-2" : "space-y-1.5"}>
+    <div className="space-y-1.5">
       {controls.map((item) => (
         <button
           key={item.control}
           type="button"
           onClick={() => onAdd(item.control)}
-          className={`group text-left transition-colors ${
-            horizontal
-              ? `rounded-md px-3 py-2 text-xs font-medium ${
-                  dark
-                    ? "bg-slate-900 text-slate-300 ring-1 ring-inset ring-slate-700 hover:bg-slate-800 hover:text-white"
-                    : "bg-white text-gray-700 ring-1 ring-inset ring-gray-200 hover:bg-gray-50"
-                }`
-              : `w-full rounded-md px-2.5 py-2 ${
-                  dark ? "hover:bg-slate-900" : "hover:bg-white hover:shadow-sm"
-                }`
-          }`}
+          className="group w-full rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white hover:shadow-sm"
         >
-          <span className={`block ${horizontal ? "" : "text-sm font-medium"}`}>+ {item.label}</span>
-          {!compact && !horizontal ? (
-            <span className={`mt-0.5 block text-xs ${dark ? "text-slate-500" : "text-gray-500"}`}>
-              {item.detail}
-            </span>
-          ) : null}
+          <span className="block text-sm font-medium">+ {item.label}</span>
         </button>
       ))}
     </div>
@@ -803,53 +517,73 @@ function FieldList(props: BuilderLayoutProps & { readonly roomy?: boolean }) {
       {props.builder.definition.fields.map((field, index) => {
         const selected = field.id === props.builder.selectedFieldId
         return (
-          <div
+          <DraggableField
             key={field.id}
-            className={`group relative rounded-lg border transition-all ${
-              selected
-                ? "border-indigo-500 bg-indigo-50/50 shadow-[0_0_0_3px_rgba(99,102,241,0.12)]"
-                : "border-gray-200 bg-white hover:border-gray-300"
-            }`}
+            fieldId={field.id}
+            index={index}
+            onReorder={props.onReorder}
           >
-            <button
-              type="button"
-              onClick={() => props.onSelect(field.id)}
-              className="w-full px-4 py-3.5 text-left"
-            >
-              <span className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium text-gray-900">
-                  {field.label}
-                  {field.required ? <span className="ml-1 text-indigo-600">*</span> : null}
-                </span>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                  {controlLabel(field.control)}
-                </span>
-              </span>
-              {field.description ? (
-                <span className="mt-1 block text-xs leading-5 text-gray-500">
-                  {field.description}
-                </span>
-              ) : null}
-            </button>
-            {selected ? (
-              <div className="flex items-center gap-1 border-t border-indigo-100 px-3 py-2">
-                <ActionButton
-                  label="↑"
-                  title="Move up"
-                  disabled={index === 0}
-                  onClick={() => props.onMove(-1)}
-                />
-                <ActionButton
-                  label="↓"
-                  title="Move down"
-                  disabled={index === props.builder.definition.fields.length - 1}
-                  onClick={() => props.onMove(1)}
-                />
-                <ActionButton label="Duplicate" onClick={props.onDuplicate} />
-                <ActionButton label="Remove" danger onClick={props.onRemove} />
+            {({ dragHandleRef }) => (
+              <div
+                className={`group overflow-hidden rounded-lg border transition-[border-color,box-shadow,background-color] ${
+                  selected
+                    ? "border-teal-500 bg-teal-50/50 shadow-[0_0_0_3px_rgba(13,148,136,0.14)]"
+                    : "border-gray-200 bg-white hover:border-gray-300"
+                }`}
+              >
+                <div className="flex items-stretch">
+                  <button
+                    ref={dragHandleRef}
+                    type="button"
+                    aria-label={`Drag ${field.label} to reorder`}
+                    title="Drag to reorder"
+                    onClick={() => props.onSelect(field.id)}
+                    className="w-10 shrink-0 cursor-grab border-r border-gray-100 text-lg leading-none text-gray-300 transition-colors hover:bg-gray-50 hover:text-teal-600 active:cursor-grabbing"
+                  >
+                    ⠿
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => props.onSelect(field.id)}
+                    className="min-w-0 flex-1 px-4 py-3.5 text-left"
+                  >
+                    <span className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium text-gray-900">
+                        {field.label}
+                        {field.required ? <span className="ml-1 text-teal-600">*</span> : null}
+                      </span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                        {controlLabel(field.control)}
+                      </span>
+                    </span>
+                    {field.description ? (
+                      <span className="mt-1 block text-xs leading-5 text-gray-500">
+                        {field.description}
+                      </span>
+                    ) : null}
+                  </button>
+                </div>
+                {selected ? (
+                  <div className="flex items-center gap-1 border-t border-teal-100 px-3 py-2">
+                    <ActionButton
+                      label="↑"
+                      title="Move up"
+                      disabled={index === 0}
+                      onClick={() => props.onMove(-1)}
+                    />
+                    <ActionButton
+                      label="↓"
+                      title="Move down"
+                      disabled={index === props.builder.definition.fields.length - 1}
+                      onClick={() => props.onMove(1)}
+                    />
+                    <ActionButton label="Duplicate" onClick={props.onDuplicate} />
+                    <ActionButton label="Remove" danger onClick={props.onRemove} />
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
+            )}
+          </DraggableField>
         )
       })}
     </div>
@@ -907,7 +641,7 @@ function FieldInspector(props: BuilderLayoutProps & { readonly expanded?: boolea
           type="checkbox"
           checked={field.required}
           onChange={(event) => props.onEdit({ required: event.target.checked })}
-          className="h-4 w-4 rounded border-gray-300 accent-indigo-600"
+          className="h-4 w-4 rounded border-gray-300 accent-teal-600"
         />
       </label>
 
@@ -1013,7 +747,7 @@ function RespondentPreview({ definition }: { readonly definition: FormDefinition
         }}
         className="mx-auto max-w-xl rounded-2xl bg-white px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10 sm:py-10"
       >
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-600">
           Enterprise sales
         </p>
         <h2 className="mt-3 text-2xl font-semibold tracking-tight text-gray-950">
@@ -1032,7 +766,7 @@ function RespondentPreview({ definition }: { readonly definition: FormDefinition
                   className="mb-2 block text-sm font-medium text-gray-900"
                 >
                   {field.label}
-                  {field.required ? <span className="ml-1 text-indigo-600">*</span> : null}
+                  {field.required ? <span className="ml-1 text-teal-600">*</span> : null}
                 </label>
               )}
               <PreviewInput
@@ -1050,7 +784,7 @@ function RespondentPreview({ definition }: { readonly definition: FormDefinition
 
         <button
           type="submit"
-          className="mt-8 w-full rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          className="mt-8 w-full rounded-lg bg-teal-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2"
         >
           {definition.submitLabel}
         </button>
@@ -1080,7 +814,7 @@ function PreviewInput({
   readonly id?: string
   readonly large?: boolean
 }) {
-  const inputClass = `w-full border-0 border-b bg-transparent px-0 text-gray-950 outline-none transition-colors placeholder:text-gray-400 focus:border-indigo-600 focus:ring-0 ${
+  const inputClass = `w-full border-0 border-b bg-transparent px-0 text-gray-950 outline-none transition-colors placeholder:text-gray-400 focus:border-teal-600 focus:ring-0 ${
     large ? "border-gray-400 py-3 text-lg" : "border-gray-300 py-2.5 text-sm"
   }`
 
@@ -1126,11 +860,11 @@ function PreviewInput({
             required={field.required}
             checked={Boolean(value)}
             onChange={(event) => onChange(event.target.checked)}
-            className="mt-1 h-4 w-4 rounded border-gray-300 accent-indigo-600"
+            className="mt-1 h-4 w-4 rounded border-gray-300 accent-teal-600"
           />
           <span>
             {field.label}
-            {field.required ? <span className="ml-1 text-indigo-600">*</span> : null}
+            {field.required ? <span className="ml-1 text-teal-600">*</span> : null}
           </span>
         </label>
       )
@@ -1215,7 +949,7 @@ function DefinitionView({ definition }: { readonly definition: FormDefinition })
           </pre>
           <div className="mt-6 border-t border-slate-800 pt-5 text-xs leading-5 text-slate-400">
             Routing can evaluate fields directly, for example:
-            <code className="mt-2 block rounded bg-slate-900 px-3 py-2 text-indigo-300">
+            <code className="mt-2 block rounded bg-slate-900 px-3 py-2 text-teal-300">
               submission.employees &gt;= 500 &amp;&amp; submission.country === &quot;UK&quot;
             </code>
           </div>
@@ -1238,7 +972,7 @@ function TextSetting({
   readonly mono?: boolean
   readonly multiline?: boolean
 }) {
-  const className = `w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 ${
+  const className = `w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-teal-500 focus:ring-2 focus:ring-teal-100 ${
     mono ? "font-mono text-xs" : ""
   }`
 
@@ -1286,7 +1020,7 @@ function NumberSetting({
         onBlur={(event) =>
           onCommit(event.target.value === "" ? undefined : event.target.valueAsNumber)
         }
-        className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+        className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
       />
     </label>
   )

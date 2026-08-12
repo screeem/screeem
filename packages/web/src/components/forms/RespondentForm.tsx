@@ -91,7 +91,7 @@ export function RespondentForm({
                         >
                           {definitionField.label}
                           {definitionField.required ? (
-                            <span className="ml-1 text-indigo-600" aria-hidden="true">
+                            <span className="ml-1 text-teal-600" aria-hidden="true">
                               *
                             </span>
                           ) : null}
@@ -146,7 +146,7 @@ export function RespondentForm({
           <button
             type="submit"
             disabled={!canSubmit || isSubmitting}
-            className="mt-8 w-full rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-indigo-700 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-8 w-full rounded-lg bg-teal-600 px-4 py-3 text-sm font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-teal-700 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSubmitting ? "Sending…" : definition.submitLabel}
           </button>
@@ -171,9 +171,10 @@ function DefaultControl({
     disabled,
     "aria-describedby": describedBy,
     "aria-invalid": invalid,
+    "aria-required": field.required,
     onBlur,
     className:
-      "w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-950 outline-none transition-[border-color,box-shadow] focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-gray-50",
+      "w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-950 outline-none transition-[border-color,box-shadow] focus:border-teal-500 focus:ring-2 focus:ring-teal-100 disabled:bg-gray-50",
   }
 
   switch (field.control) {
@@ -214,14 +215,15 @@ function DefaultControl({
             disabled={disabled}
             aria-describedby={describedBy}
             aria-invalid={invalid}
+            aria-required={field.required}
             onBlur={onBlur}
             onChange={(event) => onChange(event.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-indigo-600"
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-teal-600"
           />
           <span>
             {field.label}
             {field.required ? (
-              <span className="ml-1 text-indigo-600" aria-hidden="true">
+              <span className="ml-1 text-teal-600" aria-hidden="true">
                 *
               </span>
             ) : null}

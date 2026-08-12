@@ -3,12 +3,20 @@ import { NextResponse, type NextRequest } from "next/server"
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const isEncodedDevelopmentPlayground =
+    process.env.NODE_ENV !== "production" && /^\/%5fdev(?:\/|$)/i.test(pathname)
   const isDevelopmentPlayground =
-    process.env.NODE_ENV !== "production" && (pathname === "/_dev" || pathname.startsWith("/_dev/"))
+    process.env.NODE_ENV !== "production" && /^\/(?:_dev|%5fdev)(?:\/|$)/i.test(pathname)
   const isPublicFormSubmissionRoute = /^\/api\/forms\/[^/]+\/submissions\/?$/.test(pathname)
   const isPublicFormDefinitionRoute = /^\/api\/forms\/[^/]+\/?$/.test(pathname)
   const isHostedFormRoute = /^\/forms\/[^/]+\/?$/.test(pathname)
   const isPublicApiRoute = pathname === "/api/openapi" || pathname.startsWith("/api/v1/")
+
+  if (isEncodedDevelopmentPlayground) {
+    const playgroundUrl = request.nextUrl.clone()
+    playgroundUrl.pathname = pathname.replace(/^\/%5fdev/i, "/_dev")
+    return NextResponse.redirect(playgroundUrl)
+  }
 
   if (
     isDevelopmentPlayground ||

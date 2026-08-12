@@ -23,6 +23,7 @@ import {
 } from "@screeem/forms"
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { DraggableField } from "../../../../components/forms/DraggableField"
 import { RespondentForm } from "../../../../components/forms/RespondentForm"
 
 type EditorView = "build" | "preview"
@@ -90,46 +91,50 @@ export function FormEditor({
     let cancelled = false
     async function load() {
       setError("")
-      const response = await fetch(`/api/teams/${teamId}/forms/${formId}/draft`)
-      const body = await readBody(response)
-      if (cancelled) return
-      if (!response.ok) {
-        setError(readError(body, "Could not load this form"))
-        return
+      try {
+        const response = await fetch(`/api/teams/${teamId}/forms/${formId}/draft`)
+        const body = await readBody(response)
+        if (cancelled) return
+        if (!response.ok) {
+          setError(readError(body, "Could not load this form"))
+          return
+        }
+        const draft = body.draft !== undefined ? body.draft : body.form?.draft
+        const loadedForm = {
+          ...(body.form ?? { id: formId, name: draft?.definition?.title ?? "Form" }),
+          availability: body.availability ?? body.form?.availability,
+          published_version: body.publishedVersion ?? body.form?.published_version ?? null,
+        }
+        if (body.legacy === true && draft === null) {
+          const definition = createFormDefinition(initialName?.trim() || "Untitled form")
+          setForm({
+            id: formId,
+            name: initialName?.trim() || "Untitled form",
+            availability: body.availability,
+            published_version: body.publishedVersion,
+          })
+          setBuilder(createBuilderState(definition, 0))
+          setDraftExists(false)
+          setPublishedRevision(null)
+          setStatus("New structured draft")
+          return
+        }
+        if (!draft?.definition || typeof draft.revision !== "number") {
+          setError("The form draft response is incomplete")
+          return
+        }
+        setForm(loadedForm as LoadedForm)
+        setBuilder(createBuilderState(draft.definition as FormDefinition, draft.revision))
+        setDraftExists(true)
+        setPublishedRevision(
+          typeof body.lastPublishedDraftRevision === "number"
+            ? body.lastPublishedDraftRevision
+            : null,
+        )
+        setStatus(`Draft revision ${draft.revision}`)
+      } catch {
+        if (!cancelled) setError("Could not load this form")
       }
-      const draft = body.draft !== undefined ? body.draft : body.form?.draft
-      const loadedForm = {
-        ...(body.form ?? { id: formId, name: draft?.definition?.title ?? "Form" }),
-        availability: body.availability ?? body.form?.availability,
-        published_version: body.publishedVersion ?? body.form?.published_version ?? null,
-      }
-      if (body.legacy === true && draft === null) {
-        const definition = createFormDefinition(initialName?.trim() || "Untitled form")
-        setForm({
-          id: formId,
-          name: initialName?.trim() || "Untitled form",
-          availability: body.availability,
-          published_version: body.publishedVersion,
-        })
-        setBuilder(createBuilderState(definition, 0))
-        setDraftExists(false)
-        setPublishedRevision(null)
-        setStatus("New structured draft")
-        return
-      }
-      if (!draft?.definition || typeof draft.revision !== "number") {
-        setError("The form draft response is incomplete")
-        return
-      }
-      setForm(loadedForm as LoadedForm)
-      setBuilder(createBuilderState(draft.definition as FormDefinition, draft.revision))
-      setDraftExists(true)
-      setPublishedRevision(
-        typeof body.lastPublishedDraftRevision === "number"
-          ? body.lastPublishedDraftRevision
-          : null,
-      )
-      setStatus(`Draft revision ${draft.revision}`)
     }
     void load()
     return () => {
@@ -188,6 +193,10 @@ export function FormEditor({
     )
   }
 
+  function reorderField(fieldId: string, targetIndex: number) {
+    commit((definition) => moveField(definition, fieldId, targetIndex), fieldId)
+  }
+
   function duplicateSelected() {
     if (!selectedField) return
     const id = `${formId}-field-${Date.now()}-${idCounter.current++}`
@@ -208,29 +217,35 @@ export function FormEditor({
     setBusy("save")
     setError("")
     setIssues([])
-    const response = await fetch(`/api/teams/${teamId}/forms/${formId}/draft`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        expectedRevision: builder.baseRevision,
-        definition: builder.definition,
-      }),
-    })
-    const body = await readBody(response)
-    setBusy(null)
-    if (!response.ok) {
-      applyResponseError(body, "Could not save the draft", setError, setIssues)
+    try {
+      const response = await fetch(`/api/teams/${teamId}/forms/${formId}/draft`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedRevision: builder.baseRevision,
+          definition: builder.definition,
+        }),
+      })
+      const body = await readBody(response)
+      if (!response.ok) {
+        applyResponseError(body, "Could not save the draft", setError, setIssues)
+        return null
+      }
+      const draft = body.draft
+      if (!draft || typeof draft.revision !== "number") {
+        setError("The save response did not include a revision")
+        return null
+      }
+      setBuilder((current) => (current ? markBuilderSaved(current, draft.revision) : current))
+      setDraftExists(true)
+      setStatus(`Draft saved · revision ${draft.revision}`)
+      return draft.revision
+    } catch {
+      setError("Could not save the draft")
       return null
+    } finally {
+      setBusy(null)
     }
-    const draft = body.draft
-    if (!draft || typeof draft.revision !== "number") {
-      setError("The save response did not include a revision")
-      return null
-    }
-    setBuilder((current) => (current ? markBuilderSaved(current, draft.revision) : current))
-    setDraftExists(true)
-    setStatus(`Draft saved · revision ${draft.revision}`)
-    return draft.revision
   }
 
   async function publish() {
@@ -239,35 +254,40 @@ export function FormEditor({
     setBusy("publish")
     setError("")
     setIssues([])
-    const response = await fetch(`/api/teams/${teamId}/forms/${formId}/publish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expectedRevision: revision }),
-    })
-    const body = await readBody(response)
-    setBusy(null)
-    if (!response.ok) {
-      applyResponseError(body, "Could not publish the form", setError, setIssues)
-      return
+    try {
+      const response = await fetch(`/api/teams/${teamId}/forms/${formId}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedRevision: revision }),
+      })
+      const body = await readBody(response)
+      if (!response.ok) {
+        applyResponseError(body, "Could not publish the form", setError, setIssues)
+        return
+      }
+      const published = body.published
+      if (!published || typeof published.version !== "number") {
+        setError("The publish response did not include a version")
+        return
+      }
+      const availability = body.availability === "paused" ? "paused" : "active"
+      setForm((current) =>
+        current
+          ? {
+              ...current,
+              availability,
+              is_active: availability === "active",
+              published_version: published.version,
+            }
+          : current,
+      )
+      setPublishedRevision(revision)
+      setStatus(`Published · version ${published.version}`)
+    } catch {
+      setError("Could not publish the form")
+    } finally {
+      setBusy(null)
     }
-    const published = body.published
-    if (!published || typeof published.version !== "number") {
-      setError("The publish response did not include a version")
-      return
-    }
-    const availability = body.availability === "paused" ? "paused" : "active"
-    setForm((current) =>
-      current
-        ? {
-            ...current,
-            availability,
-            is_active: availability === "active",
-            published_version: published.version,
-          }
-        : current,
-    )
-    setPublishedRevision(revision)
-    setStatus(`Published · version ${published.version}`)
   }
 
   if (error && !builder) {
@@ -336,7 +356,7 @@ export function FormEditor({
                 busy !== null || (publishedRevision === builder.baseRevision && !builder.dirty)
               }
               onClick={() => void publish()}
-              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
             >
               {busy === "publish"
                 ? "Publishing…"
@@ -407,62 +427,90 @@ export function FormEditor({
                   {builder.definition.fields.map((field, index) => {
                     const selected = field.id === builder.selectedFieldId
                     return (
-                      <div
+                      <DraggableField
                         key={field.id}
-                        className={`rounded-lg border bg-white transition-all ${selected ? "border-indigo-500 shadow-[0_0_0_3px_rgba(99,102,241,0.12)]" : "border-gray-200 hover:border-gray-300"}`}
+                        fieldId={field.id}
+                        index={index}
+                        onReorder={reorderField}
                       >
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setBuilder((current) =>
-                              current ? selectBuilderField(current, field.id) : current,
-                            )
-                          }
-                          className="w-full px-4 py-3.5 text-left"
-                        >
-                          <span className="flex items-center justify-between gap-3">
-                            <span className="text-sm font-medium text-gray-900">
-                              {field.label}
-                              {field.required ? (
-                                <span className="ml-1 text-indigo-600">*</span>
-                              ) : null}
-                            </span>
-                            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                              {controlLabel(field.control)}
-                            </span>
-                          </span>
-                          {field.description ? (
-                            <span className="mt-1 block text-xs leading-5 text-gray-500">
-                              {field.description}
-                            </span>
-                          ) : null}
-                        </button>
-                        {selected ? (
-                          <div className="flex items-center gap-1 border-t border-indigo-100 px-3 py-2">
-                            <MiniButton
-                              label="↑"
-                              title="Move up"
-                              disabled={index === 0}
-                              onClick={() => moveSelected(-1)}
-                            />
-                            <MiniButton
-                              label="↓"
-                              title="Move down"
-                              disabled={index === builder.definition.fields.length - 1}
-                              onClick={() => moveSelected(1)}
-                            />
-                            <MiniButton label="Duplicate" onClick={duplicateSelected} />
-                            <MiniButton label="Remove" danger onClick={removeSelected} />
+                        {({ dragHandleRef }) => (
+                          <div
+                            className={`rounded-lg border bg-white transition-[border-color,box-shadow] ${
+                              selected
+                                ? "border-teal-500 shadow-[0_0_0_3px_rgba(13,148,136,0.14)]"
+                                : "border-gray-200 hover:border-gray-300"
+                            }`}
+                          >
+                            <div className="flex items-stretch">
+                              <button
+                                ref={dragHandleRef}
+                                type="button"
+                                aria-label={`Drag ${field.label} to reorder`}
+                                title="Drag to reorder"
+                                onClick={() =>
+                                  setBuilder((current) =>
+                                    current ? selectBuilderField(current, field.id) : current,
+                                  )
+                                }
+                                className="w-10 shrink-0 cursor-grab border-r border-gray-100 text-lg leading-none text-gray-300 transition-colors hover:bg-gray-50 hover:text-teal-600 active:cursor-grabbing"
+                              >
+                                ⠿
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setBuilder((current) =>
+                                    current ? selectBuilderField(current, field.id) : current,
+                                  )
+                                }
+                                className="min-w-0 flex-1 px-4 py-3.5 text-left"
+                              >
+                                <span className="flex items-center justify-between gap-3">
+                                  <span className="text-sm font-medium text-gray-900">
+                                    {field.label}
+                                    {field.required ? (
+                                      <span className="ml-1 text-teal-600">*</span>
+                                    ) : null}
+                                  </span>
+                                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                                    {controlLabel(field.control)}
+                                  </span>
+                                </span>
+                                {field.description ? (
+                                  <span className="mt-1 block text-xs leading-5 text-gray-500">
+                                    {field.description}
+                                  </span>
+                                ) : null}
+                              </button>
+                            </div>
+                            {selected ? (
+                              <div className="flex items-center gap-1 border-t border-teal-100 px-3 py-2">
+                                <MiniButton
+                                  label="↑"
+                                  title="Move up"
+                                  disabled={index === 0}
+                                  onClick={() => moveSelected(-1)}
+                                />
+                                <MiniButton
+                                  label="↓"
+                                  title="Move down"
+                                  disabled={index === builder.definition.fields.length - 1}
+                                  onClick={() => moveSelected(1)}
+                                />
+                                <MiniButton label="Duplicate" onClick={duplicateSelected} />
+                                <MiniButton label="Remove" danger onClick={removeSelected} />
+                              </div>
+                            ) : null}
                           </div>
-                        ) : null}
-                      </div>
+                        )}
+                      </DraggableField>
                     )
                   })}
                   {builder.definition.fields.length === 0 ? (
                     <button
                       type="button"
                       onClick={() => addControl("text")}
-                      className="w-full rounded-lg border border-dashed border-gray-300 px-4 py-10 text-sm text-gray-500 hover:border-indigo-400 hover:text-indigo-600"
+                      className="w-full rounded-lg border border-dashed border-gray-300 px-4 py-10 text-sm text-gray-500 hover:border-teal-400 hover:text-teal-600"
                     >
                       Add your first field
                     </button>
@@ -550,7 +598,7 @@ function Inspector({
           type="checkbox"
           checked={field.required}
           onChange={(event) => onEdit({ required: event.target.checked })}
-          className="h-4 w-4 rounded accent-indigo-600"
+          className="h-4 w-4 rounded accent-teal-600"
         />
       </label>
       {field.type === "number" ? (
@@ -615,7 +663,7 @@ function EditorPreview({ definition }: { readonly definition: FormDefinition }) 
   return (
     <section className="rounded-xl border border-gray-200 bg-[#ebe9e4] px-4 py-10 sm:px-10">
       <div className="mx-auto max-w-xl rounded-2xl bg-white px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10">
-        <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">
+        <p className="text-xs font-semibold uppercase tracking-wider text-teal-600">
           Respondent preview
         </p>
         <h2 className="mt-3 text-2xl font-semibold text-gray-950">{definition.title}</h2>
@@ -662,7 +710,7 @@ function TextDraft({
     ? "w-full border-0 bg-transparent p-0 text-xl font-semibold text-gray-950 outline-none focus:ring-0"
     : subtle
       ? "mt-2 w-full resize-none border-0 bg-transparent p-0 text-sm leading-5 text-gray-500 outline-none focus:ring-0"
-      : `w-full rounded-md border border-gray-200 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 ${mono ? "font-mono text-xs" : ""}`
+      : `w-full rounded-md border border-gray-200 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100 ${mono ? "font-mono text-xs" : ""}`
   return (
     <label className={heading || subtle ? "block" : "block text-xs font-medium text-gray-600"}>
       {heading || subtle ? (
@@ -710,7 +758,7 @@ function NumberDraft({
         onBlur={(event) =>
           onCommit(event.target.value === "" ? undefined : event.target.valueAsNumber)
         }
-        className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+        className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm outline-none focus:border-teal-500"
       />
     </label>
   )
@@ -774,10 +822,7 @@ function LoadState({ title, detail }: { readonly title: string; readonly detail:
     <div className="py-16 text-center">
       <h1 className="text-lg font-semibold text-gray-950">{title}</h1>
       <p className="mt-2 text-sm text-gray-500">{detail}</p>
-      <Link
-        href="/dashboard/forms"
-        className="mt-5 inline-flex text-sm font-medium text-indigo-600"
-      >
+      <Link href="/dashboard/forms" className="mt-5 inline-flex text-sm font-medium text-teal-600">
         Back to forms
       </Link>
     </div>
