@@ -13,6 +13,7 @@ import {
   SubmissionAlreadyExistsError,
   snapshotFormDefinition,
   snapshotFormRoutingDefinition,
+  snapshotSubmissionRoutingResult,
   type FormAvailability,
   type FormDefinition,
   type FormDefinitionStore,
@@ -24,6 +25,8 @@ import {
   type PublishedAvailability,
   type PublishedForm,
   type StoredSubmission,
+  type SubmissionListOptions,
+  type SubmissionRoutingResult,
 } from "@screeem/forms"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
@@ -55,6 +58,10 @@ type SubmissionRow = {
   form_id: string
   publication_version: number | string | null
   payload: unknown
+  routing_status: string
+  routing_route: string | null
+  matched_rule_id: string | null
+  routing_error: string | null
   created_at: string
 }
 
@@ -98,6 +105,17 @@ export function mapPublishedForm(row: PublishedRow): PublishedForm {
 
 /** Maps a stored normalized submission without returning its JSON reference. */
 export function mapStoredSubmission(row: SubmissionRow): StoredSubmission {
+  let routing: SubmissionRoutingResult
+  try {
+    routing = snapshotSubmissionRoutingResult({
+      status: row.routing_status,
+      route: row.routing_route,
+      matchedRule: row.matched_rule_id,
+      error: row.routing_error,
+    })
+  } catch {
+    throw new FormsError("invalid_stored_submission", "Stored submission routing is invalid")
+  }
   return Object.freeze({
     id: row.id,
     formId: row.form_id,
@@ -106,6 +124,7 @@ export function mapStoredSubmission(row: SubmissionRow): StoredSubmission {
         ? null
         : parseInteger(row.publication_version, "publication version"),
     values: snapshotValues(row.payload),
+    routing,
     createdAt: row.created_at,
   })
 }
@@ -298,6 +317,10 @@ export class SupabaseFormSubmissionStore implements FormSubmissionStore {
         form_id: safe.formId,
         publication_version: safe.publicationVersion,
         payload: safe.values,
+        routing_status: safe.routing.status,
+        routing_route: safe.routing.route,
+        matched_rule_id: safe.routing.matchedRule,
+        routing_error: safe.routing.error,
         created_at: safe.createdAt,
       })
       .select(SUBMISSION_COLUMNS)
@@ -309,14 +332,20 @@ export class SupabaseFormSubmissionStore implements FormSubmissionStore {
     return mapStoredSubmission(data as SubmissionRow)
   }
 
-  async list(formId: string): Promise<readonly StoredSubmission[]> {
+  async list(
+    formId: string,
+    options: SubmissionListOptions = {},
+  ): Promise<readonly StoredSubmission[]> {
     await this.requireTeamForm(formId)
-    const { data, error } = await this.client
+    const route = snapshotRouteFilter(options.route)
+    let query = this.client
       .from("form_submissions")
       .select(SUBMISSION_COLUMNS)
       .eq("team_id", this.teamId)
       .eq("form_id", formId)
       .order("created_at", { ascending: false })
+    if (route !== undefined) query = query.eq("routing_route", route)
+    const { data, error } = await query
     if (error) throw new FormsError("submission_store_error", error.message)
     return Object.freeze(((data ?? []) as SubmissionRow[]).map(mapStoredSubmission))
   }
@@ -335,7 +364,8 @@ export class SupabaseFormSubmissionStore implements FormSubmissionStore {
 
 const FORM_COLUMNS =
   "id, definition_availability, draft_definition, routing_draft, draft_revision, published_version"
-const SUBMISSION_COLUMNS = "id, form_id, publication_version, payload, created_at"
+const SUBMISSION_COLUMNS =
+  "id, form_id, publication_version, payload, routing_status, routing_route, matched_rule_id, routing_error, created_at"
 
 function mapDatabaseError(
   error: { message: string },
@@ -386,13 +416,28 @@ function readString(value: Record<string, unknown>, key: string): string {
 }
 
 function snapshotSubmission(submission: StoredSubmission): StoredSubmission {
+  let routing: SubmissionRoutingResult
+  try {
+    routing = snapshotSubmissionRoutingResult(submission.routing)
+  } catch {
+    throw invalidStoredSubmission("Submission routing result is invalid")
+  }
   return Object.freeze({
     id: submission.id,
     formId: submission.formId,
     publicationVersion: submission.publicationVersion,
     values: snapshotValues(submission.values),
+    routing,
     createdAt: submission.createdAt,
   })
+}
+
+function snapshotRouteFilter(route: string | undefined): string | undefined {
+  if (route === undefined) return undefined
+  if (typeof route !== "string" || route.length > 256) {
+    throw new TypeError("Submission route filter is invalid")
+  }
+  return route
 }
 
 function snapshotValues(value: unknown): Readonly<Record<string, string | number | boolean>> {
