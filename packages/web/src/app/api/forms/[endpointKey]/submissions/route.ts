@@ -10,6 +10,7 @@ import {
 } from "@/lib/forms/public"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { validateSubmission, type SubmissionSchema } from "@/lib/forms/schema"
+import { qualifySubmission, type QualificationResult } from "@/lib/forms/qualification"
 
 const MAX_BYTES = 64 * 1024
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
@@ -94,6 +95,7 @@ async function structuredSubmission(
   published: {
     readonly version: number
     readonly definition: FormDefinition
+    readonly routing: import("@screeem/forms").FormRoutingDefinition | null
   },
   origin: string | null,
   headers: Record<string, string>,
@@ -121,6 +123,20 @@ async function structuredSubmission(
     return invalidSubmission(result.left, headers)
   }
 
+  let qualification: QualificationResult | null
+  try {
+    qualification = await qualifySubmission(
+      published.definition,
+      published.routing,
+      result.right,
+    )
+  } catch {
+    return NextResponse.json(
+      { error: "Could not qualify submission" },
+      { status: 500, headers },
+    )
+  }
+
   const saved = await saveActiveSubmission(
     admin,
     form.id,
@@ -128,11 +144,12 @@ async function structuredSubmission(
     result.right,
     origin,
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
+    qualification,
   )
   if (saved === "unavailable") return unavailable(headers)
   if (saved === "rate-limited") return rateLimited(headers)
   if (saved === "failed") return saveFailure(headers)
-  return success(request, form.successUrl, headers, published.version)
+  return success(request, form.successUrl, headers, published.version, qualification)
 }
 
 async function legacySubmission(
@@ -171,6 +188,7 @@ async function legacySubmission(
     parsed.payload,
     origin,
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
+    null,
   )
   if (saved === "unavailable") return unavailable(headers)
   if (saved === "rate-limited") return rateLimited(headers)
@@ -373,6 +391,7 @@ async function saveActiveSubmission(
   payload: unknown,
   origin: string | null,
   userAgent: string | null,
+  qualification: QualificationResult | null,
 ): Promise<"saved" | "unavailable" | "rate-limited" | "failed"> {
   const { error } = await admin.rpc("save_form_submission_if_active", {
     target_form_id: formId,
@@ -380,6 +399,8 @@ async function saveActiveSubmission(
     new_payload: payload,
     submission_origin: origin,
     submission_user_agent: userAgent,
+    new_qualification_route: qualification?.route ?? null,
+    new_qualification_matched_rule: qualification?.matchedRule ?? null,
   })
   if (!error) return "saved"
   if (
@@ -397,6 +418,7 @@ function success(
   successUrl: string | null,
   headers: Record<string, string>,
   publicationVersion?: number,
+  qualification?: QualificationResult | null,
 ) {
   if (successUrl && !request.headers.get("accept")?.includes("application/json")) {
     return NextResponse.redirect(successUrl, 303)
@@ -405,6 +427,9 @@ function success(
     {
       ok: true,
       ...(publicationVersion === undefined ? {} : { publicationVersion }),
+      ...(qualification === null || qualification === undefined
+        ? {}
+        : { qualification }),
       ...(successUrl === null ? {} : { redirectTo: successUrl }),
     },
     { status: 201, headers },
