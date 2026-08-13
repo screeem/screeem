@@ -67,26 +67,47 @@ supabase/
 - **Model Context Protocol** — MCP SDK for tool and resource registration
 - **Vite + vite-plugin-singlefile** — bundles the preview UI into a single inline HTML file
 - **Drizzle** — database schema management
-## Local Docker stack
 
-The local stack runs the production Next.js image against Supabase's Dockerized PostgreSQL, Auth, and REST services. Docker host networking is used so the browser and server resolve the same local Supabase URL; this workflow currently targets Linux.
+## Local development
 
-Start the migrated database and web app:
+Docker provides PostgreSQL, Auth, REST, Studio, Mailpit, and the other local Supabase services. The Next.js development server runs on the host so the same commands work on macOS and Linux and development-only pages remain available.
 
-```bash
-pnpm docker:up
-```
-
-Open `http://localhost:3000`. Supabase Studio remains available at `http://localhost:54323`.
-
-Reset the database, apply every migration, run the pgTAP database tests, and run the web TypeScript/Vitest suite inside the test image:
+The first setup needs internet access to download locked pnpm packages and Docker images:
 
 ```bash
-pnpm docker:test
+make setup
 ```
 
-Stop the app and local Supabase containers:
+After that, the package store and images are cached locally. Check that the machine is ready for disconnected work with:
 
 ```bash
-pnpm docker:down
+make offline-check
 ```
+
+Run only the visual form and routing playground when you do not need accounts or persistence:
+
+```bash
+make playground
+```
+
+Open [http://localhost:3000/_dev/form-builder](http://localhost:3000/_dev/form-builder). This route exists only in the development server. Use the Build and Routing tabs to add fields, drag fields and rules into a new order, test sample submissions, and inspect the generated JSON.
+
+Run the full local application with Dockerized dependencies:
+
+```bash
+make dev
+```
+
+The app is at `http://localhost:3000`, the playground uses the URL above, and Supabase Studio is at `http://127.0.0.1:54323`. Local Supabase credentials are generated into the ignored `packages/web/.env.local` file.
+
+Useful commands:
+
+```bash
+make help          # show every target
+make infra-status  # show local service URLs
+make db-reset      # replace local data with current migrations and seed data
+make test          # run forms, web, and database tests
+make infra-down    # stop local Supabase; downloaded images remain cached
+```
+
+`make docker-build`, `make docker-up`, and `make docker-test` retain the production-image workflow. The production image intentionally excludes `/_dev`, so use `make playground` for visual review.

@@ -21,7 +21,7 @@ COPY . .
 
 FROM source AS test
 ENV NODE_ENV=test
-CMD ["sh", "-c", "pnpm --filter @screeem/forms build && pnpm --filter @screeem/forms-react build && pnpm --filter @screeem/web exec tsc --noEmit && pnpm --filter @screeem/web test"]
+CMD ["sh", "-c", "pnpm --filter @screeem/routing build && pnpm --filter @screeem/forms build && pnpm --filter @screeem/forms-react build && pnpm --filter @screeem/routing test && pnpm --filter @screeem/forms test && pnpm --filter @screeem/forms-react test && pnpm --filter @screeem/web exec tsc --noEmit && pnpm --filter @screeem/web test"]
 
 FROM source AS build
 ARG NEXT_PUBLIC_SUPABASE_URL
@@ -31,7 +31,8 @@ ENV SCREEEM_DOCKER_BUILD=1
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
-RUN pnpm --filter @screeem/forms build \
+RUN pnpm --filter @screeem/routing build \
+  && pnpm --filter @screeem/forms build \
   && pnpm --filter @screeem/forms-react build \
   && pnpm --filter @screeem/web build
 
