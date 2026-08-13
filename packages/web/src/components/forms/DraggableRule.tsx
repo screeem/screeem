@@ -13,11 +13,13 @@ import { useEffect, useRef, useState, type ReactNode, type RefObject } from "rea
 export function DraggableRule({
   ruleId,
   index,
+  disabled = false,
   onReorder,
   children,
 }: {
   readonly ruleId: string
   readonly index: number
+  readonly disabled?: boolean
   readonly onReorder: (ruleId: string, targetIndex: number) => void
   readonly children: (state: {
     readonly dragHandleRef: RefObject<HTMLButtonElement | null>
@@ -37,7 +39,7 @@ export function DraggableRule({
   useEffect(() => {
     const element = ruleRef.current
     const dragHandle = dragHandleRef.current
-    if (!element || !dragHandle) return
+    if (!element || !dragHandle || disabled) return
 
     const data = { type: "routing-rule", ruleId, index }
     return combine(
@@ -78,7 +80,7 @@ export function DraggableRule({
         },
       }),
     )
-  }, [index, ruleId])
+  }, [disabled, index, ruleId])
 
   return (
     <div
