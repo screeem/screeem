@@ -48,6 +48,8 @@ Routing definitions are limited to 3 MiB of UTF-8 JSON.
 
 Use the included in-memory stores for tests and prototypes, or implement the public store interfaces for your infrastructure. The `@screeem/forms/testing` export provides contract runners that check custom adapters against the same revision, routing compilation, publication, and immutability behavior as the in-memory stores.
 
+Stored submissions include a routing outcome: `matched`, `fallback`, `not_configured`, or `failed`. Submission stores can list every response for a form or filter by its selected route.
+
 ## Supported controls
 
 - text, email, and textarea (`string`)

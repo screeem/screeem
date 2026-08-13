@@ -1,8 +1,9 @@
 "use client"
 
+import type { SubmissionRoutingStatus } from "@screeem/forms"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 type FormView = {
   id: string
@@ -26,6 +27,10 @@ type Submission = {
   origin: string | null
   created_at: string
   publication_version?: number | null
+  routing_status: SubmissionRoutingStatus
+  routing_route: string | null
+  matched_rule_id: string | null
+  routing_error: string | null
 }
 
 interface FormsApiBody {
@@ -33,13 +38,20 @@ interface FormsApiBody {
   readonly form?: FormView
   readonly forms?: FormView[]
   readonly submissions?: Submission[]
+  readonly routes?: string[]
 }
 
 export function Forms({ teamId, canManage }: { teamId: string; canManage: boolean }) {
+  return <FormsForTeam key={teamId} teamId={teamId} canManage={canManage} />
+}
+
+function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolean }) {
   const router = useRouter()
   const [forms, setForms] = useState<FormView[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
+  const [submissionRoutes, setSubmissionRoutes] = useState<string[]>([])
+  const [routeFilter, setRouteFilter] = useState("")
   const [name, setName] = useState("")
   const [allowedOrigin, setAllowedOrigin] = useState("")
   const [successUrl, setSuccessUrl] = useState("")
@@ -48,6 +60,7 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
   const [showCreate, setShowCreate] = useState(false)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const submissionRequest = useRef(0)
 
   useEffect(() => {
     let isCancelled = false
@@ -106,18 +119,29 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
 
   async function loadSubmissions(formId: string) {
     if (selected === formId) {
+      submissionRequest.current += 1
       setSelected(null)
       return
     }
     setSelected(formId)
+    setRouteFilter("")
+    await fetchSubmissions(formId, "")
+  }
+
+  async function fetchSubmissions(formId: string, route: string) {
+    const requestId = submissionRequest.current + 1
+    submissionRequest.current = requestId
     setError("")
     try {
-      const response = await fetch(`/api/teams/${teamId}/forms/${formId}/submissions`)
+      const query = route ? `?route=${encodeURIComponent(route)}` : ""
+      const response = await fetch(`/api/teams/${teamId}/forms/${formId}/submissions${query}`)
       const body = await readBody(response)
+      if (requestId !== submissionRequest.current) return
       if (!response.ok) return setError(readError(body, "Could not load submissions"))
       setSubmissions(Array.isArray(body.submissions) ? body.submissions : [])
+      setSubmissionRoutes(Array.isArray(body.routes) ? body.routes : [])
     } catch {
-      setError("Could not load submissions")
+      if (requestId === submissionRequest.current) setError("Could not load submissions")
     }
   }
 
@@ -155,8 +179,11 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
       if (!response.ok) return setError("Could not delete form")
       setForms((items) => items.filter((item) => item.id !== form.id))
       if (selected === form.id) {
+        submissionRequest.current += 1
         setSelected(null)
         setSubmissions([])
+        setSubmissionRoutes([])
+        setRouteFilter("")
       }
     } catch {
       setError("Could not delete form")
@@ -421,7 +448,29 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
 
               {selected === form.id ? (
                 <div className="mt-5 border-t border-gray-100 pt-5">
-                  <h4 className="text-sm font-semibold text-gray-900">Recent submissions</h4>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h4 className="text-sm font-semibold text-gray-900">Recent submissions</h4>
+                    <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+                      Destination
+                      <select
+                        aria-label="Filter submissions by destination"
+                        value={routeFilter}
+                        onChange={(event) => {
+                          const route = event.target.value
+                          setRouteFilter(route)
+                          void fetchSubmissions(form.id, route)
+                        }}
+                        className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800"
+                      >
+                        <option value="">All destinations</option>
+                        {submissionRoutes.map((route) => (
+                          <option key={route} value={route}>
+                            {route}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                   <div className="mt-3 space-y-2">
                     {submissions.length === 0 ? (
                       <p className="text-sm text-gray-500">No submissions yet.</p>
@@ -437,7 +486,10 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
                               ? ` · v${submission.publication_version}`
                               : ""}
                             {submission.origin ? ` · ${submission.origin}` : ""}
+                            {submission.routing_route ? ` · ${submission.routing_route}` : ""}
+                            {submission.routing_status === "failed" ? " · Routing failed" : ""}
                           </summary>
+                          <SubmissionRouting routing={submission} />
                           <pre className="mt-3 overflow-x-auto rounded bg-gray-950 p-3 text-xs leading-5 text-gray-100">
                             {JSON.stringify(submission.payload, null, 2)}
                           </pre>
@@ -453,6 +505,28 @@ export function Forms({ teamId, canManage }: { teamId: string; canManage: boolea
       </div>
     </section>
   )
+}
+
+function SubmissionRouting({ routing }: { readonly routing: Submission }) {
+  if (routing.routing_status === "matched") {
+    return (
+      <p className="mt-3 text-xs text-gray-600">
+        Routed to <strong className="text-gray-900">{routing.routing_route}</strong> · matched{" "}
+        {routing.matched_rule_id}
+      </p>
+    )
+  }
+  if (routing.routing_status === "fallback") {
+    return (
+      <p className="mt-3 text-xs text-gray-600">
+        Routed to <strong className="text-gray-900">{routing.routing_route}</strong> · fallback
+      </p>
+    )
+  }
+  if (routing.routing_status === "failed") {
+    return <p className="mt-3 text-xs font-medium text-red-700">Routing failed</p>
+  }
+  return <p className="mt-3 text-xs text-gray-400">No routing configured</p>
 }
 
 const inputClass =

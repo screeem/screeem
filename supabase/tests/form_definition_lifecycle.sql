@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(35);
+SELECT plan(47);
 
 INSERT INTO auth.users (
   id,
@@ -180,10 +180,14 @@ SELECT is(
 
 SELECT lives_ok(
   $$
-    SELECT save_form_submission_if_active(
+    SELECT save_form_submission_with_routing_if_active(
       '20000000-0000-0000-0000-000000000001',
       2,
       '{"age": 21}'::jsonb,
+      'not_configured',
+      NULL,
+      NULL,
+      NULL,
       'https://example.com',
       'form-lifecycle-test'
     )
@@ -220,10 +224,14 @@ SELECT lives_ok(
     DO $rate_limit$
     BEGIN
       FOR submission_number IN 1..59 LOOP
-        PERFORM save_form_submission_if_active(
+        PERFORM save_form_submission_with_routing_if_active(
           '20000000-0000-0000-0000-000000000001',
           2,
           jsonb_build_object('age', 21, 'submission', submission_number),
+          'not_configured',
+          NULL,
+          NULL,
+          NULL,
           'https://example.com',
           'form-rate-limit-test'
         );
@@ -331,10 +339,14 @@ SELECT throws_ok(
 
 SELECT throws_ok(
   $$
-    SELECT save_form_submission_if_active(
+    SELECT save_form_submission_with_routing_if_active(
       '20000000-0000-0000-0000-000000000001',
       2,
       '{"age": 21}'::jsonb,
+      'not_configured',
+      NULL,
+      NULL,
+      NULL,
       'https://example.com',
       'form-rate-limit-test'
     )
@@ -343,6 +355,10 @@ SELECT throws_ok(
   'form_rate_limited',
   'the sixty-first submission in a minute is rejected'
 );
+
+UPDATE form_submissions
+SET created_at = clock_timestamp() - interval '2 minutes'
+WHERE form_id = '20000000-0000-0000-0000-000000000001';
 
 SELECT throws_ok(
   $$
@@ -382,6 +398,94 @@ SELECT is(
 
 SELECT lives_ok(
   $$
+    SELECT save_form_submission_with_routing_if_active(
+      '20000000-0000-0000-0000-000000000001',
+      3,
+      '{"age": 21}'::jsonb,
+      'matched',
+      'allow',
+      'adult',
+      NULL,
+      'https://example.com',
+      'form-routing-result-test'
+    )
+  $$,
+  'a routed submission saves against its exact publication'
+);
+
+SELECT results_eq(
+  $$
+    SELECT publication_version, routing_status, routing_route, matched_rule_id, routing_error
+    FROM form_submissions
+    WHERE form_id = '20000000-0000-0000-0000-000000000001'
+      AND user_agent = 'form-routing-result-test'
+  $$,
+  $$ VALUES (3::bigint, 'matched'::text, 'allow'::text, 'adult'::text, NULL::text) $$,
+  'the selected route and matched rule remain associated with the checked version'
+);
+
+SELECT results_eq(
+  $$
+    SELECT route
+    FROM list_form_submission_routes(
+      (SELECT team_id FROM forms WHERE id = '20000000-0000-0000-0000-000000000001'),
+      '20000000-0000-0000-0000-000000000001'
+    )
+  $$,
+  $$ VALUES ('allow'::text) $$,
+  'route filters list the tenant form destinations'
+);
+
+SELECT is(
+  (
+    SELECT count(*)
+    FROM list_form_submission_routes(
+      '00000000-0000-0000-0000-000000000099',
+      '20000000-0000-0000-0000-000000000001'
+    )
+  ),
+  0::bigint,
+  'route filters cannot cross tenant boundaries'
+);
+
+SELECT ok(
+  NOT has_function_privilege(
+    'anon',
+    'list_form_submission_routes(uuid,uuid)',
+    'EXECUTE'
+  ),
+  'anonymous callers cannot list private routing destinations'
+);
+
+SELECT ok(
+  NOT has_function_privilege(
+    'authenticated',
+    'list_form_submission_routes(uuid,uuid)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot bypass the tenant-scoped route API'
+);
+
+SELECT ok(
+  NOT has_function_privilege(
+    'anon',
+    'save_form_submission_with_routing_if_active(uuid,bigint,jsonb,text,text,text,text,text,text)',
+    'EXECUTE'
+  ),
+  'anonymous callers cannot forge stored routing results'
+);
+
+SELECT ok(
+  NOT has_function_privilege(
+    'authenticated',
+    'save_form_submission_with_routing_if_active(uuid,bigint,jsonb,text,text,text,text,text,text)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot bypass server-side routing evaluation'
+);
+
+SELECT lives_ok(
+  $$
     SELECT save_form_routing_draft(
       (SELECT id FROM teams WHERE created_by = '10000000-0000-0000-0000-000000000001'),
       '20000000-0000-0000-0000-000000000001',
@@ -390,6 +494,29 @@ SELECT lives_ok(
     )
   $$,
   'a new routing draft can be prepared after publication'
+);
+
+SELECT ok(
+  to_regprocedure('save_form_submission_if_active(uuid,bigint,jsonb,text,text)') IS NOT NULL,
+  'the previous submission RPC remains available during rolling deploys'
+);
+
+SELECT ok(
+  NOT has_function_privilege(
+    'anon',
+    'save_form_submission_if_active(uuid,bigint,jsonb,text,text)',
+    'EXECUTE'
+  ),
+  'anonymous callers cannot bypass submission validation through the previous RPC'
+);
+
+SELECT ok(
+  NOT has_function_privilege(
+    'authenticated',
+    'save_form_submission_if_active(uuid,bigint,jsonb,text,text)',
+    'EXECUTE'
+  ),
+  'authenticated clients cannot bypass submission validation through the previous RPC'
 );
 
 SELECT is(
@@ -420,6 +547,11 @@ SELECT has_index(
   'submission lists have a tenant-first index'
 );
 SELECT has_index(
+  'form_submissions',
+  'form_submissions_team_form_route_created_idx',
+  'route filters have a tenant-first index'
+);
+SELECT has_index(
   'form_definition_versions',
   'form_definition_versions_pkey',
   'published definition lookups use their tenant-first primary key'
@@ -436,10 +568,14 @@ WHERE id = '20000000-0000-0000-0000-000000000001';
 
 SELECT throws_ok(
   $$
-    SELECT save_form_submission_if_active(
+    SELECT save_form_submission_with_routing_if_active(
       '20000000-0000-0000-0000-000000000001',
       2,
       '{"age": 22}'::jsonb,
+      'not_configured',
+      NULL,
+      NULL,
+      NULL,
       'https://example.com',
       'form-lifecycle-test'
     )

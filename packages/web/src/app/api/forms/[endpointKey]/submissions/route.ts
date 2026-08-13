@@ -1,4 +1,10 @@
-import { InvalidSubmissionError, type FormDefinition } from "@screeem/forms"
+import {
+  InvalidSubmissionError,
+  notConfiguredSubmissionRouting,
+  type FormDefinition,
+  type FormRoutingDefinition,
+  type SubmissionRoutingResult,
+} from "@screeem/forms"
 import { normalizeSubmissionEffect } from "@screeem/forms/effect"
 import { Effect } from "effect"
 import { NextRequest, NextResponse } from "next/server"
@@ -10,6 +16,7 @@ import {
 } from "@/lib/forms/public"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { validateSubmission, type SubmissionSchema } from "@/lib/forms/schema"
+import { evaluatePublishedFormRouting } from "../../../../../lib/forms/routing-runtime"
 
 const MAX_BYTES = 64 * 1024
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
@@ -94,6 +101,7 @@ async function structuredSubmission(
   published: {
     readonly version: number
     readonly definition: FormDefinition
+    readonly routing: FormRoutingDefinition | null
   },
   origin: string | null,
   headers: Record<string, string>,
@@ -121,11 +129,19 @@ async function structuredSubmission(
     return invalidSubmission(result.left, headers)
   }
 
+  const routing = await evaluatePublishedFormRouting(
+    form.id,
+    published.version,
+    published.definition,
+    published.routing,
+    result.right,
+  )
   const saved = await saveActiveSubmission(
     admin,
     form.id,
     published.version,
     result.right,
+    routing,
     origin,
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
   )
@@ -169,6 +185,7 @@ async function legacySubmission(
     form.id,
     null,
     parsed.payload,
+    notConfiguredSubmissionRouting(),
     origin,
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
   )
@@ -371,16 +388,35 @@ async function saveActiveSubmission(
   formId: string,
   publicationVersion: number | null,
   payload: unknown,
+  routing: SubmissionRoutingResult,
   origin: string | null,
   userAgent: string | null,
 ): Promise<"saved" | "unavailable" | "rate-limited" | "failed"> {
-  const { error } = await admin.rpc("save_form_submission_if_active", {
+  const routedArguments = {
     target_form_id: formId,
     expected_publication_version: publicationVersion,
     new_payload: payload,
+    submission_routing_status: routing.status,
+    submission_routing_route: routing.route,
+    submission_matched_rule_id: routing.matchedRule,
+    submission_routing_error: routing.error,
     submission_origin: origin,
     submission_user_agent: userAgent,
-  })
+  }
+  let error = (
+    await admin.rpc("save_form_submission_with_routing_if_active", routedArguments)
+  ).error
+  if (error && routingRpcIsUnavailable(error)) {
+    error = (
+      await admin.rpc("save_form_submission_if_active", {
+        target_form_id: formId,
+        expected_publication_version: publicationVersion,
+        new_payload: payload,
+        submission_origin: origin,
+        submission_user_agent: userAgent,
+      })
+    ).error
+  }
   if (!error) return "saved"
   if (
     error.message.includes("form_unavailable") ||
@@ -390,6 +426,14 @@ async function saveActiveSubmission(
   }
   if (error.message.includes("form_rate_limited")) return "rate-limited"
   return "failed"
+}
+
+function routingRpcIsUnavailable(error: { readonly code?: string; readonly message: string }) {
+  return (
+    error.code === "PGRST202" ||
+    (error.message.includes("save_form_submission_with_routing_if_active") &&
+      (error.message.includes("Could not find") || error.message.includes("schema cache")))
+  )
 }
 
 function success(

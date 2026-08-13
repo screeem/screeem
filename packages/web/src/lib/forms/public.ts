@@ -1,6 +1,21 @@
-import { snapshotFormDefinition, type FormDefinition } from "@screeem/forms"
+import {
+  snapshotFormDefinition,
+  snapshotFormRoutingDefinition,
+  type FormDefinition,
+  type FormRoutingDefinition,
+} from "@screeem/forms"
 
 type SupabaseAdmin = ReturnType<(typeof import("@/lib/supabase/admin"))["createAdminClient"]>
+const MAX_CACHED_PUBLICATIONS = 16
+const MAX_CACHED_PUBLICATION_BYTES = 8 * 1024 * 1024
+
+interface CachedPublication {
+  readonly promise: Promise<ActivePublicFormDefinition>
+  bytes: number
+}
+
+const publicationCache = new Map<string, CachedPublication>()
+let publicationCacheBytes = 0
 
 export interface PublicFormRecord {
   readonly id: string
@@ -18,6 +33,7 @@ export interface ActivePublicFormDefinition {
   readonly formId: string
   readonly version: number
   readonly definition: FormDefinition
+  readonly routing: FormRoutingDefinition | null
   readonly publishedAt: string
 }
 
@@ -65,23 +81,90 @@ export async function loadActivePublicDefinition(
     throw new PublicDefinitionUnavailableError()
   }
 
+  const key = `${form.teamId}:${form.id}:${form.publishedVersion}`
+  const cached = publicationCache.get(key)
+  if (cached) {
+    publicationCache.delete(key)
+    publicationCache.set(key, cached)
+    return cached.promise
+  }
+
+  const entry: CachedPublication = {
+    promise: loadPublishedVersion(admin, form, form.publishedVersion)
+      .then((published) => {
+        if (publicationCache.get(key) === entry) {
+          entry.bytes = encodedBytes(published)
+          publicationCacheBytes += entry.bytes
+          trimPublicationCache()
+        }
+        return published
+      })
+      .catch((error) => {
+        if (publicationCache.get(key) === entry) removeCachedPublication(key, entry)
+        throw error
+      }),
+    bytes: 0,
+  }
+  publicationCache.set(key, entry)
+  trimPublicationCache()
+  return entry.promise
+}
+
+async function loadPublishedVersion(
+  admin: SupabaseAdmin,
+  form: PublicFormRecord,
+  version: number,
+): Promise<ActivePublicFormDefinition> {
   const { data, error } = await admin
     .from("form_definition_versions")
-    .select("definition, published_at")
+    .select("definition, routing_definition, published_at")
     .eq("team_id", form.teamId)
     .eq("form_id", form.id)
-    .eq("version", form.publishedVersion)
+    .eq("version", version)
     .maybeSingle()
 
   if (error) throw error
   if (!data) throw new PublicDefinitionUnavailableError()
 
-  return {
+  return Object.freeze({
     formId: form.id,
-    version: form.publishedVersion,
+    version,
     definition: snapshotFormDefinition(data.definition, { publishable: true }),
+    routing: snapshotRuntimeRouting(data.routing_definition),
     publishedAt: data.published_at,
+  })
+}
+
+function snapshotRuntimeRouting(value: unknown): FormRoutingDefinition | null {
+  if (value === null) return null
+  const routing = snapshotFormRoutingDefinition(value)
+  return Object.freeze({
+    version: routing.version,
+    rules: Object.freeze(
+      routing.rules.map(({ id, when, route }) => Object.freeze({ id, when, route })),
+    ),
+    fallback: routing.fallback,
+  })
+}
+
+function trimPublicationCache() {
+  while (
+    publicationCache.size > MAX_CACHED_PUBLICATIONS ||
+    publicationCacheBytes > MAX_CACHED_PUBLICATION_BYTES
+  ) {
+    const oldest = publicationCache.entries().next().value
+    if (oldest === undefined) break
+    removeCachedPublication(oldest[0], oldest[1])
   }
+}
+
+function removeCachedPublication(key: string, entry: CachedPublication) {
+  if (!publicationCache.delete(key)) return
+  publicationCacheBytes -= entry.bytes
+}
+
+function encodedBytes(value: unknown) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength
 }
 
 export class PublicDefinitionUnavailableError extends Error {

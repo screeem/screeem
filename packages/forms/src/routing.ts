@@ -3,8 +3,11 @@ import {
   Router,
   createRouter,
   schemaFromForm,
+  type CompiledRoutingDefinition,
+  type FormSchema,
   type Action,
   type Rule,
+  type RoutingResult,
 } from "@screeem/routing"
 import { snapshotFormDefinition } from "./definition.js"
 import { InvalidFormRoutingError } from "./errors.js"
@@ -118,6 +121,31 @@ export async function compileFormRoutingDefinition(
       ),
     )
   }
+}
+
+export async function evaluateFormRoutingDefinition(
+  form: FormDefinition,
+  routing: FormRoutingDefinition,
+  submission: Readonly<Record<string, string | number | boolean>>,
+  router: Router = createRouter(),
+): Promise<RoutingResult> {
+  const compiled = await compileFormRoutingSelector(form, routing, router)
+  return compiled.run(submission)
+}
+
+export async function compileFormRoutingSelector(
+  form: FormDefinition,
+  routing: FormRoutingDefinition,
+  router: Router = createRouter(),
+): Promise<CompiledRoutingDefinition<FormSchema>> {
+  const safeForm = snapshotFormDefinition(form, { publishable: true })
+  const safeRouting = snapshotFormRoutingDefinition(routing)
+  return router.compile({
+    version: FORM_ROUTING_FORMAT_VERSION,
+    schema: schemaFromForm(safeForm),
+    rules: safeRouting.rules.map(({ id, when, route }) => ({ id, when, route })),
+    fallback: safeRouting.fallback,
+  })
 }
 
 function snapshotRule(rules: readonly unknown[], index: number): Rule {

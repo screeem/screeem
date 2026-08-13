@@ -14,7 +14,12 @@ import {
   type NormalizedSubmission,
   type NormalizeSubmissionOptions,
 } from "./submission.js"
-import type { FormDefinitionStore, FormSubmissionStore, PublishedAvailability } from "./stores.js"
+import type {
+  FormDefinitionStore,
+  FormSubmissionStore,
+  PublishedAvailability,
+  SubmissionListOptions,
+} from "./stores.js"
 
 export type SubmissionValidationError = InvalidFormDefinitionError | InvalidSubmissionError
 
@@ -69,7 +74,10 @@ export interface EffectFormDefinitionStore {
 
 export interface EffectFormSubmissionStore {
   save(submission: StoredSubmission): Effect.Effect<StoredSubmission, FormsError>
-  list(formId: string): Effect.Effect<readonly StoredSubmission[], FormsError>
+  list(
+    formId: string,
+    options?: SubmissionListOptions,
+  ): Effect.Effect<readonly StoredSubmission[], FormsError>
 }
 
 /** Adapt any Promise-based definition store for composition in Effect hosts. */
@@ -96,7 +104,7 @@ export function toEffectFormDefinitionStore(store: FormDefinitionStore): EffectF
 export function toEffectFormSubmissionStore(store: FormSubmissionStore): EffectFormSubmissionStore {
   const adapter: EffectFormSubmissionStore = {
     save: (submission) => storeOperation(() => store.save(submission)),
-    list: (formId) => storeOperation(() => store.list(formId)),
+    list: (formId, options) => storeOperation(() => store.list(formId, options)),
   }
   return Object.freeze(adapter)
 }

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
@@ -160,6 +161,10 @@ export const formSubmissions = pgTable(
     formId: uuid("form_id").notNull(),
     publicationVersion: bigint("publication_version", { mode: "number" }),
     payload: jsonb("payload").notNull(),
+    routingStatus: text("routing_status").notNull().default("not_configured"),
+    routingRoute: text("routing_route"),
+    matchedRuleId: text("matched_rule_id"),
+    routingError: text("routing_error"),
     origin: text("origin"),
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -170,6 +175,9 @@ export const formSubmissions = pgTable(
       table.formId,
       table.createdAt.desc(),
     ),
+    index("form_submissions_team_form_route_created_idx")
+      .on(table.teamId, table.formId, table.routingRoute, table.createdAt.desc())
+      .where(sql`${table.routingRoute} IS NOT NULL`),
     foreignKey({
       columns: [table.teamId, table.formId],
       foreignColumns: [forms.teamId, forms.id],
