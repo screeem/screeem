@@ -157,11 +157,12 @@ export class MemoryFormDefinitionStore implements FormDefinitionStore {
   ): Promise<FormDraft> {
     const state = this.#requireForm(formId)
     assertRevision(state, expectedRevision)
+    const safeRouting = routing === null ? null : snapshotFormRoutingDefinition(routing)
     const draft = snapshotDraft(
       formId,
       expectedRevision + 1,
       state.draft.definition,
-      routing,
+      safeRouting,
     )
     state.draft = draft
     return snapshotDraftValue(draft)

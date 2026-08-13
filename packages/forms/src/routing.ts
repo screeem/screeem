@@ -11,9 +11,11 @@ import { InvalidFormRoutingError } from "./errors.js"
 import {
   FORM_ROUTING_FORMAT_VERSION,
   type FormDefinition,
+  type FormRoutingAuthoring,
   type FormRoutingDefinition,
   type FormRoutingIssue,
 } from "./model.js"
+import { snapshotFormRoutingAuthoring } from "./routing-authoring-contract.js"
 
 const maximumStoredRules = 100
 const maximumStoredActionsPerRule = 10
@@ -21,6 +23,7 @@ const maximumRuleIdLength = 128
 const maximumRouteLength = 256
 const maximumActionNameLength = 128
 const maximumExpressionSourceLength = 4_096
+export const maximumFormRoutingBytes = 3 * 1024 * 1024
 
 export type FormRoutingCompiler = (
   form: FormDefinition,
@@ -31,10 +34,11 @@ export type FormRoutingCompiler = (
 export function snapshotFormRoutingDefinition(input: unknown): FormRoutingDefinition {
   try {
     const routing = requireRecord(input, "routing")
-    requireKeys(routing, ["version", "rules", "fallback"], "routing")
+    requireKeys(routing, ["version", "rules", "fallback"], "routing", ["authoring"])
     const version = readData(routing, "version", "routing.version")
     const rules = readData(routing, "rules", "routing.rules")
     const fallback = readData(routing, "fallback", "routing.fallback")
+    const authoring = readOptionalData(routing, "authoring", "routing.authoring")
 
     if (version !== FORM_ROUTING_FORMAT_VERSION) {
       fail("unsupported_routing_version", "Only routing version 1 is supported", "version")
@@ -56,13 +60,20 @@ export function snapshotFormRoutingDefinition(input: unknown): FormRoutingDefini
       "fallback",
     )
 
-    return Object.freeze({
+    const safeRouting = Object.freeze({
       version: FORM_ROUTING_FORMAT_VERSION,
       rules: Object.freeze(
         Array.from({ length: rules.length }, (_, index) => snapshotRule(rules, index)),
       ),
       fallback,
+      ...(authoring.present
+        ? { authoring: snapshotFormRoutingAuthoring(authoring.value) as FormRoutingAuthoring }
+        : {}),
     })
+    if (new TextEncoder().encode(JSON.stringify(safeRouting)).byteLength > maximumFormRoutingBytes) {
+      fail("routing_size_limit", "Routing cannot exceed 3 MiB when encoded", "routing")
+    }
+    return safeRouting
   } catch (error) {
     if (error instanceof InvalidFormRoutingError) throw error
     throw new InvalidFormRoutingError([

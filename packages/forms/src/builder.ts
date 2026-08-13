@@ -79,7 +79,20 @@ export function redoBuilder(state: BuilderState): BuilderState {
   })
 }
 
-export function markBuilderSaved(state: BuilderState, revision: number): BuilderState {
+export function markBuilderSaved(
+  state: BuilderState,
+  revision: number,
+  savedDefinition: FormDefinition = state.definition,
+): BuilderState {
+  const saved = snapshotFormDefinition(savedDefinition)
+  if (!definitionsEqual(state.definition, saved)) {
+    return freezeState({
+      ...state,
+      baseRevision: revision,
+      dirty: true,
+    })
+  }
+
   return freezeState({
     past: [],
     definition: state.definition,

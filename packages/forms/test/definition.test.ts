@@ -7,6 +7,7 @@ import {
   createFormDefinition,
   duplicateField,
   InvalidFormDefinitionError,
+  markBuilderSaved,
   moveField,
   redoBuilder,
   removeField,
@@ -171,5 +172,23 @@ describe("builder history", () => {
     expect(selected.selectedFieldId).toBe("email")
     expect(selected.past).toHaveLength(0)
     expect(selected.dirty).toBe(false)
+  })
+
+  it("advances the revision without losing edits made while a save was in flight", () => {
+    const initial = createFormDefinition("Lead form")
+    const submitted = addField(initial, createField("email", { id: "email", label: "Email" }))
+    const saving = applyBuilderDefinition(createBuilderState(initial, 3), submitted)
+    const editedAgain = applyBuilderDefinition(
+      saving,
+      addField(submitted, createField("number", { id: "employees", label: "Employees" })),
+    )
+    const acknowledged = markBuilderSaved(editedAgain, 4, submitted)
+
+    expect(acknowledged.baseRevision).toBe(4)
+    expect(acknowledged.dirty).toBe(true)
+    expect(acknowledged.definition.fields.map((field) => field.id)).toEqual([
+      "email",
+      "employees",
+    ])
   })
 })
