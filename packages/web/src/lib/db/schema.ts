@@ -162,6 +162,8 @@ export const formSubmissions = pgTable(
     payload: jsonb("payload").notNull(),
     origin: text("origin"),
     userAgent: text("user_agent"),
+    qualificationRoute: text("qualification_route"),
+    qualificationMatchedRule: text("qualification_matched_rule"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [

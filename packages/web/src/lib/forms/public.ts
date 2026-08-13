@@ -1,4 +1,9 @@
-import { snapshotFormDefinition, type FormDefinition } from "@screeem/forms"
+import {
+  snapshotFormDefinition,
+  snapshotFormRoutingDefinition,
+  type FormDefinition,
+  type FormRoutingDefinition,
+} from "@screeem/forms"
 
 type SupabaseAdmin = ReturnType<(typeof import("@/lib/supabase/admin"))["createAdminClient"]>
 
@@ -18,6 +23,7 @@ export interface ActivePublicFormDefinition {
   readonly formId: string
   readonly version: number
   readonly definition: FormDefinition
+  readonly routing: FormRoutingDefinition | null
   readonly publishedAt: string
 }
 
@@ -67,7 +73,7 @@ export async function loadActivePublicDefinition(
 
   const { data, error } = await admin
     .from("form_definition_versions")
-    .select("definition, published_at")
+    .select("definition, routing_definition, published_at")
     .eq("team_id", form.teamId)
     .eq("form_id", form.id)
     .eq("version", form.publishedVersion)
@@ -80,6 +86,10 @@ export async function loadActivePublicDefinition(
     formId: form.id,
     version: form.publishedVersion,
     definition: snapshotFormDefinition(data.definition, { publishable: true }),
+    routing:
+      data.routing_definition === null
+        ? null
+        : snapshotFormRoutingDefinition(data.routing_definition),
     publishedAt: data.published_at,
   }
 }
