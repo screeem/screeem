@@ -1,4 +1,10 @@
-import { FormRevisionConflictError, InvalidFormRoutingError } from "@screeem/forms"
+import {
+  FormRevisionConflictError,
+  InvalidFormRoutingError,
+  generateFormRoutingDefinition,
+  type FormDefinition,
+  type FormRoutingAuthoring,
+} from "@screeem/forms"
 import { NextRequest, NextResponse } from "next/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -94,7 +100,88 @@ describe("routing draft API", () => {
   })
 
   it("rejects an oversized encoded body before opening the team store", async () => {
-    const response = await PUT(rawRequest(`{"padding":"${"x".repeat(256 * 1024)}"}`), context)
+    const response = await PUT(
+      rawRequest(`{"padding":"${"x".repeat(3 * 1024 * 1024 + 1_024)}"}`),
+      context,
+    )
+
+    expect(response.status).toBe(413)
+    expect(mocks.saveRoutingDraft).not.toHaveBeenCalled()
+  })
+
+  it("accepts a valid maximum-count visual draft through the transport boundary", async () => {
+    const definition: FormDefinition = {
+      formatVersion: 1,
+      title: "Qualification",
+      submitLabel: "Submit",
+      successMessage: "Thanks",
+      fields: [
+        {
+          id: "employees",
+          name: "employees",
+          label: "Employees",
+          required: true,
+          type: "number",
+          control: "number",
+        },
+      ],
+    }
+    const authoring: FormRoutingAuthoring = {
+      version: 1,
+      rules: Array.from({ length: 100 }, (_, ruleIndex) => ({
+        id: `form-rule-${ruleIndex}-${"r".repeat(40)}`,
+        combinator: "all",
+        conditions: Array.from({ length: 20 }, (_, conditionIndex) => ({
+          id: `form-condition-${ruleIndex}-${conditionIndex}-${"c".repeat(40)}`,
+          fieldId: "employees",
+          operator: "greater_than_or_equal",
+          value: conditionIndex,
+        })),
+        route: `destination-${ruleIndex}`,
+      })),
+      fallback: "review",
+    }
+    const generated = generateFormRoutingDefinition(definition, authoring)
+    if (!generated.ok) throw new Error("Expected maximum-count routing to be valid")
+    const encoded = JSON.stringify({ expectedRevision: 2, routing: generated.routing })
+    expect(new TextEncoder().encode(encoded).byteLength).toBeGreaterThan(256 * 1024)
+
+    const response = await PUT(rawRequest(encoded), context)
+
+    expect(response.status).toBe(200)
+    expect(mocks.saveRoutingDraft).toHaveBeenCalledWith("form-one", 2, generated.routing)
+  })
+
+  it("rejects a contract-valid advanced model above the aggregate write budget", async () => {
+    const rules = Array.from({ length: 100 }, (_, ruleIndex) => ({
+      id: `${ruleIndex}-${"r".repeat(124)}`.slice(0, 128),
+      when: "w".repeat(4_096),
+      route: "destination",
+      actions: Array.from({ length: 10 }, (_, actionIndex) => ({
+        use: `${actionIndex}-${"a".repeat(124)}`.slice(0, 128),
+        with: "x".repeat(4_096),
+      })),
+    }))
+    const authoring = {
+      version: 1,
+      rules: Array.from({ length: 100 }, (_, ruleIndex) => ({
+        id: rules[ruleIndex]!.id,
+        combinator: "all",
+        conditions: Array.from({ length: 20 }, (_, conditionIndex) => ({
+          id: `${ruleIndex}-${conditionIndex}-${"c".repeat(120)}`.slice(0, 128),
+          fieldId: "f".repeat(128),
+          operator: "equals",
+          value: "v".repeat(1_024),
+        })),
+        route: "destination",
+      })),
+      fallback: "review",
+    } as const
+    const maximumRouting = { version: 1 as const, rules, fallback: "review", authoring }
+    const encoded = JSON.stringify({ expectedRevision: 2, routing: maximumRouting })
+    expect(new TextEncoder().encode(encoded).byteLength).toBeGreaterThan(3 * 1024 * 1024)
+
+    const response = await PUT(rawRequest(encoded), context)
 
     expect(response.status).toBe(413)
     expect(mocks.saveRoutingDraft).not.toHaveBeenCalled()

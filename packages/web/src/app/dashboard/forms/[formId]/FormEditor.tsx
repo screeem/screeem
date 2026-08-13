@@ -4,13 +4,19 @@ import {
   addField,
   applyBuilderDefinition,
   createBuilderState,
+  createEmptyRoutingAuthoring,
   createField,
   createFormDefinition,
+  createRoutingCondition,
   duplicateField,
+  generateFormRoutingDefinition,
   markBuilderSaved,
+  maximumRoutingAuthoringRules,
+  maximumRoutingConditionsPerRule,
   moveField,
   redoBuilder,
   removeField,
+  routingAuthoringMatchesDefinition,
   selectBuilderField,
   undoBuilder,
   updateField,
@@ -20,13 +26,21 @@ import {
   type FormDefinition,
   type FormFieldDefinition,
   type FormIssue,
+  type FormRoutingAuthoring,
+  type FormRoutingAuthoringIssue,
+  type FormRoutingAuthoringRule,
+  type FormRoutingCondition,
+  type FormRoutingDefinition,
+  type FormRoutingIssue,
 } from "@screeem/forms"
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { DraggableField } from "../../../../components/forms/DraggableField"
 import { RespondentForm } from "../../../../components/forms/RespondentForm"
+import { RoutingEditor } from "../../../../components/forms/RoutingEditor"
 
-type EditorView = "build" | "preview"
+type EditorView = "build" | "routing" | "preview"
+type EditorIssue = FormIssue | FormRoutingIssue
 
 type LoadedForm = {
   id: string
@@ -40,6 +54,7 @@ type LoadedForm = {
 interface DraftResponse {
   readonly revision: number
   readonly definition: FormDefinition
+  readonly routing: FormRoutingDefinition | null
 }
 
 interface PublishedResponse {
@@ -78,14 +93,23 @@ export function FormEditor({
 }) {
   const [form, setForm] = useState<LoadedForm | null>(null)
   const [builder, setBuilder] = useState<BuilderState | null>(null)
+  const [routing, setRouting] = useState<FormRoutingAuthoring>(() =>
+    createEmptyRoutingAuthoring(),
+  )
+  const [routingConfigured, setRoutingConfigured] = useState(false)
+  const [routingDirty, setRoutingDirty] = useState(false)
+  const [advancedRouting, setAdvancedRouting] = useState<FormRoutingDefinition | null>(null)
   const [view, setView] = useState<EditorView>("build")
   const [error, setError] = useState("")
-  const [issues, setIssues] = useState<readonly FormIssue[]>([])
+  const [issues, setIssues] = useState<readonly EditorIssue[]>([])
   const [status, setStatus] = useState("")
   const [draftExists, setDraftExists] = useState(false)
   const [publishedRevision, setPublishedRevision] = useState<number | null>(null)
   const [busy, setBusy] = useState<"save" | "publish" | null>(null)
+  const busyRef = useRef<"save" | "publish" | null>(null)
   const idCounter = useRef(1)
+  const routingIdCounter = useRef(1)
+  const routingEditVersion = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -114,6 +138,11 @@ export function FormEditor({
             published_version: body.publishedVersion,
           })
           setBuilder(createBuilderState(definition, 0))
+          setRouting(createEmptyRoutingAuthoring())
+          setRoutingConfigured(false)
+          setRoutingDirty(false)
+          routingEditVersion.current = 0
+          setAdvancedRouting(null)
           setDraftExists(false)
           setPublishedRevision(null)
           setStatus("New structured draft")
@@ -125,6 +154,21 @@ export function FormEditor({
         }
         setForm(loadedForm as LoadedForm)
         setBuilder(createBuilderState(draft.definition as FormDefinition, draft.revision))
+        const routingNeedsRepair =
+          draft.routing?.authoring !== undefined &&
+          !routingAuthoringMatchesDefinition(draft.definition, draft.routing)
+        if (draft.routing?.authoring && !routingNeedsRepair) {
+          setRouting(draft.routing.authoring)
+          setRoutingConfigured(true)
+          setAdvancedRouting(null)
+          setRoutingDirty(false)
+        } else {
+          setRouting(createEmptyRoutingAuthoring())
+          setRoutingConfigured(false)
+          setAdvancedRouting(draft.routing ?? null)
+          setRoutingDirty(false)
+        }
+        routingEditVersion.current = 0
         setDraftExists(true)
         setPublishedRevision(
           typeof body.lastPublishedDraftRevision === "number"
@@ -146,12 +190,21 @@ export function FormEditor({
     if (!builder) return null
     return builder.definition.fields.find((field) => field.id === builder.selectedFieldId) ?? null
   }, [builder])
+  const generatedRouting = useMemo(
+    () =>
+      builder && routingConfigured
+        ? generateFormRoutingDefinition(builder.definition, routing)
+        : null,
+    [builder, routing, routingConfigured],
+  )
+  const routingIssues: readonly FormRoutingAuthoringIssue[] =
+    generatedRouting && !generatedRouting.ok ? generatedRouting.issues : []
 
   function commit(
     edit: (definition: FormDefinition) => FormDefinition,
     selectedFieldId = builder?.selectedFieldId ?? null,
   ) {
-    if (!builder) return
+    if (!builder || busyRef.current !== null) return
     try {
       setBuilder((current) =>
         current
@@ -211,46 +264,258 @@ export function FormEditor({
     commit((definition) => removeField(definition, selectedField.id), nextId)
   }
 
+  function commitRouting(edit: (current: FormRoutingAuthoring) => FormRoutingAuthoring) {
+    if (busyRef.current !== null) return
+    routingEditVersion.current += 1
+    setRouting((current) => edit(current))
+    setRoutingConfigured(true)
+    setRoutingDirty(true)
+    setIssues([])
+    setError("")
+  }
+
+  function addRoutingRule() {
+    if (!builder) return
+    if (routing.rules.length >= maximumRoutingAuthoringRules) {
+      setError(`Routing supports up to ${maximumRoutingAuthoringRules} rules.`)
+      return
+    }
+    const field = builder.definition.fields[0]
+    if (!field) {
+      setError("Add a form field before creating a routing rule.")
+      return
+    }
+    const number = routingIdCounter.current++
+    commitRouting((current) => ({
+      ...current,
+      rules: [
+        ...current.rules,
+        {
+          id: `${formId}-rule-${Date.now()}-${number}`,
+          combinator: "all",
+          conditions: [
+            createRoutingCondition(field, `${formId}-condition-${Date.now()}-${number}`),
+          ],
+          route: "new-destination",
+        },
+      ],
+    }))
+  }
+
+  function updateRoutingRule(ruleId: string, update: Partial<FormRoutingAuthoringRule>) {
+    commitRouting((current) => ({
+      ...current,
+      rules: current.rules.map((rule) => (rule.id === ruleId ? { ...rule, ...update } : rule)),
+    }))
+  }
+
+  function removeRoutingRule(ruleId: string) {
+    commitRouting((current) => ({
+      ...current,
+      rules: current.rules.filter((rule) => rule.id !== ruleId),
+    }))
+  }
+
+  function reorderRoutingRule(ruleId: string, targetIndex: number) {
+    commitRouting((current) => {
+      const sourceIndex = current.rules.findIndex((rule) => rule.id === ruleId)
+      if (sourceIndex < 0) return current
+      const rules = [...current.rules]
+      const [rule] = rules.splice(sourceIndex, 1)
+      if (!rule) return current
+      rules.splice(Math.max(0, Math.min(targetIndex, rules.length)), 0, rule)
+      return { ...current, rules }
+    })
+  }
+
+  function addRoutingCondition(ruleId: string) {
+    if (!builder) return
+    const field = builder.definition.fields[0]
+    const rule = routing.rules.find((candidate) => candidate.id === ruleId)
+    if (!field || !rule) return
+    if (rule.conditions.length >= maximumRoutingConditionsPerRule) {
+      setError(`A routing rule supports up to ${maximumRoutingConditionsPerRule} conditions.`)
+      return
+    }
+    const number = routingIdCounter.current++
+    const condition = createRoutingCondition(
+      field,
+      `${formId}-condition-${Date.now()}-${number}`,
+    )
+    commitRouting((current) => ({
+      ...current,
+      rules: current.rules.map((candidate) =>
+        candidate.id === ruleId
+          ? { ...candidate, conditions: [...candidate.conditions, condition] }
+          : candidate,
+      ),
+    }))
+  }
+
+  function updateRoutingCondition(
+    ruleId: string,
+    conditionId: string,
+    update: Partial<FormRoutingCondition>,
+  ) {
+    commitRouting((current) => ({
+      ...current,
+      rules: current.rules.map((rule) =>
+        rule.id === ruleId
+          ? {
+              ...rule,
+              conditions: rule.conditions.map((condition) =>
+                condition.id === conditionId ? { ...condition, ...update } : condition,
+              ),
+            }
+          : rule,
+      ),
+    }))
+  }
+
+  function removeRoutingCondition(ruleId: string, conditionId: string) {
+    commitRouting((current) => ({
+      ...current,
+      rules: current.rules.map((rule) =>
+        rule.id === ruleId
+          ? {
+              ...rule,
+              conditions: rule.conditions.filter((condition) => condition.id !== conditionId),
+            }
+          : rule,
+      ),
+    }))
+  }
+
+  function replaceAdvancedRouting() {
+    if (busyRef.current !== null) return
+    routingEditVersion.current += 1
+    setAdvancedRouting(null)
+    setRouting(createEmptyRoutingAuthoring())
+    setRoutingConfigured(true)
+    setRoutingDirty(true)
+    setError("")
+    setIssues([])
+  }
+
+  function startRouting() {
+    if (busyRef.current !== null) return
+    routingEditVersion.current += 1
+    setRouting(createEmptyRoutingAuthoring())
+    setRoutingConfigured(true)
+    setRoutingDirty(true)
+    setError("")
+    setIssues([])
+  }
+
+  function removeRouting() {
+    if (busyRef.current !== null) return
+    if (!window.confirm("Remove all routing rules from this draft?")) return
+    routingEditVersion.current += 1
+    setRouting(createEmptyRoutingAuthoring())
+    setRoutingConfigured(false)
+    setAdvancedRouting(null)
+    setRoutingDirty(true)
+    setError("")
+    setIssues([])
+  }
+
   async function saveDraft(): Promise<number | null> {
-    if (!builder) return null
-    if (!builder.dirty && draftExists) return builder.baseRevision
+    if (!builder || busyRef.current !== null) return null
+    const definitionWasDirty = builder.dirty || !draftExists
+    const routingNeedsSave = routingDirty || (builder.dirty && routingConfigured)
+    if (!definitionWasDirty && !routingNeedsSave) return builder.baseRevision
+
+    let routingDefinition: FormRoutingDefinition | null = advancedRouting
+    const submittedDefinition = builder.definition
+    const submittedRoutingEditVersion = routingEditVersion.current
+    if (routingConfigured) {
+      const generated = generateFormRoutingDefinition(builder.definition, routing)
+      if (!generated.ok) {
+        setError("Fix the routing rules before saving this draft")
+        setIssues(generated.issues)
+        setView("routing")
+        return null
+      }
+      routingDefinition = generated.routing
+    }
+
+    busyRef.current = "save"
     setBusy("save")
     setError("")
     setIssues([])
     try {
-      const response = await fetch(`/api/teams/${teamId}/forms/${formId}/draft`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expectedRevision: builder.baseRevision,
-          definition: builder.definition,
-        }),
-      })
-      const body = await readBody(response)
-      if (!response.ok) {
-        applyResponseError(body, "Could not save the draft", setError, setIssues)
-        return null
+      let revision = builder.baseRevision
+
+      if (definitionWasDirty) {
+        const response = await fetch(`/api/teams/${teamId}/forms/${formId}/draft`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedRevision: revision,
+            definition: builder.definition,
+          }),
+        })
+        const body = await readBody(response)
+        if (!response.ok) {
+          applyResponseError(body, "Could not save the draft", setError, setIssues)
+          return null
+        }
+        const savedDraft = body.draft
+        if (!savedDraft || typeof savedDraft.revision !== "number") {
+          setError("The save response did not include a revision")
+          return null
+        }
+        revision = savedDraft.revision
+        setBuilder((current) =>
+          current ? markBuilderSaved(current, revision, submittedDefinition) : current,
+        )
+        setDraftExists(true)
       }
-      const draft = body.draft
-      if (!draft || typeof draft.revision !== "number") {
-        setError("The save response did not include a revision")
-        return null
+
+      if (routingNeedsSave) {
+        const response = await fetch(`/api/teams/${teamId}/forms/${formId}/draft/routing`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedRevision: revision,
+            routing: routingDefinition,
+          }),
+        })
+        const body = await readBody(response)
+        if (!response.ok) {
+          applyResponseError(body, "Could not save the routing rules", setError, setIssues)
+          return null
+        }
+        const savedDraft = body.draft
+        if (!savedDraft || typeof savedDraft.revision !== "number") {
+          setError("The routing save response did not include a revision")
+          return null
+        }
+        revision = savedDraft.revision
+        setBuilder((current) =>
+          current ? markBuilderSaved(current, revision, submittedDefinition) : current,
+        )
+        if (routingEditVersion.current === submittedRoutingEditVersion) {
+          setRoutingDirty(false)
+        }
       }
-      setBuilder((current) => (current ? markBuilderSaved(current, draft.revision) : current))
-      setDraftExists(true)
-      setStatus(`Draft saved · revision ${draft.revision}`)
-      return draft.revision
+
+      setStatus(`Draft saved · revision ${revision}`)
+      return revision
     } catch {
       setError("Could not save the draft")
       return null
     } finally {
+      busyRef.current = null
       setBusy(null)
     }
   }
 
   async function publish() {
+    if (busyRef.current !== null) return
     const revision = await saveDraft()
     if (revision === null) return
+    busyRef.current = "publish"
     setBusy("publish")
     setError("")
     setIssues([])
@@ -286,6 +551,7 @@ export function FormEditor({
     } catch {
       setError("Could not publish the form")
     } finally {
+      busyRef.current = null
       setBusy(null)
     }
   }
@@ -322,29 +588,33 @@ export function FormEditor({
             </div>
             <p className="mt-1 text-sm text-gray-500">
               {status}
-              {builder.dirty ? " · Unsaved changes" : ""}
+              {builder.dirty || routingDirty ? " · Unsaved changes" : ""}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {view === "build" ? (
+              <>
+                <button
+                  type="button"
+                  disabled={busy !== null || builder.past.length === 0}
+                  onClick={() => setBuilder((current) => (current ? undoBuilder(current) : current))}
+                  className={quietButton}
+                >
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  disabled={busy !== null || builder.future.length === 0}
+                  onClick={() => setBuilder((current) => (current ? redoBuilder(current) : current))}
+                  className={quietButton}
+                >
+                  Redo
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
-              disabled={builder.past.length === 0}
-              onClick={() => setBuilder((current) => (current ? undoBuilder(current) : current))}
-              className={quietButton}
-            >
-              Undo
-            </button>
-            <button
-              type="button"
-              disabled={builder.future.length === 0}
-              onClick={() => setBuilder((current) => (current ? redoBuilder(current) : current))}
-              className={quietButton}
-            >
-              Redo
-            </button>
-            <button
-              type="button"
-              disabled={busy !== null || (!builder.dirty && draftExists)}
+              disabled={busy !== null || (!builder.dirty && !routingDirty && draftExists)}
               onClick={() => void saveDraft()}
               className={secondaryButton}
             >
@@ -353,14 +623,15 @@ export function FormEditor({
             <button
               type="button"
               disabled={
-                busy !== null || (publishedRevision === builder.baseRevision && !builder.dirty)
+                busy !== null ||
+                (publishedRevision === builder.baseRevision && !builder.dirty && !routingDirty)
               }
               onClick={() => void publish()}
               className="rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
             >
               {busy === "publish"
                 ? "Publishing…"
-                : publishedRevision === builder.baseRevision && !builder.dirty
+                : publishedRevision === builder.baseRevision && !builder.dirty && !routingDirty
                   ? "Published"
                   : "Publish"}
             </button>
@@ -369,10 +640,11 @@ export function FormEditor({
       </header>
 
       <nav aria-label="Editor views" className="flex gap-1 py-4">
-        {(["build", "preview"] as const).map((item) => (
+        {(["build", "routing", "preview"] as const).map((item) => (
           <button
             key={item}
             type="button"
+            disabled={busy !== null}
             onClick={() => setView(item)}
             className={`rounded-md px-3 py-1.5 text-sm font-medium ${view === item ? "bg-gray-950 text-white" : "text-gray-600 hover:bg-gray-100"}`}
           >
@@ -384,8 +656,12 @@ export function FormEditor({
       {error ? <ErrorSummary message={error} issues={issues} /> : null}
 
       {view === "build" ? (
-        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-          <div className="grid min-h-[650px] lg:grid-cols-[180px_minmax(320px,1fr)_280px]">
+        <section
+          aria-busy={busy !== null}
+          className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+        >
+          <fieldset disabled={busy !== null} className="min-w-0 border-0 p-0 disabled:opacity-70">
+            <div className="grid min-h-[650px] lg:grid-cols-[180px_minmax(320px,1fr)_280px]">
             <aside className="border-b border-gray-200 bg-gray-50/80 p-4 lg:border-b-0 lg:border-r">
               <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
                 Add field
@@ -431,6 +707,7 @@ export function FormEditor({
                         key={field.id}
                         fieldId={field.id}
                         index={index}
+                        disabled={busy !== null}
                         onReorder={reorderField}
                       >
                         {({ dragHandleRef }) => (
@@ -534,8 +811,74 @@ export function FormEditor({
                 <EmptySelection />
               )}
             </aside>
-          </div>
+            </div>
+          </fieldset>
         </section>
+      ) : null}
+
+      {view === "routing" ? (
+        advancedRouting ? (
+          <section className="rounded-xl border border-gray-200 bg-white px-6 py-10 shadow-sm sm:px-10">
+            <div className="max-w-2xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-700">
+                Routing rules
+              </p>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-gray-950">
+                This routing was created through the API
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                It will stay unchanged when you save this form. To edit routing here, replace it
+                with a new visual rule set.
+              </p>
+              <button
+                type="button"
+                onClick={replaceAdvancedRouting}
+                className="mt-5 rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
+              >
+                Replace with visual rules
+              </button>
+            </div>
+          </section>
+        ) : !routingConfigured ? (
+          <section className="rounded-xl border border-gray-200 bg-white px-6 py-10 shadow-sm sm:px-10">
+            <div className="max-w-2xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-700">
+                Routing rules
+              </p>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-gray-950">
+                No routing is configured
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                Add ordered rules to choose a destination from each validated response.
+              </p>
+              <button
+                type="button"
+                onClick={startRouting}
+                className="mt-5 rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
+              >
+                Set up routing
+              </button>
+            </div>
+          </section>
+        ) : (
+          <RoutingEditor
+            definition={builder.definition}
+            draft={routing}
+            issues={routingIssues}
+            disabled={busy !== null}
+            onAddRule={addRoutingRule}
+            onUpdateRule={updateRoutingRule}
+            onRemoveRule={removeRoutingRule}
+            onReorderRule={reorderRoutingRule}
+            onAddCondition={addRoutingCondition}
+            onUpdateCondition={updateRoutingCondition}
+            onRemoveCondition={removeRoutingCondition}
+            onFallbackChange={(fallback) =>
+              commitRouting((current) => ({ ...current, fallback }))
+            }
+            onRemoveRouting={removeRouting}
+          />
+        )
       ) : null}
 
       {view === "preview" ? <EditorPreview definition={builder.definition} /> : null}
@@ -795,7 +1138,7 @@ function ErrorSummary({
   issues,
 }: {
   readonly message: string
-  readonly issues: readonly FormIssue[]
+  readonly issues: readonly EditorIssue[]
 }) {
   return (
     <div
@@ -806,9 +1149,11 @@ function ErrorSummary({
       {issues.length ? (
         <ul className="mt-2 list-disc space-y-1 pl-5">
           {issues.map((issue, index) => (
-            <li key={`${issue.path}-${index}`}>
+            <li key={`${issue.path ?? issue.code}-${index}`}>
               {issue.message}
-              <span className="ml-1 font-mono text-xs text-red-600">{issue.path}</span>
+              {issue.path ? (
+                <span className="ml-1 font-mono text-xs text-red-600">{issue.path}</span>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -866,21 +1211,21 @@ function applyResponseError(
   body: EditorApiBody,
   fallback: string,
   setError: (message: string) => void,
-  setIssues: (issues: readonly FormIssue[]) => void,
+  setIssues: (issues: readonly EditorIssue[]) => void,
 ) {
   setError(readError(body, fallback))
-  setIssues(Array.isArray(body.issues) ? body.issues.filter(isFormIssue) : [])
+  setIssues(Array.isArray(body.issues) ? body.issues.filter(isEditorIssue) : [])
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function isFormIssue(value: unknown): value is FormIssue {
+function isEditorIssue(value: unknown): value is EditorIssue {
   return (
     isObject(value) &&
     typeof value.code === "string" &&
     typeof value.message === "string" &&
-    typeof value.path === "string"
+    (value.path === undefined || typeof value.path === "string")
   )
 }

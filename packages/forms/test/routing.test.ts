@@ -145,6 +145,28 @@ describe("routing integration", () => {
     ).not.toThrow()
   })
 
+  it("rejects routing above the aggregate encoded size limit", () => {
+    const routing = {
+      version: 1,
+      rules: Array.from({ length: 100 }, (_, index) => ({
+        id: `rule-${index}`,
+        when: "w".repeat(4_096),
+        route: "sales",
+        actions: Array.from({ length: 10 }, (_, actionIndex) => ({
+          use: `action-${actionIndex}`,
+          with: "x".repeat(4_096),
+        })),
+      })),
+      fallback: "review",
+    }
+
+    expect(() => snapshotFormRoutingDefinition(routing)).toThrow(
+      expect.objectContaining({
+        issues: [expect.objectContaining({ code: "routing_size_limit", path: "routing" })],
+      }),
+    )
+  })
+
   it.each([
     ["rule IDs", { id: "i".repeat(129) }, "routing_rule_id_limit"],
     ["conditions", { when: "w".repeat(4_097) }, "routing_expression_limit"],

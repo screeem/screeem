@@ -18,11 +18,13 @@ interface DraggableFieldRenderState {
 export function DraggableField({
   fieldId,
   index,
+  disabled = false,
   onReorder,
   children,
 }: {
   readonly fieldId: string
   readonly index: number
+  readonly disabled?: boolean
   readonly onReorder: (fieldId: string, targetIndex: number) => void
   readonly children: (state: DraggableFieldRenderState) => ReactNode
 }) {
@@ -39,7 +41,7 @@ export function DraggableField({
   useEffect(() => {
     const element = fieldRef.current
     const dragHandle = dragHandleRef.current
-    if (!element || !dragHandle) return
+    if (!element || !dragHandle || disabled) return
 
     const data = { type: "form-field", fieldId, index }
     return combine(
@@ -79,7 +81,7 @@ export function DraggableField({
         },
       }),
     )
-  }, [fieldId, index])
+  }, [disabled, fieldId, index])
 
   return (
     <div

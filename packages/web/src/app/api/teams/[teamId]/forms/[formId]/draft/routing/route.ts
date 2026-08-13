@@ -1,11 +1,12 @@
-import type { FormRoutingDefinition } from "@screeem/forms"
+import { maximumFormRoutingBytes, type FormRoutingDefinition } from "@screeem/forms"
 import { NextRequest, NextResponse } from "next/server"
 import { authorizeFormTeam } from "@/lib/forms/authorization"
 import { formErrorResponse } from "@/lib/forms/http"
 import { createFormDefinitionStore } from "@/lib/forms/server"
 
 type Context = { params: Promise<{ teamId: string; formId: string }> }
-const MAX_ROUTING_DRAFT_BYTES = 256 * 1024
+// Allow a small envelope around the shared encoded-routing budget.
+const MAX_ROUTING_DRAFT_BYTES = maximumFormRoutingBytes + 1_024
 
 export async function PUT(request: NextRequest, context: Context) {
   const { teamId, formId } = await context.params

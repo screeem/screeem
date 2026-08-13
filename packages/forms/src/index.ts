@@ -33,6 +33,7 @@ export {
 } from "./errors.js"
 export {
   FORM_DEFINITION_FORMAT_VERSION,
+  FORM_ROUTING_AUTHORING_FORMAT_VERSION,
   FORM_ROUTING_FORMAT_VERSION,
   type BooleanFieldDefinition,
   type EnumFieldDefinition,
@@ -44,7 +45,13 @@ export {
   type FormIssue,
   type FormRecord,
   type FormRoutingDefinition,
+  type FormRoutingAuthoring,
+  type FormRoutingAuthoringIssue,
+  type FormRoutingAuthoringRule,
+  type FormRoutingCombinator,
+  type FormRoutingCondition,
   type FormRoutingIssue,
+  type FormRoutingOperator,
   type NumberFieldDefinition,
   type NumberValidation,
   type PublishedForm,
@@ -55,7 +62,24 @@ export {
   type SubmissionMode,
 } from "./model.js"
 export {
+  createEmptyRoutingAuthoring,
+  createRoutingCondition,
+  createRoutingSample,
+  generateFormRoutingDefinition,
+  routingAuthoringMatchesDefinition,
+  routingOperatorsForField,
+  testFormRouting,
+  type FormRoutingOperatorOption,
+} from "./routing-authoring.js"
+export {
+  maximumRoutingAuthoringRules,
+  maximumRoutingConditionValueLength,
+  maximumRoutingConditionsPerRule,
+  snapshotFormRoutingAuthoring,
+} from "./routing-authoring-contract.js"
+export {
   compileFormRoutingDefinition,
+  maximumFormRoutingBytes,
   snapshotFormRoutingDefinition,
   type FormRoutingCompiler,
 } from "./routing.js"

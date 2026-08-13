@@ -2,6 +2,7 @@ import type { Rule } from "@screeem/routing"
 
 export const FORM_DEFINITION_FORMAT_VERSION = 1 as const
 export const FORM_ROUTING_FORMAT_VERSION = 1 as const
+export const FORM_ROUTING_AUTHORING_FORMAT_VERSION = 1 as const
 
 export type FieldControl = "text" | "email" | "textarea" | "number" | "checkbox" | "select"
 
@@ -75,6 +76,40 @@ export interface FormRoutingDefinition {
   readonly version: typeof FORM_ROUTING_FORMAT_VERSION
   readonly rules: readonly Rule[]
   readonly fallback: string
+  readonly authoring?: FormRoutingAuthoring
+}
+
+export type FormRoutingCombinator = "all" | "any"
+
+export type FormRoutingOperator =
+  | "equals"
+  | "not_equals"
+  | "greater_than"
+  | "greater_than_or_equal"
+  | "less_than"
+  | "less_than_or_equal"
+  | "is_empty"
+  | "is_not_empty"
+
+export interface FormRoutingCondition {
+  readonly id: string
+  readonly fieldId: string
+  readonly operator: FormRoutingOperator
+  readonly value?: string | number | boolean
+}
+
+export interface FormRoutingAuthoringRule {
+  readonly id: string
+  readonly combinator: FormRoutingCombinator
+  readonly conditions: readonly FormRoutingCondition[]
+  readonly route: string
+}
+
+/** Versioned visual source used to regenerate runtime routing expressions. */
+export interface FormRoutingAuthoring {
+  readonly version: typeof FORM_ROUTING_AUTHORING_FORMAT_VERSION
+  readonly rules: readonly FormRoutingAuthoringRule[]
+  readonly fallback: string
 }
 
 export interface FormRoutingIssue {
@@ -84,6 +119,10 @@ export interface FormRoutingIssue {
   readonly ruleId?: string
   readonly start?: number
   readonly end?: number
+}
+
+export interface FormRoutingAuthoringIssue extends FormRoutingIssue {
+  readonly conditionId?: string
 }
 
 export interface FormDraft {

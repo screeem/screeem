@@ -1,65 +1,30 @@
-import {
-  InvalidFormRoutingError,
-  normalizeSubmission,
-  snapshotFormRoutingDefinition,
-  type FormDefinition,
-  type FormFieldDefinition,
-  type FormRoutingDefinition,
-  type FormRoutingIssue,
-} from "@screeem/forms"
-import {
-  createRouter,
-  schemaFromForm,
-  type RoutingResult,
-} from "@screeem/routing"
+import { createRouter, schemaFromForm, type RoutingResult } from "@screeem/routing"
+import { InvalidFormRoutingError } from "./errors.js"
+import type {
+  FormDefinition,
+  FormFieldDefinition,
+  FormRoutingAuthoring,
+  FormRoutingAuthoringIssue,
+  FormRoutingCondition,
+  FormRoutingDefinition,
+  FormRoutingOperator,
+} from "./model.js"
+import { snapshotFormRoutingAuthoring } from "./routing-authoring-contract.js"
+import { snapshotFormRoutingDefinition } from "./routing.js"
+import { normalizeSubmission } from "./submission.js"
 
-export type VisualRoutingCombinator = "all" | "any"
-
-export type VisualRoutingOperator =
-  | "equals"
-  | "not_equals"
-  | "greater_than"
-  | "greater_than_or_equal"
-  | "less_than"
-  | "less_than_or_equal"
-  | "is_empty"
-  | "is_not_empty"
-
-export interface VisualRoutingCondition {
-  readonly id: string
-  readonly fieldId: string
-  readonly operator: VisualRoutingOperator
-  readonly value?: string | number | boolean
-}
-
-export interface VisualRoutingRule {
-  readonly id: string
-  readonly combinator: VisualRoutingCombinator
-  readonly conditions: readonly VisualRoutingCondition[]
-  readonly route: string
-}
-
-export interface VisualRoutingDraft {
-  readonly rules: readonly VisualRoutingRule[]
-  readonly fallback: string
-}
-
-export interface VisualRoutingIssue extends FormRoutingIssue {
-  readonly conditionId?: string
-}
-
-export interface VisualRoutingOperatorOption {
-  readonly value: VisualRoutingOperator
+export interface FormRoutingOperatorOption {
+  readonly value: FormRoutingOperator
   readonly label: string
   readonly needsValue: boolean
 }
 
-const equalityOperators: readonly VisualRoutingOperatorOption[] = [
+const equalityOperators: readonly FormRoutingOperatorOption[] = [
   { value: "equals", label: "is", needsValue: true },
   { value: "not_equals", label: "is not", needsValue: true },
 ]
 
-const numberOperators: readonly VisualRoutingOperatorOption[] = [
+const numberOperators: readonly FormRoutingOperatorOption[] = [
   ...equalityOperators,
   { value: "greater_than", label: "is greater than", needsValue: true },
   { value: "greater_than_or_equal", label: "is at least", needsValue: true },
@@ -67,22 +32,22 @@ const numberOperators: readonly VisualRoutingOperatorOption[] = [
   { value: "less_than_or_equal", label: "is at most", needsValue: true },
 ]
 
-const presenceOperators: readonly VisualRoutingOperatorOption[] = [
+const presenceOperators: readonly FormRoutingOperatorOption[] = [
   { value: "is_empty", label: "is empty", needsValue: false },
   { value: "is_not_empty", label: "is not empty", needsValue: false },
 ]
 
 export function routingOperatorsForField(
   field: FormFieldDefinition,
-): readonly VisualRoutingOperatorOption[] {
+): readonly FormRoutingOperatorOption[] {
   const typed = field.type === "number" ? numberOperators : equalityOperators
   return field.required ? typed : [...typed, ...presenceOperators]
 }
 
-export function defaultRoutingCondition(
+export function createRoutingCondition(
   field: FormFieldDefinition,
   id: string,
-): VisualRoutingCondition {
+): FormRoutingCondition {
   return Object.freeze({
     id,
     fieldId: field.id,
@@ -91,16 +56,52 @@ export function defaultRoutingCondition(
   })
 }
 
-export function serializeVisualRouting(
+export function createEmptyRoutingAuthoring(fallback = "default"): FormRoutingAuthoring {
+  return Object.freeze({ version: 1, rules: Object.freeze([]), fallback })
+}
+
+/** Checks that editable source describes the runtime rules stored beside it. */
+export function routingAuthoringMatchesDefinition(
   form: FormDefinition,
-  draft: VisualRoutingDraft,
+  routing: FormRoutingDefinition,
+): boolean {
+  if (!routing.authoring) return false
+  const generated = generateFormRoutingDefinition(form, routing.authoring)
+  if (!generated.ok || generated.routing.fallback !== routing.fallback) return false
+  if (generated.routing.rules.length !== routing.rules.length) return false
+
+  return generated.routing.rules.every((expected, index) => {
+    const actual = routing.rules[index]
+    return (
+      actual?.id === expected.id &&
+      actual.when === expected.when &&
+      actual.route === expected.route &&
+      (actual.actions?.length ?? 0) === 0
+    )
+  })
+}
+
+/** Generates runtime expressions while retaining the editable visual source. */
+export function generateFormRoutingDefinition(
+  form: FormDefinition,
+  draft: FormRoutingAuthoring,
 ):
   | { readonly ok: true; readonly routing: FormRoutingDefinition }
-  | { readonly ok: false; readonly issues: readonly VisualRoutingIssue[] } {
+  | { readonly ok: false; readonly issues: readonly FormRoutingAuthoringIssue[] } {
+  let source: FormRoutingAuthoring
+  try {
+    source = snapshotFormRoutingAuthoring(draft)
+  } catch (error) {
+    if (error instanceof InvalidFormRoutingError) {
+      return { ok: false, issues: Object.freeze(error.issues) }
+    }
+    throw error
+  }
+
   const fields = new Map(form.fields.map((field) => [field.id, field]))
-  const issues: VisualRoutingIssue[] = []
+  const issues: FormRoutingAuthoringIssue[] = []
   const ruleIds = new Set<string>()
-  const rules = draft.rules.map((rule) => {
+  const rules = source.rules.map((rule) => {
     if (ruleIds.has(rule.id)) {
       issues.push({
         code: "duplicate_rule_id",
@@ -125,7 +126,18 @@ export function serializeVisualRouting(
       })
     }
 
+    const conditionIds = new Set<string>()
     const expressions = rule.conditions.map((condition) => {
+      if (conditionIds.has(condition.id)) {
+        issues.push({
+          code: "duplicate_condition_id",
+          message: "Condition IDs must be unique within a rule.",
+          ruleId: rule.id,
+          conditionId: condition.id,
+        })
+      }
+      conditionIds.add(condition.id)
+
       const field = fields.get(condition.fieldId)
       if (!field) {
         issues.push({
@@ -171,16 +183,22 @@ export function serializeVisualRouting(
     })
   })
 
-  if (!draft.fallback.trim()) {
+  if (!source.fallback.trim()) {
     issues.push({ code: "missing_fallback", message: "Choose a fallback destination." })
   }
   if (issues.length > 0) return { ok: false, issues: Object.freeze(issues) }
 
   try {
+    const authoring = snapshotFormRoutingAuthoring({
+      ...source,
+      fallback: source.fallback.trim(),
+      rules: source.rules.map((rule) => ({ ...rule, route: rule.route.trim() })),
+    })
     const routing = snapshotFormRoutingDefinition({
       version: 1,
       rules,
-      fallback: draft.fallback.trim(),
+      fallback: source.fallback.trim(),
+      authoring,
     })
     return { ok: true, routing }
   } catch (error) {
@@ -191,26 +209,26 @@ export function serializeVisualRouting(
   }
 }
 
-export async function testVisualRouting(
+export async function testFormRouting(
   form: FormDefinition,
-  draft: VisualRoutingDraft,
+  draft: FormRoutingAuthoring,
   submission: Readonly<Record<string, string | number | boolean>>,
 ): Promise<RoutingResult> {
-  const serialized = serializeVisualRouting(form, draft)
-  if (!serialized.ok) {
-    throw new Error(serialized.issues[0]?.message ?? "Routing is incomplete.")
+  const generated = generateFormRoutingDefinition(form, draft)
+  if (!generated.ok) {
+    throw new InvalidFormRoutingError(generated.issues)
   }
   const normalized = normalizeSubmission(form, submission, { mode: "json" })
   const compiled = await createRouter().compile({
     version: 1,
     schema: schemaFromForm(form),
-    rules: serialized.routing.rules,
-    fallback: serialized.routing.fallback,
+    rules: generated.routing.rules,
+    fallback: generated.routing.fallback,
   })
   return (compiled as unknown as { run(input: object): Promise<RoutingResult> }).run(normalized)
 }
 
-export function sampleSubmissionForForm(
+export function createRoutingSample(
   form: FormDefinition,
 ): Readonly<Record<string, string | number | boolean>> {
   return Object.freeze(
@@ -220,7 +238,7 @@ export function sampleSubmissionForForm(
 
 function conditionExpression(
   field: FormFieldDefinition,
-  condition: VisualRoutingCondition,
+  condition: FormRoutingCondition,
 ): string | null {
   const fieldExpression = `submission.${field.name}`
   if (condition.operator === "is_empty") return `isEmpty(${fieldExpression})`
@@ -236,7 +254,7 @@ function conditionExpression(
 
 function conditionValue(
   field: FormFieldDefinition,
-  value: VisualRoutingCondition["value"],
+  value: FormRoutingCondition["value"],
 ): string | number | boolean | null {
   switch (field.type) {
     case "number":
@@ -250,7 +268,7 @@ function conditionValue(
   }
 }
 
-function expressionOperator(operator: VisualRoutingOperator): string | null {
+function expressionOperator(operator: FormRoutingOperator): string | null {
   switch (operator) {
     case "equals":
       return "==="
@@ -273,7 +291,7 @@ function expressionOperator(operator: VisualRoutingOperator): string | null {
 function defaultValueForField(field: FormFieldDefinition): string | number | boolean {
   switch (field.type) {
     case "number":
-      return field.validation?.min ?? 1
+      return field.validation?.min ?? field.validation?.max ?? 1
     case "boolean":
       return true
     case "enum":

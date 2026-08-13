@@ -6,8 +6,12 @@ import {
   createBuilderState,
   createField,
   createFormDefinition,
+  createRoutingCondition,
   duplicateField,
+  generateFormRoutingDefinition,
   markBuilderSaved,
+  maximumRoutingAuthoringRules,
+  maximumRoutingConditionsPerRule,
   MemoryFormDefinitionStore,
   moveField,
   redoBuilder,
@@ -20,24 +24,15 @@ import {
   type FieldControl,
   type FormDefinition,
   type FormFieldDefinition,
+  type FormRoutingAuthoring,
+  type FormRoutingAuthoringRule,
+  type FormRoutingCondition,
   type FormRoutingDefinition,
 } from "@screeem/forms"
 import Link from "next/link"
-import { useMemo, useRef, useState, type RefObject } from "react"
+import { useMemo, useRef, useState } from "react"
 import { DraggableField } from "../../../components/forms/DraggableField"
-import { DraggableRule } from "../../../components/forms/DraggableRule"
-import {
-  defaultRoutingCondition,
-  routingOperatorsForField,
-  sampleSubmissionForForm,
-  serializeVisualRouting,
-  testVisualRouting,
-  type VisualRoutingCondition,
-  type VisualRoutingDraft,
-  type VisualRoutingIssue,
-  type VisualRoutingOperator,
-  type VisualRoutingRule,
-} from "../../../lib/forms/routing-authoring"
+import { RoutingEditor } from "../../../components/forms/RoutingEditor"
 
 type View = "builder" | "routing" | "preview" | "definition"
 type Fixture = "lead" | "contact" | "eligibility"
@@ -182,10 +177,11 @@ function createFixture(fixture: Fixture): FormDefinition {
   }
 }
 
-function createRoutingFixture(fixture: Fixture): VisualRoutingDraft {
+function createRoutingFixture(fixture: Fixture): FormRoutingAuthoring {
   switch (fixture) {
     case "lead":
       return {
+        version: 1,
         rules: [
           {
             id: "uk-enterprise",
@@ -230,6 +226,7 @@ function createRoutingFixture(fixture: Fixture): VisualRoutingDraft {
       }
     case "contact":
       return {
+        version: 1,
         rules: [
           {
             id: "support",
@@ -262,6 +259,7 @@ function createRoutingFixture(fixture: Fixture): VisualRoutingDraft {
       }
     case "eligibility":
       return {
+        version: 1,
         rules: [
           {
             id: "eligible",
@@ -300,7 +298,7 @@ export function FormBuilderPlayground() {
   )
   const [view, setView] = useState<View>("builder")
   const [fixture, setFixture] = useState<Fixture>("lead")
-  const [routing, setRouting] = useState<VisualRoutingDraft>(() => createRoutingFixture("lead"))
+  const [routing, setRouting] = useState<FormRoutingAuthoring>(() => createRoutingFixture("lead"))
   const [routingDirty, setRoutingDirty] = useState(true)
   const [message, setMessage] = useState<string | null>(null)
   const [persistenceStatus, setPersistenceStatus] = useState("Not saved")
@@ -386,14 +384,14 @@ export function FormBuilderPlayground() {
     commit((definition) => moveField(definition, fieldId, targetIndex), fieldId)
   }
 
-  function commitRouting(edit: (current: VisualRoutingDraft) => VisualRoutingDraft) {
+  function commitRouting(edit: (current: FormRoutingAuthoring) => FormRoutingAuthoring) {
     setRouting((current) => edit(current))
     setRoutingDirty(true)
     setMessage(null)
   }
 
   function addRoutingRule() {
-    if (routing.rules.length >= 100) {
+    if (routing.rules.length >= maximumRoutingAuthoringRules) {
       setMessage("Routing supports up to 100 rules.")
       return
     }
@@ -410,14 +408,14 @@ export function FormBuilderPlayground() {
         {
           id: `rule-${number}`,
           combinator: "all",
-          conditions: [defaultRoutingCondition(field, `condition-${number}`)],
+          conditions: [createRoutingCondition(field, `condition-${number}`)],
           route: "new-route",
         },
       ],
     }))
   }
 
-  function updateRoutingRule(ruleId: string, update: Partial<VisualRoutingRule>) {
+  function updateRoutingRule(ruleId: string, update: Partial<FormRoutingAuthoringRule>) {
     commitRouting((current) => ({
       ...current,
       rules: current.rules.map((rule) => (rule.id === ruleId ? { ...rule, ...update } : rule)),
@@ -446,12 +444,17 @@ export function FormBuilderPlayground() {
   function addRoutingCondition(ruleId: string) {
     const field = builder.definition.fields[0]
     if (!field) return
+    const rule = routing.rules.find((candidate) => candidate.id === ruleId)
+    if (!rule || rule.conditions.length >= maximumRoutingConditionsPerRule) {
+      setMessage("A routing rule supports up to 20 conditions.")
+      return
+    }
     const id = `condition-${routingIdCounter.current++}`
     commitRouting((current) => ({
       ...current,
       rules: current.rules.map((rule) =>
         rule.id === ruleId
-          ? { ...rule, conditions: [...rule.conditions, defaultRoutingCondition(field, id)] }
+          ? { ...rule, conditions: [...rule.conditions, createRoutingCondition(field, id)] }
           : rule,
       ),
     }))
@@ -460,7 +463,7 @@ export function FormBuilderPlayground() {
   function updateRoutingCondition(
     ruleId: string,
     conditionId: string,
-    update: Partial<VisualRoutingCondition>,
+    update: Partial<FormRoutingCondition>,
   ) {
     commitRouting((current) => ({
       ...current,
@@ -505,7 +508,7 @@ export function FormBuilderPlayground() {
 
   async function saveDraftSimulation() {
     try {
-      const serialized = serializeVisualRouting(builder.definition, routing)
+      const serialized = generateFormRoutingDefinition(builder.definition, routing)
       if (!serialized.ok) {
         setMessage(serialized.issues[0]?.message ?? "Routing is incomplete.")
         return null
@@ -579,60 +582,29 @@ export function FormBuilderPlayground() {
     onMove: moveSelected,
     onReorder: reorderField,
   }
-  const serializedRouting = serializeVisualRouting(builder.definition, routing)
+  const serializedRouting = generateFormRoutingDefinition(builder.definition, routing)
   const generatedRouting = serializedRouting.ok ? serializedRouting.routing : null
 
   return (
     <div className="mx-auto w-full max-w-[1680px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <header className="space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <Link
-              href="/_dev"
-              className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-900"
-            >
-              <span aria-hidden="true">←</span> Playgrounds
-            </Link>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight text-gray-950">Form builder</h1>
-              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
-                Development only
-              </span>
-            </div>
-            <p className="max-w-2xl text-sm leading-6 text-gray-600">
-              Build fields and routing rules against one headless definition. Changes stay in this
-              page.
-            </p>
+        <div className="space-y-2">
+          <Link
+            href="/_dev"
+            className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-900"
+          >
+            <span aria-hidden="true">←</span> Playgrounds
+          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-semibold tracking-tight text-gray-950">Form builder</h1>
+            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+              Development only
+            </span>
           </div>
-
-          <div className="space-y-2 text-right">
-            <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
-              {view === "builder" ? (
-                <>
-                  <ActionButton
-                    label="Undo"
-                    disabled={builder.past.length === 0}
-                    onClick={() => setBuilder((current) => undoBuilder(current))}
-                  />
-                  <ActionButton
-                    label="Redo"
-                    disabled={builder.future.length === 0}
-                    onClick={() => setBuilder((current) => redoBuilder(current))}
-                  />
-                  <span className="mx-1 h-5 w-px bg-gray-200" aria-hidden="true" />
-                </>
-              ) : null}
-              <ActionButton label="Save draft" onClick={() => void saveDraftSimulation()} />
-              <button
-                type="button"
-                onClick={() => void publishSimulation()}
-                className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-teal-700"
-              >
-                Publish
-              </button>
-            </div>
-            <p className="text-xs text-gray-500">{persistenceStatus}</p>
-          </div>
+          <p className="max-w-2xl text-sm leading-6 text-gray-600">
+            Build fields and routing rules against one headless definition. Changes stay in this
+            page.
+          </p>
         </div>
 
         <div className="grid gap-4 border-y border-gray-200 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
@@ -659,7 +631,10 @@ export function FormBuilderPlayground() {
         </div>
       </header>
 
-      <nav aria-label="Playground views" className="flex flex-wrap gap-3">
+      <nav
+        aria-label="Playground views"
+        className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"
+      >
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-xs font-medium text-gray-500">
             Fixture
@@ -692,6 +667,34 @@ export function FormBuilderPlayground() {
             ))}
           </div>
         </div>
+        <div className="flex flex-col items-start gap-1.5 sm:items-end">
+          <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+            {view === "builder" ? (
+              <>
+                <ActionButton
+                  label="Undo"
+                  disabled={builder.past.length === 0}
+                  onClick={() => setBuilder((current) => undoBuilder(current))}
+                />
+                <ActionButton
+                  label="Redo"
+                  disabled={builder.future.length === 0}
+                  onClick={() => setBuilder((current) => redoBuilder(current))}
+                />
+                <span className="mx-1 h-5 w-px bg-gray-200" aria-hidden="true" />
+              </>
+            ) : null}
+            <ActionButton label="Save draft" onClick={() => void saveDraftSimulation()} />
+            <button
+              type="button"
+              onClick={() => void publishSimulation()}
+              className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-teal-700"
+            >
+              Publish
+            </button>
+          </div>
+          <p className="px-1 text-xs text-gray-500">{persistenceStatus}</p>
+        </div>
       </nav>
 
       {message ? (
@@ -705,7 +708,7 @@ export function FormBuilderPlayground() {
 
       {view === "builder" ? <BuilderCanvas {...shared} /> : null}
       {view === "routing" ? (
-        <RoutingCanvas
+        <RoutingEditor
           definition={builder.definition}
           draft={routing}
           issues={serializedRouting.ok ? [] : serializedRouting.issues}
@@ -1006,592 +1009,6 @@ function FieldInspector(props: BuilderLayoutProps & { readonly expanded?: boolea
         <ActionButton label="Duplicate" onClick={props.onDuplicate} />
         <ActionButton label="Remove" danger onClick={props.onRemove} />
       </div>
-    </div>
-  )
-}
-
-interface RoutingCanvasProps {
-  readonly definition: FormDefinition
-  readonly draft: VisualRoutingDraft
-  readonly issues: readonly VisualRoutingIssue[]
-  readonly onAddRule: () => void
-  readonly onUpdateRule: (ruleId: string, update: Partial<VisualRoutingRule>) => void
-  readonly onRemoveRule: (ruleId: string) => void
-  readonly onReorderRule: (ruleId: string, targetIndex: number) => void
-  readonly onAddCondition: (ruleId: string) => void
-  readonly onUpdateCondition: (
-    ruleId: string,
-    conditionId: string,
-    update: Partial<VisualRoutingCondition>,
-  ) => void
-  readonly onRemoveCondition: (ruleId: string, conditionId: string) => void
-  readonly onFallbackChange: (fallback: string) => void
-}
-
-function RoutingCanvas(props: RoutingCanvasProps) {
-  const ruleLimitReached = props.draft.rules.length >= 100
-  const definitionSignature = props.definition.fields
-    .map((field) => `${field.id}:${field.name}:${field.required}:${field.type}`)
-    .join("|")
-  const testSignature = `${definitionSignature}:${JSON.stringify(props.draft)}`
-  const [sampleState, setSampleState] = useState<{
-    readonly signature: string
-    readonly values: Readonly<Record<string, string | number | boolean>>
-  }>(() => ({
-    signature: definitionSignature,
-    values: sampleSubmissionForForm(props.definition),
-  }))
-  const [testState, setTestState] = useState<{
-    readonly signature: string
-    readonly status: "idle" | "running" | "complete" | "error"
-    readonly route?: string
-    readonly matchedRule?: string | null
-    readonly message?: string
-  }>({ signature: testSignature, status: "idle" })
-  const sample =
-    sampleState.signature === definitionSignature
-      ? sampleState.values
-      : sampleSubmissionForForm(props.definition)
-  const currentTest =
-    testState.signature === testSignature
-      ? testState
-      : { signature: testSignature, status: "idle" as const }
-  const routeSuggestions = Array.from(
-    new Set([...props.draft.rules.map((rule) => rule.route), props.draft.fallback].filter(Boolean)),
-  )
-
-  function updateSample(field: FormFieldDefinition, value: string | number | boolean | undefined) {
-    const next = { ...sample }
-    if (value === undefined) delete next[field.name]
-    else next[field.name] = value
-    setSampleState({ signature: definitionSignature, values: next })
-    setTestState({ signature: testSignature, status: "idle" })
-  }
-
-  async function runTest() {
-    setTestState({ signature: testSignature, status: "running" })
-    try {
-      const result = await testVisualRouting(props.definition, props.draft, sample)
-      setTestState({
-        signature: testSignature,
-        status: "complete",
-        route: result.route,
-        matchedRule: result.matchedRule,
-      })
-    } catch (error) {
-      setTestState({
-        signature: testSignature,
-        status: "error",
-        message: error instanceof Error ? error.message : "The sample could not be evaluated.",
-      })
-    }
-  }
-
-  return (
-    <section aria-label="Routing rules" className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-      <div className="grid min-h-[680px] xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="bg-[#f3f4f2] px-4 py-5 sm:px-7 sm:py-7">
-          <div className="mx-auto max-w-4xl">
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-300/80 pb-5">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-700">
-                  Routing rules
-                </p>
-                <h2 className="mt-2 text-xl font-semibold tracking-tight text-gray-950">
-                  Send each response to the right destination
-                </h2>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-600">
-                  Rules run from top to bottom. The first matching rule wins.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={props.onAddRule}
-                disabled={ruleLimitReached}
-                title={ruleLimitReached ? "Routing supports up to 100 rules" : undefined}
-                className="rounded-md bg-teal-700 px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800"
-              >
-                {ruleLimitReached ? "100 rule limit" : "Add rule"}
-              </button>
-            </div>
-
-            {props.issues.length > 0 ? (
-              <div role="alert" className="mt-5 border-l-2 border-amber-500 bg-amber-50 px-4 py-3">
-                <p className="text-sm font-semibold text-amber-900">
-                  {props.issues.length} routing {props.issues.length === 1 ? "issue" : "issues"}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-amber-800">
-                  {props.issues[0]?.message} Fix highlighted conditions before publishing.
-                </p>
-              </div>
-            ) : null}
-
-            <div className="mt-5 space-y-4">
-              {props.draft.rules.map((rule, index) => (
-                <DraggableRule
-                  key={rule.id}
-                  ruleId={rule.id}
-                  index={index}
-                  onReorder={props.onReorderRule}
-                >
-                  {({ dragHandleRef }) => (
-                    <RoutingRuleEditor
-                      definition={props.definition}
-                      rule={rule}
-                      index={index}
-                      issues={props.issues.filter((issue) => issue.ruleId === rule.id)}
-                      matched={
-                        currentTest.status === "complete" && currentTest.matchedRule === rule.id
-                      }
-                      canMoveDown={index < props.draft.rules.length - 1}
-                      dragHandleRef={dragHandleRef}
-                      routeSuggestions={routeSuggestions}
-                      onUpdate={(update) => props.onUpdateRule(rule.id, update)}
-                      onRemove={() => props.onRemoveRule(rule.id)}
-                      onMove={(offset) => props.onReorderRule(rule.id, index + offset)}
-                      onAddCondition={() => props.onAddCondition(rule.id)}
-                      onUpdateCondition={(conditionId, update) =>
-                        props.onUpdateCondition(rule.id, conditionId, update)
-                      }
-                      onRemoveCondition={(conditionId) =>
-                        props.onRemoveCondition(rule.id, conditionId)
-                      }
-                    />
-                  )}
-                </DraggableRule>
-              ))}
-            </div>
-
-            {props.draft.rules.length === 0 ? (
-              <div className="mt-5 border-y border-dashed border-gray-300 py-12 text-center">
-                <p className="text-sm font-medium text-gray-800">No routing rules yet</p>
-                <p className="mt-1 text-xs text-gray-500">Every response will use the fallback destination.</p>
-              </div>
-            ) : null}
-
-            <div className="mt-5 flex flex-col gap-3 border-t border-gray-300 pt-5 sm:flex-row sm:items-center">
-              <div className="w-8 text-center text-xs font-semibold text-gray-400">ELSE</div>
-              <div className="min-w-0 flex-1">
-                <label className="block text-xs font-medium text-gray-600" htmlFor="routing-fallback">
-                  If no rule matches, send to
-                </label>
-                <input
-                  id="routing-fallback"
-                  list="routing-destinations"
-                  maxLength={256}
-                  value={props.draft.fallback}
-                  onChange={(event) => props.onFallbackChange(event.target.value)}
-                  className="mt-1.5 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-900 outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
-                />
-              </div>
-            </div>
-            <datalist id="routing-destinations">
-              {routeSuggestions.map((route) => <option key={route} value={route} />)}
-            </datalist>
-          </div>
-        </div>
-
-        <RoutingTestPanel
-          definition={props.definition}
-          sample={sample}
-          testState={currentTest}
-          rules={props.draft.rules}
-          onChange={updateSample}
-          onRun={() => void runTest()}
-        />
-      </div>
-    </section>
-  )
-}
-
-function RoutingRuleEditor({
-  definition,
-  rule,
-  index,
-  issues,
-  matched,
-  canMoveDown,
-  dragHandleRef,
-  routeSuggestions,
-  onUpdate,
-  onRemove,
-  onMove,
-  onAddCondition,
-  onUpdateCondition,
-  onRemoveCondition,
-}: {
-  readonly definition: FormDefinition
-  readonly rule: VisualRoutingRule
-  readonly index: number
-  readonly issues: readonly VisualRoutingIssue[]
-  readonly matched: boolean
-  readonly canMoveDown: boolean
-  readonly dragHandleRef: RefObject<HTMLButtonElement | null>
-  readonly routeSuggestions: readonly string[]
-  readonly onUpdate: (update: Partial<VisualRoutingRule>) => void
-  readonly onRemove: () => void
-  readonly onMove: (offset: number) => void
-  readonly onAddCondition: () => void
-  readonly onUpdateCondition: (conditionId: string, update: Partial<VisualRoutingCondition>) => void
-  readonly onRemoveCondition: (conditionId: string) => void
-}) {
-  return (
-    <article
-      className={`overflow-hidden rounded-xl border bg-white transition-[border-color,box-shadow] ${
-        matched
-          ? "border-teal-600 shadow-[0_0_0_3px_rgba(13,148,136,0.14)]"
-          : issues.length > 0
-            ? "border-amber-400"
-            : "border-gray-200 shadow-[0_8px_24px_rgba(15,23,42,0.05)]"
-      }`}
-    >
-      <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 px-3 py-3 sm:px-4">
-        <button
-          ref={dragHandleRef}
-          type="button"
-          aria-label={`Drag rule ${index + 1} to reorder`}
-          title="Drag to reorder"
-          className="cursor-grab rounded px-1.5 py-1 text-lg leading-none text-gray-300 hover:bg-gray-100 hover:text-teal-700 active:cursor-grabbing"
-        >
-          ⠿
-        </button>
-        <div className="flex items-center" aria-label={`Rule ${index + 1} position controls`}>
-          <button
-            type="button"
-            disabled={index === 0}
-            onClick={() => onMove(-1)}
-            aria-label={`Move rule ${index + 1} up`}
-            className="rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-teal-700 disabled:opacity-25"
-          >
-            ↑
-          </button>
-          <button
-            type="button"
-            disabled={!canMoveDown}
-            onClick={() => onMove(1)}
-            aria-label={`Move rule ${index + 1} down`}
-            className="rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-teal-700 disabled:opacity-25"
-          >
-            ↓
-          </button>
-        </div>
-        <span className="rounded bg-gray-100 px-2 py-1 text-[11px] font-bold tabular-nums text-gray-500">
-          {String(index + 1).padStart(2, "0")}
-        </span>
-        <label className="flex items-center gap-2 text-xs text-gray-500">
-          Match
-          <select
-            value={rule.combinator}
-            onChange={(event) => onUpdate({ combinator: event.target.value as "all" | "any" })}
-            className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs font-semibold text-gray-800 outline-none focus:border-teal-600"
-          >
-            <option value="all">all conditions</option>
-            <option value="any">any condition</option>
-          </select>
-        </label>
-        <div className="ml-auto flex min-w-[220px] flex-1 items-center justify-end gap-2 sm:flex-none">
-          <label className="text-xs font-medium text-gray-500" htmlFor={`route-${rule.id}`}>
-            Send to
-          </label>
-          <input
-            id={`route-${rule.id}`}
-            list="routing-destinations"
-            maxLength={256}
-            value={rule.route}
-            onChange={(event) => onUpdate({ route: event.target.value })}
-            className="min-w-0 flex-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-sm font-semibold text-gray-900 outline-none focus:border-teal-600 sm:w-40"
-          />
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={`Remove rule ${index + 1}`}
-            className="rounded px-2 py-1 text-sm text-gray-400 hover:bg-red-50 hover:text-red-600"
-          >
-            ×
-          </button>
-        </div>
-        {routeSuggestions.length === 0 ? null : <span className="sr-only">Known destinations available</span>}
-      </div>
-
-      <div className="space-y-2 px-3 py-4 sm:px-4">
-        {rule.conditions.map((condition, conditionIndex) => (
-          <RoutingConditionEditor
-            key={condition.id}
-            definition={definition}
-            condition={condition}
-            connector={conditionIndex === 0 ? "IF" : rule.combinator === "all" ? "AND" : "OR"}
-            issue={issues.find((issue) => issue.conditionId === condition.id)}
-            canRemove={rule.conditions.length > 1}
-            onUpdate={(update) => onUpdateCondition(condition.id, update)}
-            onRemove={() => onRemoveCondition(condition.id)}
-          />
-        ))}
-        <button
-          type="button"
-          onClick={onAddCondition}
-          className="ml-10 rounded px-2 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-50"
-        >
-          + Add condition
-        </button>
-      </div>
-    </article>
-  )
-}
-
-function RoutingConditionEditor({
-  definition,
-  condition,
-  connector,
-  issue,
-  canRemove,
-  onUpdate,
-  onRemove,
-}: {
-  readonly definition: FormDefinition
-  readonly condition: VisualRoutingCondition
-  readonly connector: "IF" | "AND" | "OR"
-  readonly issue?: VisualRoutingIssue
-  readonly canRemove: boolean
-  readonly onUpdate: (update: Partial<VisualRoutingCondition>) => void
-  readonly onRemove: () => void
-}) {
-  const field = definition.fields.find((candidate) => candidate.id === condition.fieldId)
-  const operators = field ? routingOperatorsForField(field) : []
-  const selectedOperator = operators.find((operator) => operator.value === condition.operator)
-
-  function selectField(fieldId: string) {
-    const nextField = definition.fields.find((candidate) => candidate.id === fieldId)
-    if (!nextField) return
-    const next = defaultRoutingCondition(nextField, condition.id)
-    onUpdate({ fieldId: next.fieldId, operator: next.operator, value: next.value })
-  }
-
-  function selectOperator(operator: VisualRoutingOperator) {
-    const option = operators.find((candidate) => candidate.value === operator)
-    if (!option) return
-    onUpdate({
-      operator,
-      value: option.needsValue
-        ? condition.value ?? defaultRoutingCondition(field!, condition.id).value
-        : undefined,
-    })
-  }
-
-  return (
-    <div>
-      <div
-        className={`grid items-center gap-2 rounded-lg p-2 sm:grid-cols-[32px_minmax(150px,1fr)_minmax(140px,0.9fr)_minmax(130px,0.9fr)_32px] ${
-          issue ? "bg-amber-50" : "bg-gray-50/80"
-        }`}
-      >
-        <span className="text-center text-[10px] font-bold tracking-wider text-gray-400">
-          {connector}
-        </span>
-        <select
-          aria-label={`${connector} field`}
-          value={condition.fieldId}
-          onChange={(event) => selectField(event.target.value)}
-          className={`min-w-0 rounded-md border bg-white px-2.5 py-2 text-sm outline-none focus:border-teal-600 ${
-            field ? "border-gray-200 text-gray-900" : "border-amber-400 text-amber-900"
-          }`}
-        >
-          {!field ? <option value={condition.fieldId}>Removed field</option> : null}
-          {definition.fields.map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
-              {candidate.label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label={`${connector} operator`}
-          value={condition.operator}
-          disabled={!field}
-          onChange={(event) => selectOperator(event.target.value as VisualRoutingOperator)}
-          className="min-w-0 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-800 outline-none focus:border-teal-600 disabled:bg-gray-100"
-        >
-          {!selectedOperator ? <option value={condition.operator}>Unsupported operator</option> : null}
-          {operators.map((operator) => (
-            <option key={operator.value} value={operator.value}>{operator.label}</option>
-          ))}
-        </select>
-        {field && selectedOperator?.needsValue ? (
-          <RoutingConditionValue
-            field={field}
-            value={condition.value}
-            onChange={(value) => onUpdate({ value })}
-          />
-        ) : (
-          <span className="hidden text-xs text-gray-400 sm:block">No value needed</span>
-        )}
-        <button
-          type="button"
-          disabled={!canRemove}
-          onClick={onRemove}
-          aria-label="Remove condition"
-          className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:invisible"
-        >
-          ×
-        </button>
-      </div>
-      {issue ? <p className="ml-10 mt-1 text-xs font-medium text-amber-800">{issue.message}</p> : null}
-    </div>
-  )
-}
-
-function RoutingConditionValue({
-  field,
-  value,
-  onChange,
-}: {
-  readonly field: FormFieldDefinition
-  readonly value: VisualRoutingCondition["value"]
-  readonly onChange: (value: string | number | boolean | undefined) => void
-}) {
-  const className = "min-w-0 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-900 outline-none focus:border-teal-600"
-  switch (field.type) {
-    case "boolean":
-      return (
-        <select value={String(value ?? true)} onChange={(event) => onChange(event.target.value === "true")} className={className} aria-label={`${field.label} value`}>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </select>
-      )
-    case "enum":
-      return (
-        <select value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)} className={className} aria-label={`${field.label} value`}>
-          {field.values.map((option) => <option key={option} value={option}>{option}</option>)}
-        </select>
-      )
-    case "number":
-      return (
-        <input type="number" value={typeof value === "number" ? value : ""} onChange={(event) => onChange(event.target.value === "" ? undefined : event.target.valueAsNumber)} className={className} aria-label={`${field.label} value`} />
-      )
-    case "string":
-      return (
-        <input type={field.control === "email" ? "email" : "text"} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)} className={className} aria-label={`${field.label} value`} />
-      )
-  }
-}
-
-function RoutingTestPanel({
-  definition,
-  sample,
-  testState,
-  rules,
-  onChange,
-  onRun,
-}: {
-  readonly definition: FormDefinition
-  readonly sample: Readonly<Record<string, string | number | boolean>>
-  readonly testState: {
-    readonly status: "idle" | "running" | "complete" | "error"
-    readonly route?: string
-    readonly matchedRule?: string | null
-    readonly message?: string
-  }
-  readonly rules: readonly VisualRoutingRule[]
-  readonly onChange: (field: FormFieldDefinition, value: string | number | boolean | undefined) => void
-  readonly onRun: () => void
-}) {
-  const matchedRuleIndex = rules.findIndex((rule) => rule.id === testState.matchedRule)
-
-  return (
-    <aside className="border-t border-gray-200 bg-white px-5 py-6 xl:border-l xl:border-t-0">
-      <div className="sticky top-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Test routing</p>
-        <h2 className="mt-2 text-lg font-semibold text-gray-950">Try a sample response</h2>
-        <p className="mt-1 text-xs leading-5 text-gray-500">Values stay in this browser and are evaluated against the current draft.</p>
-
-        <div className="mt-5 max-h-[420px] space-y-3 overflow-y-auto pr-1">
-          {definition.fields.map((field) => (
-            <SampleRoutingInput
-              key={field.id}
-              field={field}
-              included={Object.prototype.hasOwnProperty.call(sample, field.name)}
-              value={sample[field.name]}
-              onChange={(value) => onChange(field, value)}
-            />
-          ))}
-        </div>
-
-        <button
-          type="button"
-          disabled={testState.status === "running"}
-          onClick={onRun}
-          className="mt-5 w-full rounded-md bg-gray-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
-        >
-          {testState.status === "running" ? "Testing…" : "Test this response"}
-        </button>
-
-        {testState.status === "complete" ? (
-          <div role="status" className="mt-4 border-l-2 border-teal-600 bg-teal-50 px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-teal-700">Destination</p>
-            <p className="mt-1 text-lg font-semibold text-gray-950">{testState.route}</p>
-            <p className="mt-1 text-xs text-gray-600">
-              {matchedRuleIndex >= 0
-                ? `Matched rule ${String(matchedRuleIndex + 1).padStart(2, "0")}`
-                : "No rule matched · fallback used"}
-            </p>
-          </div>
-        ) : null}
-        {testState.status === "error" ? (
-          <p role="alert" className="mt-4 border-l-2 border-red-500 bg-red-50 px-3 py-2 text-xs leading-5 text-red-800">{testState.message}</p>
-        ) : null}
-      </div>
-    </aside>
-  )
-}
-
-function SampleRoutingInput({
-  field,
-  included,
-  value,
-  onChange,
-}: {
-  readonly field: FormFieldDefinition
-  readonly included: boolean
-  readonly value?: string | number | boolean
-  readonly onChange: (value: string | number | boolean | undefined) => void
-}) {
-  const inputClass = "mt-1.5 w-full rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-900 outline-none focus:border-teal-600"
-  const defaultValue = sampleSubmissionForForm({
-    formatVersion: 1,
-    title: "Sample",
-    submitLabel: "Submit",
-    successMessage: "Thanks",
-    fields: [field],
-  })[field.name]
-
-  return (
-    <div className="rounded-lg bg-gray-50 px-3 py-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <label className="text-xs font-medium text-gray-700" htmlFor={`sample-${field.id}`}>{field.label}</label>
-        {!field.required ? (
-          <label className="flex items-center gap-1.5 text-[11px] text-gray-500">
-            <input type="checkbox" checked={included} onChange={(event) => onChange(event.target.checked ? defaultValue : undefined)} className="accent-teal-600" />
-            Include
-          </label>
-        ) : null}
-      </div>
-      {included ? (
-        field.type === "boolean" ? (
-          <select id={`sample-${field.id}`} value={String(value ?? false)} onChange={(event) => onChange(event.target.value === "true")} className={inputClass}>
-            <option value="true">Yes</option><option value="false">No</option>
-          </select>
-        ) : field.type === "enum" ? (
-          <select id={`sample-${field.id}`} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)} className={inputClass}>
-            {field.values.map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-        ) : (
-          <input
-            id={`sample-${field.id}`}
-            type={field.type === "number" ? "number" : field.control === "email" ? "email" : "text"}
-            value={value === undefined ? "" : String(value)}
-            onChange={(event) => onChange(field.type === "number" ? (event.target.value === "" ? undefined : event.target.valueAsNumber) : event.target.value)}
-            className={inputClass}
-          />
-        )
-      ) : <p className="mt-1.5 text-xs italic text-gray-400">Not included in sample</p>}
     </div>
   )
 }
