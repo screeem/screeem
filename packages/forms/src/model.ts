@@ -154,7 +154,17 @@ export interface StoredSubmission {
   readonly formId: string
   readonly publicationVersion: number | null
   readonly values: Readonly<Record<string, string | number | boolean>>
+  readonly routing: SubmissionRoutingResult
   readonly createdAt: string
+}
+
+export type SubmissionRoutingStatus = "not_configured" | "matched" | "fallback" | "failed"
+
+export interface SubmissionRoutingResult {
+  readonly status: SubmissionRoutingStatus
+  readonly route: string | null
+  readonly matchedRule: string | null
+  readonly error: string | null
 }
 
 export interface SubmissionIssue {

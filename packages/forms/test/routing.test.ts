@@ -1,13 +1,17 @@
-import { describe, expect, it } from "vitest"
-import { createRouter, schemaFromForm } from "@screeem/routing"
+import { describe, expect, it, vi } from "vitest"
+import { Effect } from "effect"
+import { createRouter, schemaFromForm, type } from "@screeem/routing"
 import {
   MemoryFormDefinitionStore,
   addField,
   createField,
   createFormDefinition,
   compileFormRoutingDefinition,
+  evaluateFormRoutingDefinition,
   InvalidFormRoutingError,
   normalizeSubmission,
+  matchedSubmissionRouting,
+  snapshotSubmissionRoutingResult,
   type FormDefinition,
   snapshotFormRoutingDefinition,
   updateField,
@@ -111,6 +115,44 @@ describe("routing integration", () => {
     })
   })
 
+  it("selects a route without running registered actions", async () => {
+    const run = vi.fn(() => Effect.succeed({}))
+    const router = createRouter().registerAction({
+      name: "notify",
+      input: type.object({}),
+      run,
+    })
+    const definition = updateField(
+      addField(
+        createFormDefinition("Qualification"),
+        createField("number", { id: "employees", name: "employees", label: "Employees" }),
+      ),
+      "employees",
+      { required: true },
+    )
+
+    await expect(
+      evaluateFormRoutingDefinition(
+        definition,
+        {
+          version: 1,
+          rules: [
+            {
+              id: "enterprise",
+              when: "submission.employees >= 500",
+              route: "sales",
+              actions: [{ use: "notify" }],
+            },
+          ],
+          fallback: "review",
+        },
+        { employees: 500 },
+        router,
+      ),
+    ).resolves.toMatchObject({ route: "sales", matchedRule: "enterprise" })
+    expect(run).not.toHaveBeenCalled()
+  })
+
   it("rejects non-data and unknown routing properties before persistence", () => {
     const routing = {
       version: 1,
@@ -126,6 +168,32 @@ describe("routing integration", () => {
       fallback: { value: "review", enumerable: true },
     })
     expect(() => snapshotFormRoutingDefinition(accessor)).toThrow(InvalidFormRoutingError)
+  })
+
+  it("snapshots only internally consistent submission routing outcomes", () => {
+    expect(matchedSubmissionRouting("sales", "qualified")).toEqual({
+      status: "matched",
+      route: "sales",
+      matchedRule: "qualified",
+      error: null,
+    })
+    expect(() =>
+      snapshotSubmissionRoutingResult({
+        status: "matched",
+        route: "sales",
+        matchedRule: null,
+        error: null,
+      }),
+    ).toThrow(TypeError)
+    expect(() =>
+      snapshotSubmissionRoutingResult({
+        status: "fallback",
+        route: "review",
+        matchedRule: null,
+        error: null,
+        extra: true,
+      }),
+    ).toThrow(TypeError)
   })
 
   it("accepts routing strings at their persistence boundaries", () => {

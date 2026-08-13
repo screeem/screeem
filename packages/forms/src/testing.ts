@@ -9,6 +9,10 @@ import {
 } from "./errors.js"
 import type { FormDefinition, FormRoutingDefinition, StoredSubmission } from "./model.js"
 import {
+  matchedSubmissionRouting,
+  notConfiguredSubmissionRouting,
+} from "./routing-result.js"
+import {
   FormAlreadyExistsError,
   FormDraftAlreadyPublishedError,
   type FormDefinitionStore,
@@ -393,6 +397,20 @@ export function formSubmissionStoreContractCases(
       assertEqual(secondRead[0]?.values.name, "Ada", "repeated submission snapshot")
       assert(firstRead !== secondRead, "list calls must return distinct snapshots")
     }),
+    contractCase("filters submissions by selected route", factory, async (store) => {
+      await store.save({
+        ...submission("submission-sales", "form-routes", 1, { name: "Ada" }),
+        routing: matchedSubmissionRouting("sales", "qualified"),
+      })
+      await store.save({
+        ...submission("submission-review", "form-routes", 1, { name: "Grace" }),
+        routing: matchedSubmissionRouting("review", "manual"),
+      })
+
+      const sales = await store.list("form-routes", { route: "sales" })
+      assertEqual(sales.length, 1, "route-filtered submission count")
+      assertEqual(sales[0]?.routing.route, "sales", "selected route")
+    }),
     contractCase("rejects duplicate submission ids", factory, async (store) => {
       await store.save(submission("submission-duplicate", "form-a", 1, { name: "First" }))
       await assertRejects(
@@ -412,6 +430,19 @@ export function formSubmissionStoreContractCases(
           store.save({
             ...submission("submission-unsafe", "form-a", 1, {}),
             values: unsafeValues,
+          }),
+        InvalidSubmissionError,
+      )
+      await assertRejects(
+        () =>
+          store.save({
+            ...submission("submission-invalid-routing", "form-a", 1, {}),
+            routing: {
+              status: "matched",
+              route: "sales",
+              matchedRule: null,
+              error: null,
+            } as unknown as StoredSubmission["routing"],
           }),
         InvalidSubmissionError,
       )
@@ -488,6 +519,7 @@ function submission(
     formId,
     publicationVersion,
     values,
+    routing: notConfiguredSubmissionRouting(),
     createdAt: "2026-01-01T00:00:00.000Z",
   }
 }

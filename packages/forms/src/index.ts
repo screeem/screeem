@@ -56,6 +56,8 @@ export {
   type NumberValidation,
   type PublishedForm,
   type StoredSubmission,
+  type SubmissionRoutingResult,
+  type SubmissionRoutingStatus,
   type StringFieldDefinition,
   type StringValidation,
   type SubmissionIssue,
@@ -79,9 +81,18 @@ export {
 } from "./routing-authoring-contract.js"
 export {
   compileFormRoutingDefinition,
+  compileFormRoutingSelector,
+  evaluateFormRoutingDefinition,
   maximumFormRoutingBytes,
   snapshotFormRoutingDefinition,
   type FormRoutingCompiler,
 } from "./routing.js"
+export {
+  failedSubmissionRouting,
+  fallbackSubmissionRouting,
+  matchedSubmissionRouting,
+  notConfiguredSubmissionRouting,
+  snapshotSubmissionRoutingResult,
+} from "./routing-result.js"
 export * from "./stores.js"
 export * from "./submission.js"

@@ -14,12 +14,14 @@ import type {
   FormRoutingDefinition,
   PublishedForm,
   StoredSubmission,
+  SubmissionRoutingResult,
 } from "./model.js"
 import {
   compileFormRoutingDefinition,
   snapshotFormRoutingDefinition,
   type FormRoutingCompiler,
 } from "./routing.js"
+import { snapshotSubmissionRoutingResult } from "./routing-result.js"
 
 export type PublishedAvailability = Extract<FormAvailability, "active" | "paused">
 
@@ -82,7 +84,11 @@ export interface FormDefinitionStore {
 
 export interface FormSubmissionStore {
   save(submission: StoredSubmission): Promise<StoredSubmission>
-  list(formId: string): Promise<readonly StoredSubmission[]>
+  list(formId: string, options?: SubmissionListOptions): Promise<readonly StoredSubmission[]>
+}
+
+export interface SubmissionListOptions {
+  readonly route?: string
 }
 
 interface StoredFormState {
@@ -258,9 +264,15 @@ export class MemoryFormSubmissionStore implements FormSubmissionStore {
     return snapshotSubmission(stored)
   }
 
-  async list(formId: string): Promise<readonly StoredSubmission[]> {
+  async list(
+    formId: string,
+    options: SubmissionListOptions = {},
+  ): Promise<readonly StoredSubmission[]> {
+    const route = snapshotRouteFilter(options.route)
     return Object.freeze(
-      (this.#submissions.get(formId) ?? []).map((submission) => snapshotSubmission(submission)),
+      (this.#submissions.get(formId) ?? [])
+        .filter((submission) => route === undefined || submission.routing.route === route)
+        .map((submission) => snapshotSubmission(submission)),
     )
   }
 }
@@ -317,13 +329,31 @@ function snapshotRecord(state: StoredFormState): FormRecord {
 
 function snapshotSubmission(submission: StoredSubmission): StoredSubmission {
   const values = snapshotSubmissionValues(submission.values)
+  let routing: SubmissionRoutingResult
+  try {
+    routing = snapshotSubmissionRoutingResult(submission.routing)
+  } catch {
+    throw invalidSubmission(
+      "invalid_routing_result",
+      "Submission routing result is invalid",
+    )
+  }
   return Object.freeze({
     id: submission.id,
     formId: submission.formId,
     publicationVersion: submission.publicationVersion,
     values,
+    routing,
     createdAt: submission.createdAt,
   })
+}
+
+function snapshotRouteFilter(route: string | undefined): string | undefined {
+  if (route === undefined) return undefined
+  if (typeof route !== "string" || route.length > 256) {
+    throw new TypeError("Submission route filter is invalid")
+  }
+  return route
 }
 
 function snapshotSubmissionValues(
