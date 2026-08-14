@@ -38,6 +38,26 @@ export const socialAccounts = pgTable(
   (table) => [index("social_accounts_team_created_idx").on(table.teamId, table.createdAt)],
 )
 
+export const calendarEvents = pgTable(
+  "calendar_events",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    teamId: uuid("team_id").notNull(),
+    aggregateId: uuid("aggregate_id").notNull(),
+    clientEventId: uuid("client_event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").notNull().default({}),
+    revertsEventId: bigint("reverts_event_id", { mode: "number" }),
+    actorId: uuid("actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("calendar_events_team_client_key").on(table.teamId, table.clientEventId),
+    index("calendar_events_team_id_id_idx").on(table.teamId, table.id),
+    index("calendar_events_aggregate_id_id_idx").on(table.teamId, table.aggregateId, table.id),
+  ],
+)
+
 export const apiKeys = pgTable(
   "api_keys",
   {
