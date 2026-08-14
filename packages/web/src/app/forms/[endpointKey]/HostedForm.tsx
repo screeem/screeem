@@ -1,13 +1,17 @@
 "use client"
 
-import type { FormDefinition, NormalizedSubmission } from "@screeem/forms"
+import type {
+  FormDefinition,
+  NormalizedSubmission,
+  PublishedAvailability,
+} from "@screeem/forms"
 import { RespondentForm } from "@/components/forms/RespondentForm"
 import { useEffect, useState } from "react"
 
 interface PublicFormResponse {
   readonly form?: {
     readonly name?: string
-    readonly availability?: "active" | "paused"
+    readonly availability?: PublishedAvailability
   }
   readonly published?: {
     readonly version: number

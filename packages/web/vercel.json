@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm --filter @screeem/web... build"
+  "buildCommand": "pnpm --filter @screeem/web... build",
+  "crons": [
+    {
+      "path": "/api/internal/form-event-deliveries",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }

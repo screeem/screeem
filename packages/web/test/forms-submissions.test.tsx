@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import type { SubmissionRoutingStatus } from "@screeem/forms"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }))
 
 import { Forms } from "../src/app/dashboard/Forms"
+import type { FormEventDeliverySummary } from "../src/lib/forms/form-delivery-contract"
 
 afterEach(() => {
   cleanup()
@@ -40,7 +42,20 @@ describe("form submission routing results", () => {
       .mockResolvedValueOnce(
         response({
           routes: ["review", "sales"],
-          submissions: [submission("matched", "sales", "enterprise")],
+          submissions: [
+            submission("matched", "sales", "enterprise", [
+              {
+                submission_id: "matched-submission",
+                delivery_key: "submission-one:routing.matched:0",
+                registration_name: "notify",
+                event_type: "routing.matched",
+                delivery_kind: "routing_action",
+                status: "succeeded",
+                attempt_count: 1,
+                last_error: null,
+              },
+            ]),
+          ],
         }),
       )
       .mockResolvedValueOnce(
@@ -57,6 +72,9 @@ describe("form submission routing results", () => {
     await user.click(await screen.findByRole("button", { name: "Submissions" }))
     expect((await screen.findByText(/Routed to/)).textContent).toContain(
       "sales · matched enterprise",
+    )
+    expect(screen.getByText("notify").closest("p")?.textContent).toContain(
+      "notify · succeeded",
     )
 
     await user.selectOptions(
@@ -116,6 +134,36 @@ describe("form submission routing results", () => {
     await waitFor(() => expect(screen.queryByText(/matched enterprise/)).toBeNull())
   })
 
+  it("clears submissions when a destination filter fails to load", async () => {
+    const failedFilter = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response({ forms: [form] }))
+      .mockResolvedValueOnce(
+        response({
+          routes: ["review", "sales"],
+          submissions: [submission("matched", "sales", "enterprise")],
+        }),
+      )
+      .mockImplementationOnce(() => failedFilter.promise)
+    vi.stubGlobal("fetch", fetchMock)
+    const user = userEvent.setup()
+
+    render(<Forms teamId="team-one" canManage={false} />)
+    await user.click(await screen.findByRole("button", { name: "Submissions" }))
+    expect(await screen.findByText(/matched enterprise/)).toBeTruthy()
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Filter submissions by destination" }),
+      "review",
+    )
+    expect(screen.queryByText(/matched enterprise/)).toBeNull()
+    act(() => failedFilter.resolve(response({ error: "Could not filter" }, 500)))
+
+    expect(await screen.findByText("Could not filter")).toBeTruthy()
+    expect(screen.queryByText(/matched enterprise/)).toBeNull()
+  })
+
   it("discards submission state and requests when the team changes", async () => {
     const oldTeamSubmissions = deferredResponse()
     const fetchMock = vi
@@ -147,6 +195,72 @@ describe("form submission routing results", () => {
     await waitFor(() => expect(screen.queryByText(/matched enterprise/)).toBeNull())
     expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/teams/team-two/forms")
   })
+
+  it("does not show one form's submissions after switching to a form that fails to load", async () => {
+    const secondForm = { ...form, id: "form-two", name: "Second form", endpoint_key: "key-two" }
+    const failedLoad = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response({ forms: [form, secondForm] }))
+      .mockResolvedValueOnce(
+        response({
+          routes: ["sales"],
+          submissions: [submission("matched", "sales", "enterprise")],
+        }),
+      )
+      .mockImplementationOnce(() => failedLoad.promise)
+    vi.stubGlobal("fetch", fetchMock)
+    const user = userEvent.setup()
+
+    render(<Forms teamId="team-one" canManage={false} />)
+    const buttons = await screen.findAllByRole("button", { name: "Submissions" })
+    await user.click(buttons[0]!)
+    expect(await screen.findByText(/matched enterprise/)).toBeTruthy()
+
+    await user.click(buttons[1]!)
+    expect(screen.queryByText(/matched enterprise/)).toBeNull()
+    act(() => failedLoad.resolve(response({ error: "unavailable" }, 500)))
+
+    expect(await screen.findByText("unavailable")).toBeTruthy()
+    expect(screen.queryByText(/matched enterprise/)).toBeNull()
+  })
+
+  it("reports a malformed submissions response without rendering it", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response({ forms: [form] }))
+      .mockResolvedValueOnce(response({ routes: [], submissions: [{}] }))
+    vi.stubGlobal("fetch", fetchMock)
+    const user = userEvent.setup()
+
+    render(<Forms teamId="team-one" canManage={false} />)
+    await user.click(await screen.findByRole("button", { name: "Submissions" }))
+
+    expect(await screen.findByText("Could not load submissions")).toBeTruthy()
+    expect(screen.queryByText("Invalid Date")).toBeNull()
+  })
+
+  it("accepts submissions returned before action summaries were added", async () => {
+    const olderSubmission = submission(
+      "matched",
+      "sales",
+      "enterprise",
+    )
+    Reflect.deleteProperty(olderSubmission, "event_deliveries")
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response({ forms: [form] }))
+      .mockResolvedValueOnce(response({ routes: ["sales"], submissions: [olderSubmission] }))
+    vi.stubGlobal("fetch", fetchMock)
+    const user = userEvent.setup()
+
+    render(<Forms teamId="team-one" canManage={false} />)
+    await user.click(await screen.findByRole("button", { name: "Submissions" }))
+
+    expect((await screen.findByText(/Routed to/)).textContent).toContain(
+      "sales · matched enterprise",
+    )
+  })
 })
 
 const form = {
@@ -165,25 +279,27 @@ const form = {
 }
 
 function submission(
-  routing_status: "matched" | "fallback",
-  routing_route: string,
-  matched_rule_id: string | null,
+  routingStatus: Extract<SubmissionRoutingStatus, "matched" | "fallback">,
+  routingRoute: string,
+  matchedRuleId: string | null,
+  eventDeliveries: readonly FormEventDeliverySummary[] = [],
 ) {
   return {
-    id: `${routing_status}-submission`,
+    id: `${routingStatus}-submission`,
     payload: { employees: 500 },
     origin: null,
     created_at: "2026-08-13T09:00:00.000Z",
     publication_version: 2,
-    routing_status,
-    routing_route,
-    matched_rule_id,
+    routing_status: routingStatus,
+    routing_route: routingRoute,
+    matched_rule_id: matchedRuleId,
     routing_error: null,
+    event_deliveries: eventDeliveries,
   }
 }
 
-function response(body: unknown) {
-  return { ok: true, json: async () => body }
+function response(body: unknown, status = 200) {
+  return { ok: status >= 200 && status < 300, status, json: async () => body }
 }
 
 function deferredResponse() {

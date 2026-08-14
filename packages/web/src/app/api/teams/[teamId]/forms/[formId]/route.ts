@@ -1,3 +1,4 @@
+import type { PublishedAvailability } from "@screeem/forms"
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -58,7 +59,7 @@ export async function PATCH(
   if (denied) return denied
   const body = (await request.json().catch(() => null)) as {
     isActive?: boolean
-    availability?: "active" | "paused"
+    availability?: PublishedAvailability
     requiresTurnstile?: boolean
     submissionSchema?: unknown
   } | null

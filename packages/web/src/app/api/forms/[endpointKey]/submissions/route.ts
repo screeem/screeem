@@ -16,10 +16,28 @@ import {
 } from "@/lib/forms/public"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { validateSubmission, type SubmissionSchema } from "@/lib/forms/schema"
+import { runAfterResponse } from "../../../../../lib/forms/after-response"
+import {
+  executeFormEventDeliveries,
+  orderFormEventDeliveries,
+  planFormRoutingDeliveries,
+} from "../../../../../lib/forms/form-event-deliveries"
+import {
+  createFormPersistence,
+  type FormPersistence,
+  type PublicSubmissionSaveStatus,
+} from "../../../../../lib/forms/routing-persistence"
+import { productionFormAutomationRegistry } from "../../../../../lib/forms/form-registrations"
+import {
+  snapshotFormEvent,
+  type FormEvent,
+  type StoredFormEventDelivery,
+} from "../../../../../lib/forms/form-actions"
 import { evaluatePublishedFormRouting } from "../../../../../lib/forms/routing-runtime"
 
 const MAX_BYTES = 64 * 1024
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+export const maxDuration = 60
 
 export async function OPTIONS(
   request: NextRequest,
@@ -81,9 +99,10 @@ export async function POST(
   if (length > MAX_BYTES) return tooLarge(headers)
   try {
     const published = await loadActivePublicDefinition(admin, form)
+    const persistence = createFormPersistence()
     return published
-      ? await structuredSubmission(request, admin, form, published, origin, headers)
-      : await legacySubmission(request, admin, form, origin, headers)
+      ? await structuredSubmission(request, persistence, form, published, origin, headers)
+      : await legacySubmission(request, persistence, form, origin, headers)
   } catch (error) {
     if (error instanceof PublicDefinitionUnavailableError) {
       return NextResponse.json({ error: "Form not found" }, { status: 404, headers })
@@ -92,11 +111,9 @@ export async function POST(
   }
 }
 
-type SupabaseAdmin = ReturnType<typeof createAdminClient>
-
 async function structuredSubmission(
   request: NextRequest,
-  admin: SupabaseAdmin,
+  persistence: FormPersistence,
   form: PublicFormRecord,
   published: {
     readonly version: number
@@ -129,6 +146,24 @@ async function structuredSubmission(
     return invalidSubmission(result.left, headers)
   }
 
+  const evaluationId = crypto.randomUUID()
+  const submissionId = crypto.randomUUID()
+  const identifiers = {
+    tenantId: form.teamId,
+    formId: form.id,
+    publicationVersion: published.version,
+    submissionId,
+  }
+  const beforeEvent = snapshotFormEvent({
+    eventId: `${evaluationId}:before`,
+    tenantId: form.teamId,
+    formId: form.id,
+    type: "routing.evaluation.before",
+    occurredAt: new Date().toISOString(),
+    payload: { publicationVersion: published.version, evaluationId, submissionId },
+  })
+  await productionFormAutomationRegistry.runInline(beforeEvent)
+  const evaluationStartedAt = performance.now()
   const routing = await evaluatePublishedFormRouting(
     form.id,
     published.version,
@@ -136,24 +171,87 @@ async function structuredSubmission(
     published.routing,
     result.right,
   )
+  const afterEvent = snapshotFormEvent({
+    eventId: `${evaluationId}:after`,
+    tenantId: form.teamId,
+    formId: form.id,
+    type: "routing.evaluation.after",
+    occurredAt: new Date().toISOString(),
+    payload: {
+      publicationVersion: published.version,
+      evaluationId,
+      submissionId,
+      route: routing.route,
+      matchedRule: routing.matchedRule,
+      outcome: routing.status,
+      durationMs: Math.max(0, performance.now() - evaluationStartedAt),
+    },
+  })
+  await productionFormAutomationRegistry.runInline(afterEvent)
+  const matchedEvent = matchedRoutingEvent(
+    identifiers,
+    routing,
+    result.right,
+  )
+  const beforeSaveEvent = submissionEvent(
+    "submission.before_save",
+    identifiers,
+    result.right,
+    routing,
+  )
+  const acceptedEvent = submissionEvent(
+    "submission.accepted",
+    identifiers,
+    result.right,
+    routing,
+  )
+  if (matchedEvent) await productionFormAutomationRegistry.runInline(matchedEvent)
+  await productionFormAutomationRegistry.runInline(beforeSaveEvent)
+  const deliveries = orderFormEventDeliveries([
+    ...productionFormAutomationRegistry.planDurable(beforeEvent),
+    ...productionFormAutomationRegistry.planDurable(afterEvent),
+    ...planFormRoutingDeliveries(published.routing, routing, matchedEvent),
+    ...productionFormAutomationRegistry.planDurable(beforeSaveEvent),
+    ...productionFormAutomationRegistry.planDurable(acceptedEvent),
+  ], identifiers)
   const saved = await saveActiveSubmission(
-    admin,
+    persistence,
+    submissionId,
+    form.teamId,
     form.id,
     published.version,
     result.right,
     routing,
+    deliveries,
     origin,
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
   )
   if (saved === "unavailable") return unavailable(headers)
   if (saved === "rate-limited") return rateLimited(headers)
   if (saved === "failed") return saveFailure(headers)
+  await runAfterResponse(async () => {
+    await Promise.all([
+      productionFormAutomationRegistry.runIsolated(beforeEvent),
+      productionFormAutomationRegistry.runIsolated(afterEvent),
+      ...(matchedEvent ? [productionFormAutomationRegistry.runIsolated(matchedEvent)] : []),
+      productionFormAutomationRegistry.runIsolated(beforeSaveEvent),
+      productionFormAutomationRegistry.runIsolated(acceptedEvent),
+    ])
+    if (deliveries.length > 0) {
+      await executeFormEventDeliveries({
+        definition: published.definition,
+        routing: published.routing,
+        deliveries,
+        store: persistence,
+      })
+    }
+  })
   return success(request, form.successUrl, headers, published.version)
 }
 
 async function legacySubmission(
   request: NextRequest,
-  admin: SupabaseAdmin,
+  persistence: FormPersistence,
   form: PublicFormRecord,
   origin: string | null,
   headers: Record<string, string>,
@@ -180,18 +278,60 @@ async function legacySubmission(
     }
   }
 
+  const submissionId = crypto.randomUUID()
+  const identifiers = {
+    tenantId: form.teamId,
+    formId: form.id,
+    publicationVersion: null,
+    submissionId,
+  }
+  const routing = notConfiguredSubmissionRouting()
+  const beforeSaveEvent = submissionEvent(
+    "submission.before_save",
+    identifiers,
+    parsed.payload,
+    routing,
+  )
+  const acceptedEvent = submissionEvent(
+    "submission.accepted",
+    identifiers,
+    parsed.payload,
+    routing,
+  )
+  await productionFormAutomationRegistry.runInline(beforeSaveEvent)
+  const deliveries = orderFormEventDeliveries([
+    ...productionFormAutomationRegistry.planDurable(beforeSaveEvent),
+    ...productionFormAutomationRegistry.planDurable(acceptedEvent),
+  ], identifiers)
   const saved = await saveActiveSubmission(
-    admin,
+    persistence,
+    submissionId,
+    form.teamId,
     form.id,
     null,
     parsed.payload,
-    notConfiguredSubmissionRouting(),
+    routing,
+    deliveries,
     origin,
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
   )
   if (saved === "unavailable") return unavailable(headers)
   if (saved === "rate-limited") return rateLimited(headers)
   if (saved === "failed") return saveFailure(headers)
+  await runAfterResponse(async () => {
+    await Promise.all([
+      productionFormAutomationRegistry.runIsolated(beforeSaveEvent),
+      productionFormAutomationRegistry.runIsolated(acceptedEvent),
+    ])
+    if (deliveries.length > 0) {
+      await executeFormEventDeliveries({
+        definition: null,
+        routing: null,
+        deliveries,
+        store: persistence,
+      })
+    }
+  })
   return success(request, form.successUrl, headers)
 }
 
@@ -208,16 +348,18 @@ async function readStructuredPayload(
   | { readonly response: NextResponse }
 > {
   try {
+    const body = await readBoundedBody(request)
+    if (body === null) return { response: tooLarge(headers) }
     const contentType = request.headers.get("content-type") ?? ""
     if (contentType.includes("application/json")) {
-      const input: unknown = await request.json()
+      const input: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body))
       return {
         input: input as Record<string, unknown>,
         mode: "json",
-        encodedBytes: new TextEncoder().encode(JSON.stringify(input)).byteLength,
+        encodedBytes: body.byteLength,
       }
     }
-    const input = await request.formData()
+    const input = await formDataFromBytes(body, contentType)
     return {
       input,
       mode: "form",
@@ -241,13 +383,15 @@ async function readLegacyPayload(
   | { readonly response: NextResponse }
 > {
   try {
+    const body = await readBoundedBody(request)
+    if (body === null) return { response: tooLarge(headers) }
     const contentType = request.headers.get("content-type") ?? ""
     if (contentType.includes("application/json")) {
-      const value: unknown = await request.json()
+      const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body))
       if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error()
       return { payload: value as Record<string, unknown> }
     }
-    const formData = await request.formData()
+    const formData = await formDataFromBytes(body, contentType)
     return { payload: formDataPayload(formData) }
   } catch {
     return {
@@ -257,6 +401,39 @@ async function readLegacyPayload(
       ),
     }
   }
+}
+
+async function readBoundedBody(request: NextRequest): Promise<Uint8Array | null> {
+  if (!request.body) return new Uint8Array()
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > MAX_BYTES) {
+      await reader.cancel().catch(() => undefined)
+      return null
+    }
+    chunks.push(value)
+  }
+  const body = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    body.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return body
+}
+
+async function formDataFromBytes(body: Uint8Array, contentType: string) {
+  const ownedBody = new Uint8Array(body.byteLength)
+  ownedBody.set(body)
+  const response = new Response(ownedBody.buffer, {
+    headers: { "Content-Type": contentType },
+  })
+  return response.formData()
 }
 
 function formDataPayload(input: FormData): Record<string, unknown> {
@@ -384,56 +561,87 @@ function unavailable(headers: Record<string, string>) {
 }
 
 async function saveActiveSubmission(
-  admin: SupabaseAdmin,
+  persistence: FormPersistence,
+  submissionId: string,
+  tenantId: string,
   formId: string,
   publicationVersion: number | null,
   payload: unknown,
   routing: SubmissionRoutingResult,
+  deliveries: readonly StoredFormEventDelivery[],
   origin: string | null,
   userAgent: string | null,
-): Promise<"saved" | "unavailable" | "rate-limited" | "failed"> {
-  const routedArguments = {
-    target_form_id: formId,
-    expected_publication_version: publicationVersion,
-    new_payload: payload,
-    submission_routing_status: routing.status,
-    submission_routing_route: routing.route,
-    submission_matched_rule_id: routing.matchedRule,
-    submission_routing_error: routing.error,
-    submission_origin: origin,
-    submission_user_agent: userAgent,
+): Promise<PublicSubmissionSaveStatus | "failed"> {
+  try {
+    return await persistence.saveSubmission({
+      submissionId,
+      tenantId,
+      formId,
+      publicationVersion,
+      payload,
+      routing,
+      deliveries,
+      origin,
+      userAgent,
+    })
+  } catch {
+    return "failed"
   }
-  let error = (
-    await admin.rpc("save_form_submission_with_routing_if_active", routedArguments)
-  ).error
-  if (error && routingRpcIsUnavailable(error)) {
-    error = (
-      await admin.rpc("save_form_submission_if_active", {
-        target_form_id: formId,
-        expected_publication_version: publicationVersion,
-        new_payload: payload,
-        submission_origin: origin,
-        submission_user_agent: userAgent,
-      })
-    ).error
-  }
-  if (!error) return "saved"
-  if (
-    error.message.includes("form_unavailable") ||
-    error.message.includes("form_version_changed")
-  ) {
-    return "unavailable"
-  }
-  if (error.message.includes("form_rate_limited")) return "rate-limited"
-  return "failed"
 }
 
-function routingRpcIsUnavailable(error: { readonly code?: string; readonly message: string }) {
-  return (
-    error.code === "PGRST202" ||
-    (error.message.includes("save_form_submission_with_routing_if_active") &&
-      (error.message.includes("Could not find") || error.message.includes("schema cache")))
-  )
+function matchedRoutingEvent(
+  scope: {
+    readonly tenantId: string
+    readonly formId: string
+    readonly publicationVersion: number
+    readonly submissionId: string
+  },
+  routing: SubmissionRoutingResult,
+  submission: Readonly<Record<string, string | number | boolean>>,
+): FormEvent<"routing.matched"> | null {
+  if (routing.status !== "matched" || routing.route === null || routing.matchedRule === null) {
+    return null
+  }
+  return snapshotFormEvent({
+    eventId: `${scope.submissionId}:routing.matched`,
+    tenantId: scope.tenantId,
+    formId: scope.formId,
+    type: "routing.matched",
+    occurredAt: new Date().toISOString(),
+    payload: {
+      publicationVersion: scope.publicationVersion,
+      submissionId: scope.submissionId,
+      submission,
+      ruleId: routing.matchedRule,
+      route: routing.route,
+    },
+  }) as FormEvent<"routing.matched">
+}
+
+function submissionEvent(
+  type: "submission.before_save" | "submission.accepted",
+  scope: {
+    readonly tenantId: string
+    readonly formId: string
+    readonly publicationVersion: number | null
+    readonly submissionId: string
+  },
+  submission: Readonly<Record<string, unknown>>,
+  routing: SubmissionRoutingResult,
+): FormEvent<"submission.before_save" | "submission.accepted"> {
+  return snapshotFormEvent({
+    eventId: `${scope.submissionId}:${type}`,
+    tenantId: scope.tenantId,
+    formId: scope.formId,
+    type,
+    occurredAt: new Date().toISOString(),
+    payload: {
+      publicationVersion: scope.publicationVersion,
+      submissionId: scope.submissionId,
+      submission,
+      routing,
+    },
+  }) as FormEvent<"submission.before_save" | "submission.accepted">
 }
 
 function success(

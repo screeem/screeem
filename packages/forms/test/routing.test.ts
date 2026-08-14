@@ -188,6 +188,15 @@ describe("routing integration", () => {
     expect(() =>
       snapshotSubmissionRoutingResult({
         status: "fallback",
+        route: "",
+        matchedRule: null,
+        error: null,
+      }),
+    ).toThrow(TypeError)
+    expect(() => matchedSubmissionRouting("sales", "")).toThrow(TypeError)
+    expect(() =>
+      snapshotSubmissionRoutingResult({
+        status: "fallback",
         route: "review",
         matchedRule: null,
         error: null,
@@ -273,5 +282,22 @@ describe("routing integration", () => {
         issues: [expect.objectContaining({ code: "routing_route_limit", path: "fallback" })],
       }),
     )
+  })
+
+  it("rejects empty routes at the persistence boundary", () => {
+    expect(() =>
+      snapshotFormRoutingDefinition({
+        version: 1,
+        rules: [{ id: "qualified", when: "true", route: "" }],
+        fallback: "review",
+      }),
+    ).toThrow(expect.objectContaining({ issues: [expect.objectContaining({ path: "rules[0].route" })] }))
+    expect(() =>
+      snapshotFormRoutingDefinition({
+        version: 1,
+        rules: [],
+        fallback: "",
+      }),
+    ).toThrow(expect.objectContaining({ issues: [expect.objectContaining({ path: "fallback" })] }))
   })
 })

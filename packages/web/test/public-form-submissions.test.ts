@@ -4,8 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   findPublicForm: vi.fn(),
   loadActivePublicDefinition: vi.fn(),
-  rpc: vi.fn(),
+  saveSubmission: vi.fn(),
+  claim: vi.fn(),
+  succeed: vi.fn(),
+  fail: vi.fn(),
 }))
+
+vi.mock("server-only", () => ({}))
 
 vi.mock("@/lib/forms/public", () => ({
   PublicDefinitionUnavailableError: class PublicDefinitionUnavailableError extends Error {},
@@ -14,7 +19,16 @@ vi.mock("@/lib/forms/public", () => ({
 }))
 
 vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: () => ({ rpc: mocks.rpc }),
+  createAdminClient: () => ({}),
+}))
+
+vi.mock("../src/lib/forms/routing-persistence", () => ({
+  createFormPersistence: () => ({
+    saveSubmission: mocks.saveSubmission,
+    claim: mocks.claim,
+    succeed: mocks.succeed,
+    fail: mocks.fail,
+  }),
 }))
 
 vi.mock("@/lib/forms/schema", () => ({
@@ -23,6 +37,7 @@ vi.mock("@/lib/forms/schema", () => ({
 
 import { OPTIONS, POST } from "../src/app/api/forms/[endpointKey]/submissions/route"
 import { GET as GET_DEFINITION } from "../src/app/api/forms/[endpointKey]/route"
+import { productionFormAutomationRegistry } from "../src/lib/forms/form-registrations"
 
 const context = { params: Promise.resolve({ endpointKey: "public-key" }) }
 const allowedOrigin = "https://forms.example"
@@ -41,7 +56,8 @@ beforeEach(() => {
     submissionSchema: null,
   })
   mocks.loadActivePublicDefinition.mockResolvedValue(null)
-  mocks.rpc.mockResolvedValue({ error: null })
+  mocks.saveSubmission.mockResolvedValue("saved")
+  mocks.claim.mockResolvedValue(null)
 })
 
 describe("public form submission transport", () => {
@@ -80,6 +96,41 @@ describe("public form submission transport", () => {
     expect(response.headers.get("access-control-allow-origin")).toBe(allowedOrigin)
   })
 
+  it.each([
+    ["JSON", "application/json"],
+    ["multipart form data", "multipart/form-data; boundary=bounded-test"],
+  ])("stops an oversized chunked %s body before buffering it", async (_label, contentType) => {
+    structuredForm({
+      version: 1,
+      definition,
+      routing: null,
+      publishedAt: "2026-08-13T00:00:00.000Z",
+    })
+    let cancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(64 * 1024 + 1))
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+    const oversized = new NextRequest(
+      "http://localhost/api/forms/public-key/submissions",
+      {
+        method: "POST",
+        headers: { Origin: allowedOrigin, "Content-Type": contentType },
+        body,
+      },
+    )
+
+    const response = await POST(oversized, context)
+
+    expect(response.status).toBe(413)
+    expect(cancelled).toBe(true)
+    expect(mocks.saveSubmission).not.toHaveBeenCalled()
+  })
+
   it("copies legacy FormData into a null-prototype payload", async () => {
     const formData = new FormData()
     formData.append("__proto__", "plain submission value")
@@ -94,7 +145,7 @@ describe("public form submission transport", () => {
     )
 
     expect(response.status).toBe(201)
-    const payload = mocks.rpc.mock.calls[0]?.[1]?.new_payload
+    const payload = mocks.saveSubmission.mock.calls[0]?.[0]?.payload
     expect(Object.getPrototypeOf(payload)).toBeNull()
     expect(Object.prototype.hasOwnProperty.call(payload, "__proto__")).toBe(true)
     expect(payload.__proto__).toBe("plain submission value")
@@ -115,16 +166,21 @@ describe("public form submission transport", () => {
     const response = await submitStructured({ name: "Ada", employees: 500 })
 
     expect(response.status).toBe(201)
-    expect(mocks.rpc).toHaveBeenCalledWith("save_form_submission_with_routing_if_active", {
-      target_form_id: "form-one",
-      expected_publication_version: 3,
-      new_payload: { name: "Ada", employees: 500 },
-      submission_routing_status: "matched",
-      submission_routing_route: "sales",
-      submission_matched_rule_id: "enterprise",
-      submission_routing_error: null,
-      submission_origin: allowedOrigin,
-      submission_user_agent: null,
+    expect(mocks.saveSubmission).toHaveBeenCalledWith({
+      submissionId: expect.any(String),
+      tenantId: "team-one",
+      formId: "form-one",
+      publicationVersion: 3,
+      payload: { name: "Ada", employees: 500 },
+      routing: {
+        status: "matched",
+        route: "sales",
+        matchedRule: "enterprise",
+        error: null,
+      },
+      deliveries: [],
+      origin: allowedOrigin,
+      userAgent: null,
     })
   })
 
@@ -140,13 +196,11 @@ describe("public form submission transport", () => {
       publishedAt: "2026-08-13T00:00:00.000Z",
     })
     expect((await submitStructured({ name: "Ada", employees: 20 })).status).toBe(201)
-    expect(mocks.rpc.mock.calls[0]?.[1]).toMatchObject({
-      submission_routing_status: "fallback",
-      submission_routing_route: "review",
-      submission_matched_rule_id: null,
+    expect(mocks.saveSubmission.mock.calls[0]?.[0]).toMatchObject({
+      routing: { status: "fallback", route: "review", matchedRule: null },
     })
 
-    mocks.rpc.mockClear()
+    mocks.saveSubmission.mockClear()
     structuredForm({
       version: 5,
       definition,
@@ -154,11 +208,136 @@ describe("public form submission transport", () => {
       publishedAt: "2026-08-13T00:00:00.000Z",
     })
     expect((await submitStructured({ name: "Grace", employees: 20 })).status).toBe(201)
-    expect(mocks.rpc.mock.calls[0]?.[1]).toMatchObject({
-      submission_routing_status: "not_configured",
-      submission_routing_route: null,
-      submission_matched_rule_id: null,
+    expect(mocks.saveSubmission.mock.calls[0]?.[0]).toMatchObject({
+      routing: { status: "not_configured", route: null, matchedRule: null },
     })
+  })
+
+  it("plans submission events at the public API boundary without routing", async () => {
+    const plan = vi
+      .spyOn(productionFormAutomationRegistry, "planDurable")
+      .mockImplementation((event) => {
+        if (event.type !== "submission.before_save" && event.type !== "submission.accepted") {
+          return []
+        }
+        return [{
+          event,
+          kind: "event_handler",
+          registrationName: `handle-${event.type}`,
+          deliveryKey: `${event.eventId}:0`,
+          sequence: 0,
+        }]
+      })
+
+    const response = await submitStructured({ source: "unrouted" })
+
+    expect(response.status).toBe(201)
+    expect(mocks.saveSubmission.mock.calls[0]?.[0]).toMatchObject({
+      publicationVersion: null,
+      routing: { status: "not_configured" },
+      deliveries: [
+        {
+          registrationName: "handle-submission.before_save",
+          deliveryKey: expect.stringMatching(/:submission\.before_save:0$/),
+          event: { type: "submission.before_save" },
+        },
+        {
+          registrationName: "handle-submission.accepted",
+          deliveryKey: expect.stringMatching(/:submission\.accepted:0$/),
+          event: { type: "submission.accepted" },
+        },
+      ],
+    })
+    plan.mockRestore()
+  })
+
+  it("lets an inline before-save handler reject at the API boundary", async () => {
+    const inline = vi
+      .spyOn(productionFormAutomationRegistry, "runInline")
+      .mockImplementation((event) =>
+        event.type === "submission.before_save"
+          ? Promise.reject(new Error("rejected"))
+          : Promise.resolve(),
+      )
+
+    const response = await submitStructured({ source: "rejected" })
+
+    expect(response.status).toBe(500)
+    expect(mocks.saveSubmission).not.toHaveBeenCalled()
+    inline.mockRestore()
+  })
+
+  it("emits lifecycle events with stable submission and tenant identifiers", async () => {
+    structuredForm({
+      version: 9,
+      definition,
+      routing: null,
+      publishedAt: "2026-08-13T00:00:00.000Z",
+    })
+    const inline = vi.spyOn(productionFormAutomationRegistry, "runInline")
+
+    const response = await submitStructured({ name: "Ada", employees: 20 })
+
+    expect(response.status).toBe(201)
+    const beforeEvent = inline.mock.calls[0]?.[0]
+    expect(beforeEvent).toMatchObject({
+      type: "routing.evaluation.before",
+      tenantId: "team-one",
+      formId: "form-one",
+      payload: {
+        publicationVersion: 9,
+        evaluationId: expect.any(String),
+      },
+    })
+    expect(inline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "routing.evaluation.after",
+        payload: expect.objectContaining({
+          evaluationId:
+            beforeEvent?.type === "routing.evaluation.before"
+              ? beforeEvent.payload.evaluationId
+              : undefined,
+          outcome: "not_configured",
+          durationMs: expect.any(Number),
+        }),
+      }),
+    )
+    inline.mockRestore()
+  })
+
+  it("persists matched action plans before attempting execution", async () => {
+    structuredForm({
+      version: 10,
+      definition,
+      routing: {
+        version: 1,
+        rules: [
+          {
+            id: "enterprise",
+            when: "submission.employees >= 500",
+            route: "sales",
+            actions: [{ use: "notify", with: "({ name: submission.name })" }],
+          },
+        ],
+        fallback: "review",
+      },
+      publishedAt: "2026-08-13T00:00:00.000Z",
+    })
+    mocks.claim.mockResolvedValueOnce({ attempt: 1 })
+
+    const response = await submitStructured({ name: "Ada", employees: 500 })
+
+    expect(response.status).toBe(201)
+    expect(mocks.saveSubmission.mock.calls[0]?.[0]).toMatchObject({
+      deliveries: [
+        expect.objectContaining({
+          registrationName: "notify",
+          sequence: 0,
+          event: expect.objectContaining({ type: "routing.matched" }),
+        }),
+      ],
+    })
+    expect(mocks.claim).toHaveBeenCalledOnce()
   })
 
   it("saves a valid submission when routing evaluation fails", async () => {
@@ -176,43 +355,55 @@ describe("public form submission transport", () => {
     const response = await submitStructured({ name: "x".repeat(17_000), employees: 500 })
 
     expect(response.status).toBe(201)
-    expect(mocks.rpc.mock.calls[0]?.[1]).toMatchObject({
-      submission_routing_status: "failed",
-      submission_routing_route: null,
-      submission_matched_rule_id: null,
-      submission_routing_error: "routing_evaluation_failed",
+    expect(mocks.saveSubmission.mock.calls[0]?.[0]).toMatchObject({
+      routing: {
+        status: "failed",
+        route: null,
+        matchedRule: null,
+        error: "routing_evaluation_failed",
+      },
     })
   })
 
-  it("falls back to the previous submission RPC during a rolling deploy", async () => {
+  it("fails closed when the transactional store is unavailable", async () => {
     structuredForm({
       version: 8,
       definition,
       routing: null,
       publishedAt: "2026-08-13T00:00:00.000Z",
     })
-    mocks.rpc
-      .mockResolvedValueOnce({
-        error: {
-          code: "PGRST202",
-          message: "Could not find save_form_submission_with_routing_if_active in the schema cache",
-        },
-      })
-      .mockResolvedValueOnce({ error: null })
+    mocks.saveSubmission.mockRejectedValueOnce(new Error("database unavailable"))
 
     const response = await submitStructured({ name: "Ada", employees: 20 })
 
-    expect(response.status).toBe(201)
-    expect(mocks.rpc.mock.calls[1]).toEqual([
-      "save_form_submission_if_active",
-      {
-        target_form_id: "form-one",
-        expected_publication_version: 8,
-        new_payload: { name: "Ada", employees: 20 },
-        submission_origin: allowedOrigin,
-        submission_user_agent: null,
+    expect(response.status).toBe(500)
+    expect(mocks.saveSubmission).toHaveBeenCalledOnce()
+  })
+
+  it("does not save an action-bearing submission without durable action storage", async () => {
+    structuredForm({
+      version: 11,
+      definition,
+      routing: {
+        version: 1,
+        rules: [
+          {
+            id: "enterprise",
+            when: "submission.employees >= 500",
+            route: "sales",
+            actions: [{ use: "notify", with: "({ name: submission.name })" }],
+          },
+        ],
+        fallback: "review",
       },
-    ])
+      publishedAt: "2026-08-13T00:00:00.000Z",
+    })
+    mocks.saveSubmission.mockRejectedValueOnce(new Error("action table unavailable"))
+
+    const response = await submitStructured({ name: "Ada", employees: 500 })
+
+    expect(response.status).toBe(500)
+    expect(mocks.saveSubmission).toHaveBeenCalledOnce()
   })
 
   it("rejects a submission when the publication changes before its atomic save", async () => {
@@ -222,7 +413,7 @@ describe("public form submission transport", () => {
       routing: null,
       publishedAt: "2026-08-13T00:00:00.000Z",
     })
-    mocks.rpc.mockResolvedValueOnce({ error: { message: "form_version_changed" } })
+    mocks.saveSubmission.mockResolvedValueOnce("unavailable")
 
     const response = await submitStructured({ name: "Ada", employees: 500 })
 

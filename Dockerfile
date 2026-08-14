@@ -21,7 +21,7 @@ COPY . .
 
 FROM source AS test
 ENV NODE_ENV=test
-CMD ["sh", "-c", "pnpm --filter @screeem/routing build && pnpm --filter @screeem/forms build && pnpm --filter @screeem/forms-react build && pnpm --filter @screeem/routing test && pnpm --filter @screeem/forms test && pnpm --filter @screeem/forms-react test && pnpm --filter @screeem/web exec tsc --noEmit && pnpm --filter @screeem/web test"]
+CMD ["sh", "-c", "pnpm --filter @screeem/routing build && pnpm --filter @screeem/forms build && pnpm --filter @screeem/forms-react build && pnpm --filter @screeem/routing test && pnpm --filter @screeem/forms test && pnpm --filter @screeem/forms-react test && pnpm --filter @screeem/web exec tsc --noEmit && pnpm --filter @screeem/web test && pnpm --filter @screeem/web test:routing-db"]
 
 FROM source AS build
 ARG NEXT_PUBLIC_SUPABASE_URL

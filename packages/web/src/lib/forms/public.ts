@@ -1,8 +1,9 @@
 import {
   snapshotFormDefinition,
   snapshotFormRoutingDefinition,
-  type FormDefinition,
+  type FormAvailability,
   type FormRoutingDefinition,
+  type PublishedForm,
 } from "@screeem/forms"
 
 type SupabaseAdmin = ReturnType<(typeof import("@/lib/supabase/admin"))["createAdminClient"]>
@@ -10,7 +11,7 @@ const MAX_CACHED_PUBLICATIONS = 16
 const MAX_CACHED_PUBLICATION_BYTES = 8 * 1024 * 1024
 
 interface CachedPublication {
-  readonly promise: Promise<ActivePublicFormDefinition>
+  readonly promise: Promise<PublishedForm>
   bytes: number
 }
 
@@ -23,18 +24,10 @@ export interface PublicFormRecord {
   readonly allowedOrigin: string | null
   readonly successUrl: string | null
   readonly legacyUnstructured: boolean
-  readonly definitionAvailability: "draft" | "active" | "paused"
+  readonly definitionAvailability: FormAvailability
   readonly publishedVersion: number | null
   readonly requiresTurnstile: boolean
   readonly submissionSchema: unknown | null
-}
-
-export interface ActivePublicFormDefinition {
-  readonly formId: string
-  readonly version: number
-  readonly definition: FormDefinition
-  readonly routing: FormRoutingDefinition | null
-  readonly publishedAt: string
 }
 
 export async function findPublicForm(
@@ -72,7 +65,7 @@ export async function findPublicForm(
 export async function loadActivePublicDefinition(
   admin: SupabaseAdmin,
   form: PublicFormRecord,
-): Promise<ActivePublicFormDefinition | null> {
+): Promise<PublishedForm | null> {
   if (form.publishedVersion === null) {
     if (form.legacyUnstructured) return null
     throw new PublicDefinitionUnavailableError()
@@ -114,7 +107,7 @@ async function loadPublishedVersion(
   admin: SupabaseAdmin,
   form: PublicFormRecord,
   version: number,
-): Promise<ActivePublicFormDefinition> {
+): Promise<PublishedForm> {
   const { data, error } = await admin
     .from("form_definition_versions")
     .select("definition, routing_definition, published_at")
@@ -141,7 +134,14 @@ function snapshotRuntimeRouting(value: unknown): FormRoutingDefinition | null {
   return Object.freeze({
     version: routing.version,
     rules: Object.freeze(
-      routing.rules.map(({ id, when, route }) => Object.freeze({ id, when, route })),
+      routing.rules.map(({ id, when, route, actions }) =>
+        Object.freeze({
+          id,
+          when,
+          route,
+          ...(actions === undefined ? {} : { actions }),
+        }),
+      ),
     ),
     fallback: routing.fallback,
   })
