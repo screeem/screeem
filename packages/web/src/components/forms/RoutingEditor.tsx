@@ -3,11 +3,17 @@
 import {
   createRoutingCondition,
   createRoutingSample,
+  fallbackSubmissionRouting,
+  matchedSubmissionRouting,
   maximumRoutingAuthoringRules,
   maximumRoutingConditionValueLength,
   maximumRoutingConditionsPerRule,
   routingOperatorsForField,
+  snapshotFormActionTestContext,
+  snapshotFormActionTestResult,
+  snapshotFormActionTesters,
   testFormRouting,
+  type FormActionTester,
   type FormDefinition,
   type FormFieldDefinition,
   type FormRoutingAuthoring,
@@ -16,14 +22,18 @@ import {
   type FormRoutingCondition,
   type FormRoutingOperator,
 } from "@screeem/forms"
-import { useRef, useState, type RefObject } from "react"
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { DraggableRule } from "./DraggableRule"
+
+const actionTesterFunctionIds = new WeakMap<FormActionTester["test"], number>()
+let nextActionTesterFunctionId = 1
 
 export interface RoutingEditorProps {
   readonly definition: FormDefinition
   readonly draft: FormRoutingAuthoring
   readonly issues: readonly FormRoutingAuthoringIssue[]
   readonly disabled?: boolean
+  readonly actionTesters?: readonly FormActionTester[]
   readonly onAddRule: () => void
   readonly onUpdateRule: (ruleId: string, update: Partial<FormRoutingAuthoringRule>) => void
   readonly onRemoveRule: (ruleId: string) => void
@@ -42,13 +52,28 @@ export interface RoutingEditorProps {
 export function RoutingEditor(props: RoutingEditorProps) {
   const testRequest = useRef(0)
   const ruleLimitReached = props.draft.rules.length >= maximumRoutingAuthoringRules
-  const definitionSignature = JSON.stringify(props.definition.fields)
-  const testSignature = `${definitionSignature}:${JSON.stringify(props.draft)}`
+  const fieldSignature = JSON.stringify(props.definition.fields)
+  const testSignature = `${JSON.stringify(props.definition)}:${JSON.stringify(props.draft)}`
+  const actionTesters = useMemo(
+    () => snapshotFormActionTesters(props.actionTesters ?? []),
+    [props.actionTesters],
+  )
+  const actionTestersSignature = actionTesters
+    .map((tester) =>
+      JSON.stringify([
+        tester.actionName,
+        tester.label,
+        tester.description ?? null,
+        tester.timeoutMs ?? null,
+        actionTesterFunctionId(tester.test),
+      ]),
+    )
+    .join(":")
   const [sampleState, setSampleState] = useState<{
     readonly signature: string
     readonly values: Readonly<Record<string, string | number | boolean>>
   }>(() => ({
-    signature: definitionSignature,
+    signature: fieldSignature,
     values: createRoutingSample(props.definition),
   }))
   const [testState, setTestState] = useState<{
@@ -59,7 +84,7 @@ export function RoutingEditor(props: RoutingEditorProps) {
     readonly message?: string
   }>({ signature: "", status: "idle" })
   const sample =
-    sampleState.signature === definitionSignature
+    sampleState.signature === fieldSignature
       ? sampleState.values
       : createRoutingSample(props.definition)
   const evaluationSignature = `${testSignature}:${JSON.stringify(sample)}`
@@ -76,7 +101,7 @@ export function RoutingEditor(props: RoutingEditorProps) {
     const next = { ...sample }
     if (value === undefined) delete next[field.name]
     else next[field.name] = value
-    setSampleState({ signature: definitionSignature, values: next })
+    setSampleState({ signature: fieldSignature, values: next })
     setTestState({ signature: "", status: "idle" })
   }
 
@@ -229,6 +254,9 @@ export function RoutingEditor(props: RoutingEditorProps) {
           sample={sample}
           testState={currentTest}
           rules={props.draft.rules}
+          actionTesters={actionTesters}
+          actionTestersSignature={actionTestersSignature}
+          evaluationSignature={evaluationSignature}
           onChange={updateSample}
           onRun={() => void runTest()}
         />
@@ -557,6 +585,9 @@ function RoutingTestPanel({
   sample,
   testState,
   rules,
+  actionTesters,
+  actionTestersSignature,
+  evaluationSignature,
   onChange,
   onRun,
 }: {
@@ -569,6 +600,9 @@ function RoutingTestPanel({
     readonly message?: string
   }
   readonly rules: readonly FormRoutingAuthoringRule[]
+  readonly actionTesters: readonly FormActionTester[]
+  readonly actionTestersSignature: string
+  readonly evaluationSignature: string
   readonly onChange: (field: FormFieldDefinition, value: string | number | boolean | undefined) => void
   readonly onRun: () => void
 }) {
@@ -580,7 +614,7 @@ function RoutingTestPanel({
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Test routing</p>
         <h2 className="mt-2 text-lg font-semibold text-gray-950">Try a sample response</h2>
         <p className="mt-1 text-xs leading-5 text-gray-500">
-          Values stay in this browser and are evaluated against the current draft.
+          Routing is evaluated in this browser against the current draft.
         </p>
 
         <div className="mt-5 max-h-[420px] space-y-3 overflow-y-auto pr-1">
@@ -615,6 +649,16 @@ function RoutingTestPanel({
             </p>
           </div>
         ) : null}
+        {testState.status === "complete" && actionTesters.length > 0 ? (
+          <ActionTestPanel
+            key={`${evaluationSignature}:${actionTestersSignature}`}
+            definition={definition}
+            sample={sample}
+            route={testState.route!}
+            matchedRule={testState.matchedRule ?? null}
+            testers={actionTesters}
+          />
+        ) : null}
         {testState.status === "error" ? (
           <p
             role="alert"
@@ -626,6 +670,183 @@ function RoutingTestPanel({
       </div>
     </aside>
   )
+}
+
+function ActionTestPanel({
+  definition,
+  sample,
+  route,
+  matchedRule,
+  testers,
+}: {
+  readonly definition: FormDefinition
+  readonly sample: Readonly<Record<string, string | number | boolean>>
+  readonly route: string
+  readonly matchedRule: string | null
+  readonly testers: readonly FormActionTester[]
+}) {
+  const request = useRef(0)
+  const controller = useRef<AbortController | null>(null)
+  const [state, setState] = useState<{
+    readonly actionName: string
+    readonly tester?: FormActionTester["test"]
+    readonly status: "idle" | "running" | "complete" | "error"
+    readonly summary?: string
+    readonly resultStatus?: "success" | "warning"
+    readonly details?: readonly { readonly label: string; readonly value: string }[]
+  }>({ actionName: "", status: "idle" })
+  const currentState =
+    state.tester === undefined ||
+    testers.some(
+      (tester) => tester.actionName === state.actionName && tester.test === state.tester,
+    )
+      ? state
+      : { actionName: "", status: "idle" as const }
+
+  useEffect(
+    () => () => {
+      request.current += 1
+      controller.current?.abort()
+    },
+    [],
+  )
+
+  async function testAction(tester: FormActionTester) {
+    const currentRequest = ++request.current
+    controller.current?.abort()
+    const currentController = new AbortController()
+    controller.current = currentController
+    setState({ actionName: tester.actionName, tester: tester.test, status: "running" })
+    try {
+      const routing = matchedRule
+        ? matchedSubmissionRouting(route, matchedRule)
+        : fallbackSubmissionRouting(route)
+      const context = snapshotFormActionTestContext(
+        { definition, submission: sample, routing },
+        currentController.signal,
+      )
+      const result = snapshotFormActionTestResult(
+        await runActionTester(tester, context, currentController),
+      )
+      if (currentRequest !== request.current) return
+      setState({
+        actionName: tester.actionName,
+        tester: tester.test,
+        status: "complete",
+        summary: result.summary,
+        resultStatus: result.status,
+        details: result.details,
+      })
+    } catch (error) {
+      if (currentRequest !== request.current) return
+      setState({
+        actionName: tester.actionName,
+        tester: tester.test,
+        status: "error",
+        summary: error instanceof Error ? error.message : "The action test could not be completed.",
+      })
+    } finally {
+      if (controller.current === currentController) controller.current = null
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-gray-200 pt-4">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+        Action previews
+      </p>
+      <p className="mt-1 text-xs leading-5 text-gray-500">
+        Preview available integrations. This does not add an action or queue durable work. A remote
+        tester may receive the sample values.
+      </p>
+      <div className="mt-2 space-y-2">
+        {testers.map((tester) => {
+          const running =
+            currentState.status === "running" && currentState.actionName === tester.actionName
+          return (
+            <button
+              key={tester.actionName}
+              type="button"
+              disabled={currentState.status === "running"}
+              onClick={() => void testAction(tester)}
+              className="w-full rounded-md border border-gray-200 bg-white px-3 py-2.5 text-left transition-colors hover:border-teal-500 hover:bg-teal-50 disabled:opacity-50"
+            >
+              <span className="block text-sm font-semibold text-gray-900">
+                {running ? `Previewing ${tester.label}…` : `Preview ${tester.label}`}
+              </span>
+              {tester.description ? (
+                <span className="mt-0.5 block text-xs leading-5 text-gray-500">
+                  {tester.description}
+                </span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+      {currentState.status === "complete" ? (
+        <div
+          role="status"
+          className={`mt-3 border-l-2 px-3 py-2.5 ${
+            currentState.resultStatus === "warning"
+              ? "border-amber-500 bg-amber-50"
+              : "border-teal-600 bg-teal-50"
+          }`}
+        >
+          <p className="text-sm font-semibold text-gray-950">{currentState.summary}</p>
+          {currentState.details?.length ? (
+            <dl className="mt-2 space-y-1 text-xs">
+              {currentState.details.map((detail, index) => (
+                <div
+                  key={`${detail.label}:${index}`}
+                  className="grid grid-cols-[88px_minmax(0,1fr)] gap-2"
+                >
+                  <dt className="text-gray-500">{detail.label}</dt>
+                  <dd className="break-words font-medium text-gray-800">{detail.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+        </div>
+      ) : null}
+      {currentState.status === "error" ? (
+        <p
+          role="alert"
+          className="mt-3 border-l-2 border-red-500 bg-red-50 px-3 py-2 text-xs leading-5 text-red-800"
+        >
+          {currentState.summary}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function actionTesterFunctionId(test: FormActionTester["test"]): number {
+  const existing = actionTesterFunctionIds.get(test)
+  if (existing !== undefined) return existing
+  const id = nextActionTesterFunctionId++
+  actionTesterFunctionIds.set(test, id)
+  return id
+}
+
+async function runActionTester(
+  tester: FormActionTester,
+  context: Parameters<FormActionTester["test"]>[0],
+  controller: AbortController,
+) {
+  const timeoutMs = tester.timeoutMs ?? 5_000
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  let rejectAbort: ((reason: Error) => void) | undefined
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject
+  })
+  const onAbort = () => rejectAbort?.(new Error("Action preview was cancelled or timed out."))
+  controller.signal.addEventListener("abort", onAbort, { once: true })
+  try {
+    return await Promise.race([tester.test(context), aborted])
+  } finally {
+    clearTimeout(timeout)
+    controller.signal.removeEventListener("abort", onAbort)
+  }
 }
 
 function SampleRoutingInput({

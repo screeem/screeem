@@ -27,7 +27,12 @@ packages:
 
 playground: packages ## Run the development-only visual form and routing playground.
 	@printf '\nOpen $(PLAYGROUND_URL)\n\n'
-	$(PNPM) --filter @screeem/web dev --hostname 127.0.0.1
+	@if [ "$$(curl --location --silent --connect-timeout 2 --max-time 5 --output /dev/null --write-out '%{http_code}' $(PLAYGROUND_URL))" = 200 ] && \
+		curl --location --silent --connect-timeout 2 --max-time 5 $(PLAYGROUND_URL) | grep -Fq 'Form builder'; then \
+		printf 'The playground is already running at $(PLAYGROUND_URL)\n'; \
+	else \
+		$(PNPM) --filter @screeem/web dev --hostname 127.0.0.1; \
+	fi
 
 dev: infra-up packages ## Run Dockerized local services and the Next.js development server.
 	@printf '\nApp:        http://localhost:3000\nPlayground: $(PLAYGROUND_URL)\nStudio:     http://127.0.0.1:54323\n\n'

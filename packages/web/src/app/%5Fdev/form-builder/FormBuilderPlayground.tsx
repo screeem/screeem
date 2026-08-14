@@ -26,6 +26,7 @@ import {
   type FormFieldDefinition,
   type FormRoutingAuthoring,
   type FormRoutingAuthoringRule,
+  type FormActionTester,
   type FormRoutingCondition,
   type FormRoutingDefinition,
 } from "@screeem/forms"
@@ -51,6 +52,27 @@ const fixtures: readonly { id: Fixture; label: string }[] = [
   { id: "contact", label: "Contact request" },
   { id: "eligibility", label: "Programme eligibility" },
 ]
+
+const notifySalesTester: FormActionTester = Object.freeze<FormActionTester>({
+  actionName: "notifySales",
+  label: "Notify sales",
+  description: "Preview the notification without sending it.",
+  async test({ definition, submission, routing }) {
+    const emailField = definition.fields.find((field) => field.control === "email")
+    const submittedEmail = emailField ? submission[emailField.name] : undefined
+    return {
+      status: submittedEmail ? "success" : "warning",
+      summary: submittedEmail
+        ? "Notification preview ready — nothing was sent."
+        : "Notification preview is missing a submitted email.",
+      details: [
+        { label: "Recipient", value: "routing-preview@notifications.invalid" },
+        { label: "Destination", value: routing.route ?? "No destination" },
+        { label: "Lead", value: typeof submittedEmail === "string" ? submittedEmail : "Not provided" },
+      ],
+    }
+  },
+})
 
 function createLeadQualificationFixture(): FormDefinition {
   let definition = updateForm(createFormDefinition("Request an enterprise demo"), {
@@ -712,6 +734,7 @@ export function FormBuilderPlayground() {
           definition={builder.definition}
           draft={routing}
           issues={serializedRouting.ok ? [] : serializedRouting.issues}
+          actionTesters={[notifySalesTester]}
           onAddRule={addRoutingRule}
           onUpdateRule={updateRoutingRule}
           onRemoveRule={removeRoutingRule}
