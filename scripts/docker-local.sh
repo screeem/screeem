@@ -38,6 +38,7 @@ write_local_env() {
     printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$SERVICE_ROLE_KEY"
     printf 'DATABASE_URL=%s\n' "$DB_URL"
     printf 'TURNSTILE_SECRET_KEY=\n'
+    printf 'CRON_SECRET=local-routing-actions\n'
   } > "$env_tmp"
   mv "$env_tmp" "$web_env"
 }

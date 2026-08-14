@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
+import { snapshotFormSubmissionsApiResponse } from "../../../../../../../lib/forms/submission-contract"
+import { createFormRoutingPersistence } from "../../../../../../../lib/forms/routing-persistence"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getMembership } from "@/lib/teams/server"
@@ -40,22 +42,79 @@ export async function GET(
     .limit(limit)
   if (route !== null) submissionsQuery = submissionsQuery.eq("routing_route", route)
 
-  const [submissionsResult, routesResult] = await Promise.all([
-    submissionsQuery,
-    admin.rpc("list_form_submission_routes", {
-      target_team_id: teamId,
-      target_form_id: formId,
-    }),
-  ])
-  if (submissionsResult.error || routesResult.error) {
-    return NextResponse.json(
-      { error: submissionsResult.error?.message ?? routesResult.error?.message },
-      { status: 500 },
-    )
+  const loaded = await Promise.all([
+      submissionsQuery,
+      createFormRoutingPersistence().listRecentRoutes(teamId, formId),
+    ]).catch(() => null)
+  if (!loaded) {
+    return NextResponse.json({ error: "Could not load submissions" }, { status: 500 })
   }
-  const routeRows = (routesResult.data ?? []) as Array<{ route: unknown }>
-  const routes = routeRows.flatMap(({ route }) =>
-    typeof route === "string" ? [route] : [],
+  const [submissionsResult, routes] = loaded
+  if (submissionsResult.error) {
+    return NextResponse.json({ error: submissionsResult.error.message }, { status: 500 })
+  }
+  try {
+    const submissionData: unknown = submissionsResult.data
+    if (!Array.isArray(submissionData)) {
+      throw new TypeError("Invalid submission query result")
+    }
+    const submissionIds = submissionData.map((row) => {
+      if (!isRecord(row) || typeof row.id !== "string") {
+        throw new TypeError("Invalid submission query result")
+      }
+      return row.id
+    })
+    const actionsBySubmission = new Map<string, unknown[]>()
+    if (submissionIds.length > 0) {
+      const actionResult = await admin
+        .from("form_submission_action_executions")
+        .select("submission_id, action_key, action_name, status, attempt_count, last_error")
+        .eq("team_id", teamId)
+        .eq("form_id", formId)
+        .in("submission_id", submissionIds)
+        .order("action_index", { ascending: true })
+      if (actionResult.error && !missingActionExecutionTable(actionResult.error)) {
+        return NextResponse.json({ error: actionResult.error.message }, { status: 500 })
+      }
+      const actionData: unknown = actionResult.error ? [] : actionResult.data
+      if (!Array.isArray(actionData)) throw new TypeError("Invalid action query result")
+      const knownSubmissionIds = new Set(submissionIds)
+      for (const row of actionData) {
+        if (
+          !isRecord(row) ||
+          typeof row.submission_id !== "string" ||
+          !knownSubmissionIds.has(row.submission_id)
+        ) {
+          throw new TypeError("Invalid action query result")
+        }
+        const existing = actionsBySubmission.get(row.submission_id)
+        if (existing) existing.push(row)
+        else actionsBySubmission.set(row.submission_id, [row])
+      }
+    }
+    const response = snapshotFormSubmissionsApiResponse({
+      submissions: submissionData.map((submission) => ({
+        ...submission,
+        action_executions:
+          isRecord(submission) && typeof submission.id === "string"
+            ? (actionsBySubmission.get(submission.id) ?? [])
+            : [],
+      })),
+      routes,
+    })
+    return NextResponse.json(response)
+  } catch {
+    return NextResponse.json({ error: "Stored submission data is invalid" }, { status: 500 })
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function missingActionExecutionTable(error: { readonly code?: string; readonly message: string }) {
+  return (
+    (error.code === "PGRST205" || error.code === "42P01") &&
+    error.message.includes("form_submission_action_executions")
   )
-  return NextResponse.json({ submissions: submissionsResult.data ?? [], routes })
 }

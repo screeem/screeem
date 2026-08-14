@@ -1,9 +1,14 @@
 "use client"
 
-import type { SubmissionRoutingStatus } from "@screeem/forms"
+import type { FormAvailability } from "@screeem/forms"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
+import {
+  snapshotFormSubmissionsApiResponse,
+  type FormRoutingActionExecutionSummary,
+  type FormSubmissionListItem,
+} from "../../lib/forms/submission-contract"
 
 type FormView = {
   id: string
@@ -15,30 +20,16 @@ type FormView = {
   requires_turnstile: boolean
   submission_schema: Record<string, unknown> | null
   legacy_unstructured: boolean
-  availability?: "draft" | "active" | "paused"
+  availability?: FormAvailability
   draft_revision?: number
   published_version?: number | null
   created_at: string
-}
-
-type Submission = {
-  id: string
-  payload: Record<string, unknown>
-  origin: string | null
-  created_at: string
-  publication_version?: number | null
-  routing_status: SubmissionRoutingStatus
-  routing_route: string | null
-  matched_rule_id: string | null
-  routing_error: string | null
 }
 
 interface FormsApiBody {
   readonly error?: unknown
   readonly form?: FormView
   readonly forms?: FormView[]
-  readonly submissions?: Submission[]
-  readonly routes?: string[]
 }
 
 export function Forms({ teamId, canManage }: { teamId: string; canManage: boolean }) {
@@ -49,8 +40,8 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
   const router = useRouter()
   const [forms, setForms] = useState<FormView[]>([])
   const [selected, setSelected] = useState<string | null>(null)
-  const [submissions, setSubmissions] = useState<Submission[]>([])
-  const [submissionRoutes, setSubmissionRoutes] = useState<string[]>([])
+  const [submissions, setSubmissions] = useState<readonly FormSubmissionListItem[]>([])
+  const [submissionRoutes, setSubmissionRoutes] = useState<readonly string[]>([])
   const [routeFilter, setRouteFilter] = useState("")
   const [name, setName] = useState("")
   const [allowedOrigin, setAllowedOrigin] = useState("")
@@ -121,10 +112,14 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
     if (selected === formId) {
       submissionRequest.current += 1
       setSelected(null)
+      setSubmissions([])
+      setSubmissionRoutes([])
       return
     }
     setSelected(formId)
     setRouteFilter("")
+    setSubmissions([])
+    setSubmissionRoutes([])
     await fetchSubmissions(formId, "")
   }
 
@@ -132,14 +127,16 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
     const requestId = submissionRequest.current + 1
     submissionRequest.current = requestId
     setError("")
+    setSubmissions([])
     try {
       const query = route ? `?route=${encodeURIComponent(route)}` : ""
       const response = await fetch(`/api/teams/${teamId}/forms/${formId}/submissions${query}`)
       const body = await readBody(response)
       if (requestId !== submissionRequest.current) return
       if (!response.ok) return setError(readError(body, "Could not load submissions"))
-      setSubmissions(Array.isArray(body.submissions) ? body.submissions : [])
-      setSubmissionRoutes(Array.isArray(body.routes) ? body.routes : [])
+      const result = snapshotFormSubmissionsApiResponse(body)
+      setSubmissions(result.submissions)
+      setSubmissionRoutes(result.routes)
     } catch {
       if (requestId === submissionRequest.current) setError("Could not load submissions")
     }
@@ -490,6 +487,7 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
                             {submission.routing_status === "failed" ? " · Routing failed" : ""}
                           </summary>
                           <SubmissionRouting routing={submission} />
+                          <SubmissionActions actions={submission.action_executions} />
                           <pre className="mt-3 overflow-x-auto rounded bg-gray-950 p-3 text-xs leading-5 text-gray-100">
                             {JSON.stringify(submission.payload, null, 2)}
                           </pre>
@@ -507,7 +505,26 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
   )
 }
 
-function SubmissionRouting({ routing }: { readonly routing: Submission }) {
+function SubmissionActions({
+  actions,
+}: {
+  readonly actions: readonly FormRoutingActionExecutionSummary[]
+}) {
+  if (actions.length === 0) return null
+  return (
+    <div className="mt-3 space-y-1 text-xs text-gray-600">
+      {actions.map((action) => (
+        <p key={action.action_key}>
+          <strong className="text-gray-900">{action.action_name}</strong> · {action.status}
+          {action.attempt_count > 1 ? ` · ${action.attempt_count} attempts` : ""}
+          {action.last_error ? ` · ${action.last_error}` : ""}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+function SubmissionRouting({ routing }: { readonly routing: FormSubmissionListItem }) {
   if (routing.routing_status === "matched") {
     return (
       <p className="mt-3 text-xs text-gray-600">

@@ -24,6 +24,7 @@ import {
   type BuilderState,
   type FieldControl,
   type FormDefinition,
+  type FormAvailability,
   type FormFieldDefinition,
   type FormIssue,
   type FormRoutingAuthoring,
@@ -46,7 +47,7 @@ type LoadedForm = {
   id: string
   name: string
   endpoint_key?: string
-  availability?: "draft" | "active" | "paused"
+  availability?: FormAvailability
   is_active?: boolean
   published_version?: number | null
 }
@@ -67,7 +68,7 @@ interface EditorApiBody {
   readonly draft?: DraftResponse | null
   readonly form?: LoadedForm & { readonly draft?: DraftResponse | null }
   readonly legacy?: boolean
-  readonly availability?: "draft" | "active" | "paused"
+  readonly availability?: FormAvailability
   readonly publishedVersion?: number | null
   readonly lastPublishedDraftRevision?: number | null
   readonly published?: PublishedResponse

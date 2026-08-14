@@ -50,6 +50,7 @@ test: infra-up ## Run routing, forms, React, web, and local database tests.
 	$(PNPM) --filter @screeem/forms test
 	$(PNPM) --filter @screeem/forms-react test
 	$(PNPM) --filter @screeem/web test
+	$(PNPM) --filter @screeem/web test:routing-db
 	$(PNPM) supabase test db
 
 docker-build: ## Build and cache the production and test app images.

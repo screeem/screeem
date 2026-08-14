@@ -1,3 +1,4 @@
+import "server-only"
 import {
   compileFormRoutingSelector,
   failedSubmissionRouting,
@@ -8,6 +9,7 @@ import {
   type FormRoutingDefinition,
   type SubmissionRoutingResult,
 } from "@screeem/forms"
+import { productionFormRoutingRegistry } from "./routing-registrations"
 
 const MAX_CACHED_SELECTORS = 16
 const selectorCache = new Map<string, ReturnType<typeof compileFormRoutingSelector>>()
@@ -28,7 +30,11 @@ export async function evaluatePublishedFormRouting(
       selectorCache.delete(key)
       selectorCache.set(key, selector)
     } else {
-      selector = compileFormRoutingSelector(definition, routing)
+      selector = compileFormRoutingSelector(
+        definition,
+        routing,
+        productionFormRoutingRegistry.compilationRouter(),
+      )
       selectorCache.set(key, selector)
       selector.catch(() => {
         if (selectorCache.get(key) === selector) selectorCache.delete(key)

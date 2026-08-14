@@ -111,3 +111,13 @@ make infra-down    # stop local Supabase; downloaded images remain cached
 ```
 
 `make docker-build`, `make docker-up`, and `make docker-test` retain the production-image workflow. The production image intentionally excludes `/_dev`, so use `make playground` for visual review.
+
+## Routing host registrations
+
+Application-owned routing functions, actions, and lifecycle handlers are registered in `packages/web/src/lib/forms/routing-registrations.ts`. Form authors use the registered names; they do not need the implementation details.
+
+Build the exported registry with `registerPureFunction`, `registerAction`, `onBeforeEvaluation`, and `onAfterEvaluation`. Registrations are immutable, so chain each call when creating the exported registry.
+
+Actions run in their configured order after the submission and route are stored. Each action receives a stable `idempotencyKey` and an `AbortSignal`. Pass both to external clients that support request deduplication and cancellation. Failed actions retry three times with delays and remain visible with the submission. `CRON_SECRET` protects the recovery worker at `/api/internal/form-routing-actions`; the included Vercel schedule is daily and can be supplemented by a more frequent external scheduler.
+
+The action store uses `DATABASE_URL` for short server-side transactions. In production, set it to the Supabase transaction-pooler URL. Its migration defines storage, constraints, indexes, and row-level access only; routing and action behavior stays in TypeScript. `make test` runs the transaction behavior against local Postgres.

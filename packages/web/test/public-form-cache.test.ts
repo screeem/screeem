@@ -34,7 +34,7 @@ describe("published form cache", () => {
     expect(load).toHaveBeenCalledTimes(2)
   })
 
-  it("caches only the condition and destination needed at submission time", async () => {
+  it("caches runtime actions without retaining editor authoring data", async () => {
     const admin = fakeAdmin(async () => ({
       data: publishedRow({
         version: 1,
@@ -47,6 +47,7 @@ describe("published form cache", () => {
           },
         ],
         fallback: "review",
+        authoring: { version: 1, rules: [], fallback: "review" },
       }),
       error: null,
     }))
@@ -57,7 +58,9 @@ describe("published form cache", () => {
       id: "qualified",
       when: "true",
       route: "sales",
+      actions: [{ use: "notify", with: "({ email: submission.email })" }],
     })
+    expect(published?.routing).not.toHaveProperty("authoring")
   })
 })
 

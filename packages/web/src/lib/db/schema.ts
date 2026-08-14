@@ -1,9 +1,12 @@
+import type { FormAvailability, SubmissionRoutingStatus } from "@screeem/forms"
 import { sql } from "drizzle-orm"
+import { formRoutingActionExecutionStatuses } from "../forms/submission-contract"
 import {
   bigint,
   boolean,
   foreignKey,
   index,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
@@ -112,7 +115,10 @@ export const forms = pgTable(
     requiresTurnstile: boolean("requires_turnstile").notNull().default(false),
     submissionSchema: jsonb("submission_schema"),
     legacyUnstructured: boolean("legacy_unstructured").notNull().default(true),
-    definitionAvailability: text("definition_availability").notNull().default("draft"),
+    definitionAvailability: text("definition_availability")
+      .$type<FormAvailability>()
+      .notNull()
+      .default("draft"),
     draftDefinition: jsonb("draft_definition"),
     routingDraft: jsonb("routing_draft"),
     draftRevision: bigint("draft_revision", { mode: "number" }).notNull().default(0),
@@ -161,7 +167,10 @@ export const formSubmissions = pgTable(
     formId: uuid("form_id").notNull(),
     publicationVersion: bigint("publication_version", { mode: "number" }),
     payload: jsonb("payload").notNull(),
-    routingStatus: text("routing_status").notNull().default("not_configured"),
+    routingStatus: text("routing_status")
+      .$type<SubmissionRoutingStatus>()
+      .notNull()
+      .default("not_configured"),
     routingRoute: text("routing_route"),
     matchedRuleId: text("matched_rule_id"),
     routingError: text("routing_error"),
@@ -178,9 +187,67 @@ export const formSubmissions = pgTable(
     index("form_submissions_team_form_route_created_idx")
       .on(table.teamId, table.formId, table.routingRoute, table.createdAt.desc())
       .where(sql`${table.routingRoute} IS NOT NULL`),
+    unique("form_submissions_team_form_id_key").on(table.teamId, table.formId, table.id),
     foreignKey({
       columns: [table.teamId, table.formId],
       foreignColumns: [forms.teamId, forms.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.teamId, table.formId, table.publicationVersion],
+      foreignColumns: [
+        formDefinitionVersions.teamId,
+        formDefinitionVersions.formId,
+        formDefinitionVersions.version,
+      ],
+    }),
+  ],
+)
+
+export const formSubmissionActionExecutions = pgTable(
+  "form_submission_action_executions",
+  {
+    teamId: uuid("team_id").notNull(),
+    formId: uuid("form_id").notNull(),
+    submissionId: uuid("submission_id").notNull(),
+    publicationVersion: bigint("publication_version", { mode: "number" }).notNull(),
+    actionKey: text("action_key").notNull(),
+    actionName: text("action_name").notNull(),
+    actionIndex: integer("action_index").notNull(),
+    ruleId: text("rule_id").notNull(),
+    status: text("status", { enum: formRoutingActionExecutionStatuses })
+      .notNull()
+      .default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastError: text("last_error"),
+    output: jsonb("output"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.submissionId, table.actionKey] }),
+    unique("form_submission_action_execution_index_key").on(
+      table.teamId,
+      table.submissionId,
+      table.actionIndex,
+    ),
+    index("form_submission_action_pending_idx")
+      .on(table.nextAttemptAt, table.createdAt)
+      .where(sql`${table.status} = 'pending' AND ${table.attemptCount} < 3`),
+    index("form_submission_action_running_lease_idx")
+      .on(table.leaseExpiresAt, table.createdAt)
+      .where(sql`${table.status} = 'running'`),
+    index("form_submission_action_team_form_created_idx").on(
+      table.teamId,
+      table.formId,
+      table.createdAt.desc(),
+    ),
+    foreignKey({
+      columns: [table.teamId, table.formId, table.submissionId],
+      foreignColumns: [formSubmissions.teamId, formSubmissions.formId, formSubmissions.id],
     }).onDelete("cascade"),
     foreignKey({
       columns: [table.teamId, table.formId, table.publicationVersion],

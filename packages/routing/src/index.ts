@@ -8,6 +8,7 @@ export {
   type FormDefinition,
   type FormFieldDefinition,
   type FormSchema,
+  type InferRuntimeType,
   type InferSubmission,
   type RuntimeType,
   type SchemaDescription,
