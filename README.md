@@ -123,3 +123,11 @@ Forms emit `submission.before_save` and `submission.accepted` whether routing is
 Durable deliveries run in order after the submission and route are stored. Each delivery receives a stable `idempotencyKey` and an `AbortSignal`. Pass both to external clients that support request deduplication and cancellation. Failed deliveries are attempted up to three times with delays and remain visible with the submission. `CRON_SECRET` protects the recovery worker at `/api/internal/form-event-deliveries`; the included Vercel schedule is daily and can be supplemented by a more frequent external scheduler.
 
 The delivery store uses `DATABASE_URL` for short server-side transactions. In production, set it to the Supabase transaction-pooler URL. Its migration defines storage, constraints, indexes, and row-level access only; event and action behavior stays in TypeScript. `make test` runs the transaction behavior against local Postgres.
+
+## Salesforce integration development
+
+Salesforce is the first adapter on the provider-neutral integration boundary. Configure an External Client App with the callback `${NEXT_PUBLIC_SITE_URL}/api/integrations/salesforce/callback` and the `id`, `api`, and `refresh_token` scopes. For local development, copy the values from `packages/web/salesforce.env.example` into `packages/web/.env.development.local`; `make dev` regenerates `.env.local` but leaves this integration override untouched. Keep `SALESFORCE_INTEGRATION_ENABLED=false` until those values are installed.
+
+Managers start or renew authorization through the team-scoped connect/reconnect endpoints. OAuth state is short-lived, one-time, and bound to the initiating user and team. Access and refresh tokens are AES-GCM encrypted with tenant, connection, and provider identity as authenticated context. Standard tests use the fake client and do not contact Salesforce.
+
+An optional sandbox contract test is available with `pnpm --filter @screeem/web test:salesforce-sandbox`. It requires `SALESFORCE_SANDBOX_CLIENT_ID`, `SALESFORCE_SANDBOX_ACCESS_TOKEN`, `SALESFORCE_SANDBOX_REFRESH_TOKEN`, `SALESFORCE_SANDBOX_INSTANCE_URL`, and `SALESFORCE_SANDBOX_IDENTITY_URL`; `SALESFORCE_SANDBOX_CLIENT_SECRET` is optional. The normal test suite never makes Salesforce requests.

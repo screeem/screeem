@@ -24,6 +24,7 @@ import {
   type CreateIntegrationConnectionInput,
   type IntegrationConnectionStore,
   type IntegrationCredentialStore,
+  type IntegrationExecutionStore,
   type IntegrationTeamControlStore,
   type SealedIntegrationCredential,
   type StoredIntegrationCredential,
@@ -33,7 +34,7 @@ import {
 
 type Database = ReturnType<typeof getDatabase>
 
-interface ConnectionRow {
+export interface IntegrationConnectionRow {
   readonly id: string
   readonly team_id: string
   readonly provider: string
@@ -55,6 +56,8 @@ interface ConnectionRow {
   readonly disconnected_at: Date | null
 }
 
+type ConnectionRow = IntegrationConnectionRow
+
 interface TeamControlRow {
   readonly team_id: string
   readonly revision: number | string
@@ -65,7 +68,20 @@ interface TeamControlRow {
   readonly updated_at: Date
 }
 
-interface CredentialRow {
+interface IntegrationExecutionRow extends ConnectionRow {
+  readonly control_revision: number | string | null
+  readonly control_enabled: boolean | null
+  readonly control_disabled_by: string | null
+  readonly control_disabled_at: Date | null
+  readonly control_updated_by: string | null
+  readonly control_updated_at: Date | null
+  readonly credential_key_id: string | null
+  readonly credential_sealed_payload: string | null
+  readonly credential_revision: number | string | null
+  readonly credential_updated_at: Date | null
+}
+
+export interface IntegrationCredentialRow {
   readonly team_id: string
   readonly connection_id: string
   readonly key_id: string
@@ -73,6 +89,8 @@ interface CredentialRow {
   readonly revision: number | string
   readonly updated_at: Date
 }
+
+type CredentialRow = IntegrationCredentialRow
 
 export class PostgresIntegrationConnectionStore implements IntegrationConnectionStore {
   constructor(private readonly database: Database = getDatabase()) {}
@@ -249,6 +267,40 @@ export class PostgresIntegrationConnectionStore implements IntegrationConnection
       WHERE team_id = ${safeTeamId}
         AND id = ${safeConnectionId}
         AND revision = ${expectedRevision}
+      RETURNING
+        id, team_id, provider, revision, status, health, enabled,
+        display_name, external_account_id, last_error_code, last_checked_at,
+        created_by, created_at, updated_by, updated_at,
+        disabled_by, disabled_at, disconnected_by, disconnected_at
+    `)
+    if (!rows[0]) await this.throwMutationMiss(safeTeamId, safeConnectionId, expectedRevision)
+    return mapConnectionRow(rows[0])
+  }
+
+  async markReauthorizationRequired(
+    teamId: IntegrationIdentifier,
+    connectionId: IntegrationIdentifier,
+    expectedRevision: number,
+    checkedAt: string,
+  ): Promise<IntegrationConnection> {
+    const safeTeamId = snapshotIntegrationIdentifier(teamId)
+    const safeConnectionId = snapshotIntegrationIdentifier(connectionId)
+    const time = normalizeDate(checkedAt, "integration check time")
+    const rows = await safeDatabaseCall(() => this.database<ConnectionRow[]>`
+      UPDATE integration_connections
+      SET revision = revision + 1,
+          status = 'reauthorization_required',
+          health = 'degraded',
+          last_error_code = 'authentication_failed',
+          last_checked_at = ${time},
+          updated_by = NULL,
+          updated_at = ${time},
+          disconnected_by = NULL,
+          disconnected_at = NULL
+      WHERE team_id = ${safeTeamId}
+        AND id = ${safeConnectionId}
+        AND revision = ${expectedRevision}
+        AND status = 'connected'
       RETURNING
         id, team_id, provider, revision, status, health, enabled,
         display_name, external_account_id, last_error_code, last_checked_at,
@@ -487,8 +539,86 @@ export class PostgresIntegrationCredentialStore implements IntegrationCredential
   }
 }
 
+export class PostgresIntegrationExecutionStore implements IntegrationExecutionStore {
+  constructor(private readonly database: Database = getDatabase()) {}
+
+  async load(teamId: IntegrationIdentifier, connectionId: IntegrationIdentifier) {
+    const safeTeamId = snapshotIntegrationIdentifier(teamId)
+    const safeConnectionId = snapshotIntegrationIdentifier(connectionId)
+    const rows = await safeDatabaseCall(() => this.database<IntegrationExecutionRow[]>`
+      SELECT
+        connection.id, connection.team_id, connection.provider, connection.revision,
+        connection.status, connection.health, connection.enabled,
+        connection.display_name, connection.external_account_id,
+        connection.last_error_code, connection.last_checked_at,
+        connection.created_by, connection.created_at, connection.updated_by,
+        connection.updated_at, connection.disabled_by, connection.disabled_at,
+        connection.disconnected_by, connection.disconnected_at,
+        control.revision AS control_revision,
+        control.enabled AS control_enabled,
+        control.disabled_by AS control_disabled_by,
+        control.disabled_at AS control_disabled_at,
+        control.updated_by AS control_updated_by,
+        control.updated_at AS control_updated_at,
+        credential.key_id AS credential_key_id,
+        credential.sealed_payload AS credential_sealed_payload,
+        credential.revision AS credential_revision,
+        credential.updated_at AS credential_updated_at
+      FROM integration_connections AS connection
+      LEFT JOIN integration_team_controls AS control
+        ON control.team_id = connection.team_id
+      LEFT JOIN integration_credentials AS credential
+        ON credential.team_id = connection.team_id
+       AND credential.connection_id = connection.id
+       AND connection.enabled
+       AND connection.status = 'connected'
+       AND COALESCE(control.enabled, true)
+      WHERE connection.team_id = ${safeTeamId}
+        AND connection.id = ${safeConnectionId}
+      LIMIT 1
+    `)
+    const row = rows[0]
+    if (!row) return null
+    const connection = mapConnectionRow(row)
+    const control = row.control_revision === null
+      ? snapshotIntegrationTeamControl({
+          teamId: safeTeamId,
+          revision: null,
+          enabled: true,
+          disabledBy: null,
+          disabledAt: null,
+          updatedBy: null,
+          updatedAt: null,
+        })
+      : mapTeamControlRow({
+          team_id: safeTeamId,
+          revision: row.control_revision,
+          enabled: row.control_enabled!,
+          disabled_by: row.control_disabled_by,
+          disabled_at: row.control_disabled_at,
+          updated_by: row.control_updated_by,
+          updated_at: row.control_updated_at!,
+        })
+    const credential = row.credential_revision === null
+      ? null
+      : mapCredentialRow({
+          team_id: safeTeamId,
+          connection_id: safeConnectionId,
+          key_id: row.credential_key_id!,
+          sealed_payload: row.credential_sealed_payload!,
+          revision: row.credential_revision,
+          updated_at: row.credential_updated_at!,
+        })
+    return Object.freeze({ connection, control, credential })
+  }
+}
+
 export function mapIntegrationConnectionRow(row: ConnectionRow): IntegrationConnection {
   return mapConnectionRow(row)
+}
+
+export function mapIntegrationCredentialRow(row: IntegrationCredentialRow): StoredIntegrationCredential {
+  return mapCredentialRow(row)
 }
 
 function mapConnectionRow(row: ConnectionRow): IntegrationConnection {

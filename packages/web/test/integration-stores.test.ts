@@ -142,6 +142,27 @@ describe("integration stores", () => {
       controls.setEnabled(teamOne, disabled.revision, true, userOne, now),
     ).rejects.toBeInstanceOf(IntegrationTeamControlRevisionConflictError)
   })
+
+  it("only marks a currently connected revision for reauthorization", async () => {
+    const connection = await createConnection(connections, teamOne, connectionOne)
+    const marked = await connections.markReauthorizationRequired(
+      teamOne,
+      connection.id,
+      connection.revision,
+      "2026-08-14T10:01:00.000Z",
+    )
+    expect(marked).toMatchObject({
+      status: "reauthorization_required",
+      health: "degraded",
+      lastErrorCode: "authentication_failed",
+    })
+    await expect(connections.markReauthorizationRequired(
+      teamOne,
+      connection.id,
+      marked.revision,
+      "2026-08-14T10:02:00.000Z",
+    )).rejects.toBeInstanceOf(IntegrationConnectionRevisionConflictError)
+  })
 })
 
 function createConnection(

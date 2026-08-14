@@ -225,6 +225,86 @@ export const integrationTeamControls = pgTable(
   ],
 )
 
+export const integrationOauthAttempts = pgTable(
+  "integration_oauth_attempts",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    attemptId: uuid("attempt_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.provider] }),
+    unique("integration_oauth_attempts_identity_key").on(
+      table.teamId,
+      table.provider,
+      table.attemptId,
+    ),
+    index("integration_oauth_attempts_expires_idx").on(table.expiresAt),
+    check("integration_oauth_attempts_provider_check", sql`${table.provider} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
+    check("integration_oauth_attempts_expiry_check", sql`${table.expiresAt} > ${table.createdAt}`),
+  ],
+)
+
+export const integrationOauthStates = pgTable(
+  "integration_oauth_states",
+  {
+    stateHash: text("state_hash").primaryKey(),
+    provider: text("provider").notNull(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    attemptId: uuid("attempt_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    codeVerifier: text("code_verifier").notNull(),
+    returnPath: text("return_path").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique("integration_oauth_states_team_provider_key").on(table.teamId, table.provider),
+    foreignKey({
+      columns: [table.teamId, table.provider, table.attemptId],
+      foreignColumns: [
+        integrationOauthAttempts.teamId,
+        integrationOauthAttempts.provider,
+        integrationOauthAttempts.attemptId,
+      ],
+    }).onDelete("cascade"),
+    index("integration_oauth_states_expires_idx").on(table.expiresAt),
+    check("integration_oauth_states_state_hash_check", sql`${table.stateHash} ~ '^[A-Za-z0-9_-]{43}$'`),
+    check("integration_oauth_states_provider_check", sql`${table.provider} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
+    check("integration_oauth_states_verifier_check", sql`char_length(${table.codeVerifier}) BETWEEN 43 AND 128 AND ${table.codeVerifier} ~ '^[A-Za-z0-9._~-]+$'`),
+    check("integration_oauth_states_return_path_check", sql`char_length(${table.returnPath}) BETWEEN 1 AND 512 AND ${table.returnPath} LIKE '/%' AND ${table.returnPath} NOT LIKE '//%'`),
+    check("integration_oauth_states_expiry_check", sql`${table.expiresAt} > ${table.createdAt}`),
+  ],
+)
+
+export const integrationRefreshLeases = pgTable(
+  "integration_refresh_leases",
+  {
+    teamId: uuid("team_id").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    ownerToken: text("owner_token").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.connectionId] }),
+    foreignKey({
+      columns: [table.teamId, table.connectionId],
+      foreignColumns: [integrationConnections.teamId, integrationConnections.id],
+    }).onDelete("cascade"),
+    index("integration_refresh_leases_expires_idx").on(table.expiresAt),
+    check("integration_refresh_leases_owner_check", sql`${table.ownerToken} ~ '^[A-Za-z0-9_-]{32,128}$'`),
+    check("integration_refresh_leases_expiry_check", sql`${table.expiresAt} > ${table.updatedAt}`),
+  ],
+)
+
 export const forms = pgTable(
   "forms",
   {
