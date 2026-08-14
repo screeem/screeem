@@ -5,8 +5,14 @@ import {
   formEventDeliveryStatuses,
 } from "../forms/form-delivery-contract"
 import {
+  integrationConnectionStatuses,
+  type IntegrationErrorCode,
+  integrationHealthStatuses,
+} from "../integrations/contract"
+import {
   bigint,
   boolean,
+  check,
   foreignKey,
   index,
   integer,
@@ -103,6 +109,100 @@ export const teamInvitations = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
   (table) => [index("team_invitations_team_expires_idx").on(table.teamId, table.expiresAt)],
+)
+
+export const integrationConnections = pgTable(
+  "integration_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    revision: bigint("revision", { mode: "number" }).notNull().default(1),
+    status: text("status", { enum: integrationConnectionStatuses }).notNull(),
+    health: text("health", { enum: integrationHealthStatuses }).notNull().default("unknown"),
+    enabled: boolean("enabled").notNull().default(true),
+    displayName: text("display_name"),
+    externalAccountId: text("external_account_id"),
+    lastErrorCode: text("last_error_code").$type<IntegrationErrorCode>(),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: uuid("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    disabledBy: uuid("disabled_by"),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    disconnectedBy: uuid("disconnected_by"),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("integration_connections_team_id_id_key").on(table.teamId, table.id),
+    unique("integration_connections_team_provider_key").on(table.teamId, table.provider),
+    index("integration_connections_team_created_idx").on(
+      table.teamId,
+      table.createdAt.desc(),
+    ),
+    check("integration_connections_provider_check", sql`${table.provider} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
+    check("integration_connections_revision_check", sql`${table.revision} > 0`),
+    check("integration_connections_status_check", sql`${table.status} IN ('connected', 'reauthorization_required', 'disconnected')`),
+    check("integration_connections_health_check", sql`${table.health} IN ('unknown', 'healthy', 'degraded')`),
+    check("integration_connections_display_name_check", sql`${table.displayName} IS NULL OR char_length(${table.displayName}) BETWEEN 1 AND 160`),
+    check("integration_connections_external_account_id_check", sql`${table.externalAccountId} IS NULL OR char_length(${table.externalAccountId}) BETWEEN 1 AND 256`),
+    check("integration_connections_last_error_code_check", sql`${table.lastErrorCode} IS NULL OR ${table.lastErrorCode} IN ('authentication_failed', 'authorization_failed', 'invalid_configuration', 'invalid_request', 'provider_unavailable', 'rate_limited', 'unknown')`),
+    check(
+      "integration_connections_disabled_state_check",
+      sql`(${table.enabled} AND ${table.disabledAt} IS NULL) OR (NOT ${table.enabled} AND ${table.disabledAt} IS NOT NULL)`,
+    ),
+    check(
+      "integration_connections_disconnected_state_check",
+      sql`(${table.status} = 'disconnected' AND ${table.disconnectedAt} IS NOT NULL) OR (${table.status} <> 'disconnected' AND ${table.disconnectedAt} IS NULL)`,
+    ),
+  ],
+)
+
+export const integrationCredentials = pgTable(
+  "integration_credentials",
+  {
+    teamId: uuid("team_id").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    keyId: text("key_id").notNull(),
+    sealedPayload: text("sealed_payload").notNull(),
+    revision: bigint("revision", { mode: "number" }).notNull().default(1),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.connectionId] }),
+    foreignKey({
+      columns: [table.teamId, table.connectionId],
+      foreignColumns: [integrationConnections.teamId, integrationConnections.id],
+    }).onDelete("cascade"),
+    check("integration_credentials_key_id_check", sql`${table.keyId} ~ '^[A-Za-z0-9._-]{1,128}$'`),
+    check("integration_credentials_sealed_payload_check", sql`octet_length(${table.sealedPayload}) BETWEEN 1 AND 131072 AND ${table.sealedPayload} ~ '^v[0-9]+[.][A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*$'`),
+    check("integration_credentials_revision_check", sql`${table.revision} > 0`),
+  ],
+)
+
+export const integrationTeamControls = pgTable(
+  "integration_team_controls",
+  {
+    teamId: uuid("team_id")
+      .primaryKey()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    revision: bigint("revision", { mode: "number" }).notNull().default(1),
+    enabled: boolean("enabled").notNull().default(true),
+    disabledBy: uuid("disabled_by"),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    updatedBy: uuid("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("integration_team_controls_revision_check", sql`${table.revision} > 0`),
+    check(
+      "integration_team_controls_disabled_state_check",
+      sql`(${table.enabled} AND ${table.disabledAt} IS NULL) OR (NOT ${table.enabled} AND ${table.disabledAt} IS NOT NULL)`,
+    ),
+  ],
 )
 
 export const forms = pgTable(
