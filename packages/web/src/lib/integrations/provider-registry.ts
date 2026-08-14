@@ -14,12 +14,11 @@ import {
   type IntegrationTeamControl,
 } from "./contract"
 import {
-  snapshotSealedIntegrationCredential,
   snapshotStoredIntegrationCredential,
   type IntegrationConnectionStore,
   type IntegrationCredentialStore,
   type IntegrationTeamControlStore,
-  type SealedIntegrationCredential,
+  type StoredIntegrationCredential,
 } from "./stores"
 
 export interface IntegrationProviderDescriptor {
@@ -31,7 +30,7 @@ export interface IntegrationProviderDescriptor {
 export interface IntegrationProviderDefinition<Client> extends IntegrationProviderDescriptor {
   readonly open: (options: {
     readonly connection: IntegrationConnection
-    readonly credential: SealedIntegrationCredential
+    readonly credential: StoredIntegrationCredential
   }) => Client | Promise<Client>
 }
 
@@ -176,8 +175,10 @@ export class IntegrationResolver {
     ) {
       throw new TypeError("Integration scope mismatch")
     }
-    const credential = snapshotSealedIntegrationCredential(storedCredential.credential)
-    const client = await provider.open({ connection, credential })
+    const client = await provider.open({
+      connection,
+      credential: snapshotStoredIntegrationCredential(storedCredential),
+    })
     return Object.freeze({ provider: descriptor(provider), connection, client })
   }
 }

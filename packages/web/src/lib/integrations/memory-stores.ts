@@ -22,6 +22,7 @@ import {
   type CreateIntegrationConnectionInput,
   type IntegrationConnectionStore,
   type IntegrationCredentialStore,
+  type IntegrationExecutionStore,
   type IntegrationTeamControlStore,
   type RecordIntegrationHealthInput,
   type SealedIntegrationCredential,
@@ -146,6 +147,38 @@ export class MemoryIntegrationConnectionStore implements IntegrationConnectionSt
       lastCheckedAt: normalizedTimestamp(input.checkedAt),
       updatedBy: snapshotIntegrationIdentifier(input.actorId),
       updatedAt: normalizedTimestamp(input.updatedAt),
+    })
+    this.#connections.set(connection.id, connection)
+    return snapshotIntegrationConnection(connection)
+  }
+
+  async markReauthorizationRequired(
+    teamId: IntegrationIdentifier,
+    connectionId: IntegrationIdentifier,
+    expectedRevision: number,
+    checkedAt: string,
+  ): Promise<IntegrationConnection> {
+    const current = this.#read(teamId, connectionId)
+    assertRevision(current, expectedRevision)
+    if (current.status !== "connected") {
+      throw new IntegrationConnectionRevisionConflictError(
+        current.id,
+        expectedRevision,
+        current.revision,
+      )
+    }
+    const time = normalizedTimestamp(checkedAt)
+    const connection = snapshotIntegrationConnection({
+      ...current,
+      revision: expectedRevision + 1,
+      status: "reauthorization_required",
+      health: "degraded",
+      lastErrorCode: "authentication_failed",
+      lastCheckedAt: time,
+      updatedBy: null,
+      updatedAt: time,
+      disconnectedBy: null,
+      disconnectedAt: null,
     })
     this.#connections.set(connection.id, connection)
     return snapshotIntegrationConnection(connection)
@@ -324,6 +357,35 @@ export class MemoryIntegrationCredentialStore implements IntegrationCredentialSt
     }
     teamCredentials?.delete(safeConnectionId)
     if (teamCredentials?.size === 0) this.#credentials.delete(safeTeamId)
+  }
+}
+
+export class MemoryIntegrationExecutionStore implements IntegrationExecutionStore {
+  constructor(
+    private readonly connections: IntegrationConnectionStore,
+    private readonly controls: IntegrationTeamControlStore,
+    private readonly credentials: IntegrationCredentialStore,
+  ) {}
+
+  async load(teamId: IntegrationIdentifier, connectionId: IntegrationIdentifier) {
+    try {
+      const [connection, control, credential] = await Promise.all([
+        this.connections.get(teamId, connectionId),
+        this.controls.get(teamId),
+        this.credentials.load(teamId, connectionId),
+      ])
+      return Object.freeze({
+        connection: snapshotIntegrationConnection(connection),
+        control: snapshotIntegrationTeamControl(control),
+        credential:
+          connection.enabled && connection.status === "connected" && control.enabled && credential
+            ? snapshotStoredIntegrationCredential(credential)
+            : null,
+      })
+    } catch (error) {
+      if (error instanceof IntegrationConnectionNotFoundError) return null
+      throw error
+    }
   }
 }
 

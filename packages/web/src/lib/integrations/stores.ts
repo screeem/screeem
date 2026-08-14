@@ -58,6 +58,12 @@ export interface IntegrationConnectionStore {
     expectedRevision: number,
     input: UpdateIntegrationAuthStateInput,
   ): Promise<IntegrationConnection>
+  markReauthorizationRequired(
+    teamId: IntegrationIdentifier,
+    connectionId: IntegrationIdentifier,
+    expectedRevision: number,
+    checkedAt: string,
+  ): Promise<IntegrationConnection>
   recordHealth(
     teamId: IntegrationIdentifier,
     connectionId: IntegrationIdentifier,
@@ -142,6 +148,19 @@ export interface IntegrationCredentialStore {
     connectionId: IntegrationIdentifier,
     expectedRevision: number,
   ): Promise<void>
+}
+
+export interface IntegrationExecutionSnapshot {
+  readonly connection: IntegrationConnection
+  readonly control: IntegrationTeamControl
+  readonly credential: StoredIntegrationCredential | null
+}
+
+export interface IntegrationExecutionStore {
+  load(
+    teamId: IntegrationIdentifier,
+    connectionId: IntegrationIdentifier,
+  ): Promise<IntegrationExecutionSnapshot | null>
 }
 
 export type IntegrationStoreErrorCode =

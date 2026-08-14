@@ -123,3 +123,21 @@ Forms emit `submission.before_save` and `submission.accepted` whether routing is
 Durable deliveries run in order after the submission and route are stored. Each delivery receives a stable `idempotencyKey` and an `AbortSignal`. Pass both to external clients that support request deduplication and cancellation. Failed deliveries are attempted up to three times with delays and remain visible with the submission. `CRON_SECRET` protects the recovery worker at `/api/internal/form-event-deliveries`; the included Vercel schedule is daily and can be supplemented by a more frequent external scheduler.
 
 The delivery store uses `DATABASE_URL` for short server-side transactions. In production, set it to the Supabase transaction-pooler URL. Its migration defines storage, constraints, indexes, and row-level access only; event and action behavior stays in TypeScript. `make test` runs the transaction behavior against local Postgres.
+
+## Salesforce integration development
+
+Salesforce is the first adapter on the provider-neutral integration boundary. Configure an External Client App with the callback `${NEXT_PUBLIC_SITE_URL}/api/integrations/salesforce/callback` and the `id`, `api`, and `refresh_token` scopes. For local development, copy the values from `packages/web/salesforce.env.example` into `packages/web/.env.development.local`; `make dev` regenerates `.env.local` but leaves this integration override untouched. Keep `SALESFORCE_INTEGRATION_ENABLED=false` until those values are installed.
+
+Managers start or renew authorization through the team-scoped connect/reconnect endpoints. OAuth state is short-lived, one-time, and bound to the initiating user and team. Access and refresh tokens are AES-GCM encrypted with tenant, connection, and provider identity as authenticated context. Standard tests use the fake client and do not contact Salesforce.
+
+Before enabling Salesforce in production:
+
+- Configure the External Client App with PKCE, refresh-token rotation, and the current Salesforce-required refresh-token idle TTL. The client persists rotated refresh tokens and moves expired or revoked credentials to `reauthorization_required`.
+- Enable Salesforce's refresh-token IP allowlist when the app is subject to the partner-app controls. The deployment must then use stable outbound IPs; on Vercel this requires Static IPs or Secure Compute. Add every production egress IP to Salesforce before enabling the integration.
+- Configure the app as a confidential server integration and provide `SALESFORCE_CLIENT_SECRET` through the deployment secret manager.
+- Keep the requested scopes to `id`, `api`, and `refresh_token`, and verify the callback URL exactly matches `NEXT_PUBLIC_SITE_URL`.
+- Complete these checks in a Salesforce sandbox before enabling the global integration switch.
+
+`SALESFORCE_LOGIN_URL` currently accepts only `https://login.salesforce.com` and `https://test.salesforce.com`. Salesforce My Domain, Experience Cloud, and custom OAuth origins are not supported; add a separately validated My Domain flow rather than placing an arbitrary host in this setting.
+
+An optional sandbox contract test is available with `pnpm --filter @screeem/web test:salesforce-sandbox`. It requires `SALESFORCE_SANDBOX_CLIENT_ID`, `SALESFORCE_SANDBOX_ACCESS_TOKEN`, `SALESFORCE_SANDBOX_REFRESH_TOKEN`, `SALESFORCE_SANDBOX_INSTANCE_URL`, and `SALESFORCE_SANDBOX_IDENTITY_URL`; `SALESFORCE_SANDBOX_CLIENT_SECRET` is optional. The normal test suite never makes Salesforce requests.
