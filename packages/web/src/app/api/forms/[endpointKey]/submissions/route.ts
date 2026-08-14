@@ -18,16 +18,21 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { validateSubmission, type SubmissionSchema } from "@/lib/forms/schema"
 import { runAfterResponse } from "../../../../../lib/forms/after-response"
 import {
-  executeFormRoutingActions,
-  planFormRoutingActions,
-  type PlannedFormRoutingAction,
-} from "../../../../../lib/forms/routing-actions"
+  executeFormEventDeliveries,
+  orderFormEventDeliveries,
+  planFormRoutingDeliveries,
+} from "../../../../../lib/forms/form-event-deliveries"
 import {
-  createFormRoutingPersistence,
-  type FormRoutingPersistence,
+  createFormPersistence,
+  type FormPersistence,
   type PublicSubmissionSaveStatus,
 } from "../../../../../lib/forms/routing-persistence"
-import { productionFormRoutingRegistry } from "../../../../../lib/forms/routing-registrations"
+import { productionFormAutomationRegistry } from "../../../../../lib/forms/form-registrations"
+import {
+  snapshotFormEvent,
+  type FormEvent,
+  type StoredFormEventDelivery,
+} from "../../../../../lib/forms/form-actions"
 import { evaluatePublishedFormRouting } from "../../../../../lib/forms/routing-runtime"
 
 const MAX_BYTES = 64 * 1024
@@ -94,7 +99,7 @@ export async function POST(
   if (length > MAX_BYTES) return tooLarge(headers)
   try {
     const published = await loadActivePublicDefinition(admin, form)
-    const persistence = createFormRoutingPersistence()
+    const persistence = createFormPersistence()
     return published
       ? await structuredSubmission(request, persistence, form, published, origin, headers)
       : await legacySubmission(request, persistence, form, origin, headers)
@@ -108,7 +113,7 @@ export async function POST(
 
 async function structuredSubmission(
   request: NextRequest,
-  persistence: FormRoutingPersistence,
+  persistence: FormPersistence,
   form: PublicFormRecord,
   published: {
     readonly version: number
@@ -149,14 +154,15 @@ async function structuredSubmission(
     publicationVersion: published.version,
     submissionId,
   }
-  await productionFormRoutingRegistry.emitBefore({
+  const beforeEvent = snapshotFormEvent({
+    eventId: `${evaluationId}:before`,
     tenantId: form.teamId,
     formId: form.id,
-    publicationVersion: published.version,
-    evaluationId,
-    type: "before_evaluation",
+    type: "routing.evaluation.before",
     occurredAt: new Date().toISOString(),
+    payload: { publicationVersion: published.version, evaluationId, submissionId },
   })
+  await productionFormAutomationRegistry.runInline(beforeEvent)
   const evaluationStartedAt = performance.now()
   const routing = await evaluatePublishedFormRouting(
     form.id,
@@ -165,19 +171,49 @@ async function structuredSubmission(
     published.routing,
     result.right,
   )
-  await productionFormRoutingRegistry.emitAfter({
+  const afterEvent = snapshotFormEvent({
+    eventId: `${evaluationId}:after`,
     tenantId: form.teamId,
     formId: form.id,
-    publicationVersion: published.version,
-    evaluationId,
-    type: "after_evaluation",
+    type: "routing.evaluation.after",
     occurredAt: new Date().toISOString(),
-    route: routing.route,
-    matchedRule: routing.matchedRule,
-    outcome: routing.status,
-    durationMs: Math.max(0, performance.now() - evaluationStartedAt),
+    payload: {
+      publicationVersion: published.version,
+      evaluationId,
+      submissionId,
+      route: routing.route,
+      matchedRule: routing.matchedRule,
+      outcome: routing.status,
+      durationMs: Math.max(0, performance.now() - evaluationStartedAt),
+    },
   })
-  const actions = planFormRoutingActions(published.routing, routing)
+  await productionFormAutomationRegistry.runInline(afterEvent)
+  const matchedEvent = matchedRoutingEvent(
+    identifiers,
+    routing,
+    result.right,
+  )
+  const beforeSaveEvent = submissionEvent(
+    "submission.before_save",
+    identifiers,
+    result.right,
+    routing,
+  )
+  const acceptedEvent = submissionEvent(
+    "submission.accepted",
+    identifiers,
+    result.right,
+    routing,
+  )
+  if (matchedEvent) await productionFormAutomationRegistry.runInline(matchedEvent)
+  await productionFormAutomationRegistry.runInline(beforeSaveEvent)
+  const deliveries = orderFormEventDeliveries([
+    ...productionFormAutomationRegistry.planDurable(beforeEvent),
+    ...productionFormAutomationRegistry.planDurable(afterEvent),
+    ...planFormRoutingDeliveries(published.routing, routing, matchedEvent),
+    ...productionFormAutomationRegistry.planDurable(beforeSaveEvent),
+    ...productionFormAutomationRegistry.planDurable(acceptedEvent),
+  ], identifiers)
   const saved = await saveActiveSubmission(
     persistence,
     submissionId,
@@ -186,32 +222,36 @@ async function structuredSubmission(
     published.version,
     result.right,
     routing,
-    actions,
+    deliveries,
     origin,
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
   )
   if (saved === "unavailable") return unavailable(headers)
   if (saved === "rate-limited") return rateLimited(headers)
   if (saved === "failed") return saveFailure(headers)
-  if (published.routing !== null && actions.length > 0) {
-    await runAfterResponse(() =>
-      executeFormRoutingActions({
-        identifiers,
+  await runAfterResponse(async () => {
+    await Promise.all([
+      productionFormAutomationRegistry.runIsolated(beforeEvent),
+      productionFormAutomationRegistry.runIsolated(afterEvent),
+      ...(matchedEvent ? [productionFormAutomationRegistry.runIsolated(matchedEvent)] : []),
+      productionFormAutomationRegistry.runIsolated(beforeSaveEvent),
+      productionFormAutomationRegistry.runIsolated(acceptedEvent),
+    ])
+    if (deliveries.length > 0) {
+      await executeFormEventDeliveries({
         definition: published.definition,
-        routing: published.routing!,
-        result: routing,
-        submission: result.right,
-        actions,
+        routing: published.routing,
+        deliveries,
         store: persistence,
-      }),
-    )
-  }
+      })
+    }
+  })
   return success(request, form.successUrl, headers, published.version)
 }
 
 async function legacySubmission(
   request: NextRequest,
-  persistence: FormRoutingPersistence,
+  persistence: FormPersistence,
   form: PublicFormRecord,
   origin: string | null,
   headers: Record<string, string>,
@@ -238,21 +278,60 @@ async function legacySubmission(
     }
   }
 
+  const submissionId = crypto.randomUUID()
+  const identifiers = {
+    tenantId: form.teamId,
+    formId: form.id,
+    publicationVersion: null,
+    submissionId,
+  }
+  const routing = notConfiguredSubmissionRouting()
+  const beforeSaveEvent = submissionEvent(
+    "submission.before_save",
+    identifiers,
+    parsed.payload,
+    routing,
+  )
+  const acceptedEvent = submissionEvent(
+    "submission.accepted",
+    identifiers,
+    parsed.payload,
+    routing,
+  )
+  await productionFormAutomationRegistry.runInline(beforeSaveEvent)
+  const deliveries = orderFormEventDeliveries([
+    ...productionFormAutomationRegistry.planDurable(beforeSaveEvent),
+    ...productionFormAutomationRegistry.planDurable(acceptedEvent),
+  ], identifiers)
   const saved = await saveActiveSubmission(
     persistence,
-    crypto.randomUUID(),
+    submissionId,
     form.teamId,
     form.id,
     null,
     parsed.payload,
-    notConfiguredSubmissionRouting(),
-    [],
+    routing,
+    deliveries,
     origin,
     request.headers.get("user-agent")?.slice(0, 500) ?? null,
   )
   if (saved === "unavailable") return unavailable(headers)
   if (saved === "rate-limited") return rateLimited(headers)
   if (saved === "failed") return saveFailure(headers)
+  await runAfterResponse(async () => {
+    await Promise.all([
+      productionFormAutomationRegistry.runIsolated(beforeSaveEvent),
+      productionFormAutomationRegistry.runIsolated(acceptedEvent),
+    ])
+    if (deliveries.length > 0) {
+      await executeFormEventDeliveries({
+        definition: null,
+        routing: null,
+        deliveries,
+        store: persistence,
+      })
+    }
+  })
   return success(request, form.successUrl, headers)
 }
 
@@ -482,14 +561,14 @@ function unavailable(headers: Record<string, string>) {
 }
 
 async function saveActiveSubmission(
-  persistence: FormRoutingPersistence,
+  persistence: FormPersistence,
   submissionId: string,
   tenantId: string,
   formId: string,
   publicationVersion: number | null,
   payload: unknown,
   routing: SubmissionRoutingResult,
-  actions: readonly PlannedFormRoutingAction[],
+  deliveries: readonly StoredFormEventDelivery[],
   origin: string | null,
   userAgent: string | null,
 ): Promise<PublicSubmissionSaveStatus | "failed"> {
@@ -501,13 +580,68 @@ async function saveActiveSubmission(
       publicationVersion,
       payload,
       routing,
-      actions,
+      deliveries,
       origin,
       userAgent,
     })
   } catch {
     return "failed"
   }
+}
+
+function matchedRoutingEvent(
+  scope: {
+    readonly tenantId: string
+    readonly formId: string
+    readonly publicationVersion: number
+    readonly submissionId: string
+  },
+  routing: SubmissionRoutingResult,
+  submission: Readonly<Record<string, string | number | boolean>>,
+): FormEvent<"routing.matched"> | null {
+  if (routing.status !== "matched" || routing.route === null || routing.matchedRule === null) {
+    return null
+  }
+  return snapshotFormEvent({
+    eventId: `${scope.submissionId}:routing.matched`,
+    tenantId: scope.tenantId,
+    formId: scope.formId,
+    type: "routing.matched",
+    occurredAt: new Date().toISOString(),
+    payload: {
+      publicationVersion: scope.publicationVersion,
+      submissionId: scope.submissionId,
+      submission,
+      ruleId: routing.matchedRule,
+      route: routing.route,
+    },
+  }) as FormEvent<"routing.matched">
+}
+
+function submissionEvent(
+  type: "submission.before_save" | "submission.accepted",
+  scope: {
+    readonly tenantId: string
+    readonly formId: string
+    readonly publicationVersion: number | null
+    readonly submissionId: string
+  },
+  submission: Readonly<Record<string, unknown>>,
+  routing: SubmissionRoutingResult,
+): FormEvent<"submission.before_save" | "submission.accepted"> {
+  return snapshotFormEvent({
+    eventId: `${scope.submissionId}:${type}`,
+    tenantId: scope.tenantId,
+    formId: scope.formId,
+    type,
+    occurredAt: new Date().toISOString(),
+    payload: {
+      publicationVersion: scope.publicationVersion,
+      submissionId: scope.submissionId,
+      submission,
+      routing,
+    },
+  }) as FormEvent<"submission.before_save" | "submission.accepted">
 }
 
 function success(

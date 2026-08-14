@@ -2,7 +2,7 @@ import "server-only"
 
 import { compileFormRoutingDefinition } from "@screeem/forms"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { productionFormRoutingRegistry } from "./routing-registrations"
+import { productionFormAutomationRegistry } from "./form-registrations"
 import { SupabaseFormDefinitionStore, SupabaseFormSubmissionStore } from "./supabase-store"
 
 export function createFormDefinitionStore(teamId: string) {
@@ -10,7 +10,7 @@ export function createFormDefinitionStore(teamId: string) {
     compileFormRoutingDefinition(
       definition,
       routing,
-      productionFormRoutingRegistry.compilationRouter(),
+      productionFormAutomationRegistry.compilationRouter(),
     ),
   )
 }

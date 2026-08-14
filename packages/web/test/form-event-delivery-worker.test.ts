@@ -3,16 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({ drain: vi.fn() }))
 
-vi.mock("@/lib/forms/routing-actions", () => ({
-  drainPendingFormRoutingActions: mocks.drain,
+vi.mock("@/lib/forms/form-event-deliveries", () => ({
+  drainPendingFormEventDeliveries: mocks.drain,
 }))
 vi.mock("@/lib/forms/routing-persistence", () => ({
-  createFormRoutingPersistence: () => ({}),
+  createFormPersistence: () => ({}),
 }))
 
-import { GET } from "../src/app/api/internal/form-routing-actions/route"
+import { GET } from "../src/app/api/internal/form-event-deliveries/route"
 
-describe("routing action worker", () => {
+describe("form event delivery worker", () => {
   beforeEach(() => {
     vi.stubEnv("CRON_SECRET", "worker-secret")
     mocks.drain.mockResolvedValue(3)
@@ -30,7 +30,7 @@ describe("routing action worker", () => {
     expect(mocks.drain).not.toHaveBeenCalled()
   })
 
-  it("drains pending actions for an authorized worker", async () => {
+  it("drains pending deliveries for an authorized worker", async () => {
     const response = await GET(request("Bearer worker-secret"))
 
     expect(response.status).toBe(200)
@@ -49,7 +49,7 @@ describe("routing action worker", () => {
 })
 
 function request(authorization?: string) {
-  return new NextRequest("http://localhost/api/internal/form-routing-actions", {
+  return new NextRequest("http://localhost/api/internal/form-event-deliveries", {
     headers: authorization ? { authorization } : {},
   })
 }

@@ -55,6 +55,9 @@ export function snapshotFormRoutingDefinition(input: unknown): FormRoutingDefini
     if (typeof fallback !== "string") {
       fail("invalid_fallback_route", "The fallback route must be a string", "fallback")
     }
+    if (fallback.length === 0) {
+      fail("invalid_fallback_route", "The fallback route cannot be empty", "fallback")
+    }
     assertMaximumLength(
       fallback,
       maximumRouteLength,
@@ -160,6 +163,12 @@ function snapshotRule(rules: readonly unknown[], index: number): Rule {
   if (typeof id !== "string" || typeof when !== "string" || typeof route !== "string") {
     fail("invalid_routing_rule", "A routing rule requires string id, when and route values", path)
   }
+  if (id.length === 0 || when.length === 0) {
+    fail("invalid_routing_rule", "A routing rule requires non-empty id and when values", path)
+  }
+  if (route.length === 0) {
+    fail("invalid_routing_rule", `Rule ${id} route cannot be empty`, `${path}.route`, id)
+  }
   assertMaximumLength(
     id,
     maximumRuleIdLength,
@@ -226,6 +235,9 @@ function snapshotAction(
 
   if (typeof use !== "string" || (input.present && typeof input.value !== "string")) {
     fail("invalid_routing_action", "A routing action requires string use and with values", path, ruleId)
+  }
+  if (use.length === 0) {
+    fail("invalid_routing_action", "A routing action name cannot be empty", `${path}.use`, ruleId)
   }
   assertMaximumLength(
     use,

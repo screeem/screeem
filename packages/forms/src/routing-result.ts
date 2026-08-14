@@ -58,12 +58,17 @@ export function snapshotSubmissionRoutingResult(input: unknown): SubmissionRouti
   ) {
     throw new TypeError("Submission routing status is invalid")
   }
-  if (route !== null && (typeof route !== "string" || route.length > maximumRouteLength)) {
+  if (
+    route !== null &&
+    (typeof route !== "string" || route.length === 0 || route.length > maximumRouteLength)
+  ) {
     throw new TypeError("Submission route is invalid")
   }
   if (
     matchedRule !== null &&
-    (typeof matchedRule !== "string" || matchedRule.length > maximumRuleIdLength)
+    (typeof matchedRule !== "string" ||
+      matchedRule.length === 0 ||
+      matchedRule.length > maximumRuleIdLength)
   ) {
     throw new TypeError("Submission matched rule is invalid")
   }

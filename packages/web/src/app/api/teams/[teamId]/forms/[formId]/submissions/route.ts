@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { snapshotFormSubmissionsApiResponse } from "../../../../../../../lib/forms/submission-contract"
-import { createFormRoutingPersistence } from "../../../../../../../lib/forms/routing-persistence"
+import { createFormPersistence } from "../../../../../../../lib/forms/routing-persistence"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getMembership } from "@/lib/teams/server"
+import { maximumFormEventDeliveries } from "../../../../../../../lib/forms/form-delivery-contract"
+
+const maximumSubmissionPageSize = 10
 
 export async function GET(
   request: NextRequest,
@@ -17,7 +20,10 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   if (!(await getMembership(user.id, teamId)))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  const limit = Math.min(Math.max(Number(request.nextUrl.searchParams.get("limit")) || 50, 1), 100)
+  const limit = Math.min(
+    Math.max(Number(request.nextUrl.searchParams.get("limit")) || maximumSubmissionPageSize, 1),
+    maximumSubmissionPageSize,
+  )
   const route = request.nextUrl.searchParams.get("route")
   if (route !== null && route.length > 256) {
     return NextResponse.json({ error: "Route filter is too long" }, { status: 400 })
@@ -44,7 +50,7 @@ export async function GET(
 
   const loaded = await Promise.all([
       submissionsQuery,
-      createFormRoutingPersistence().listRecentRoutes(teamId, formId),
+      createFormPersistence().listRecentRoutes(teamId, formId),
     ]).catch(() => null)
   if (!loaded) {
     return NextResponse.json({ error: "Could not load submissions" }, { status: 500 })
@@ -64,40 +70,43 @@ export async function GET(
       }
       return row.id
     })
-    const actionsBySubmission = new Map<string, unknown[]>()
+    const deliveriesBySubmission = new Map<string, unknown[]>()
     if (submissionIds.length > 0) {
-      const actionResult = await admin
-        .from("form_submission_action_executions")
-        .select("submission_id, action_key, action_name, status, attempt_count, last_error")
+      const deliveryResult = await admin
+        .from("form_event_deliveries")
+        .select(
+          "submission_id, delivery_key, registration_name, event_type, delivery_kind, status, attempt_count, last_error",
+        )
         .eq("team_id", teamId)
         .eq("form_id", formId)
         .in("submission_id", submissionIds)
-        .order("action_index", { ascending: true })
-      if (actionResult.error && !missingActionExecutionTable(actionResult.error)) {
-        return NextResponse.json({ error: actionResult.error.message }, { status: 500 })
+        .order("stream_sequence", { ascending: true })
+        .limit(maximumSubmissionPageSize * maximumFormEventDeliveries)
+      if (deliveryResult.error) {
+        return NextResponse.json({ error: deliveryResult.error.message }, { status: 500 })
       }
-      const actionData: unknown = actionResult.error ? [] : actionResult.data
-      if (!Array.isArray(actionData)) throw new TypeError("Invalid action query result")
+      const deliveryData: unknown = deliveryResult.data
+      if (!Array.isArray(deliveryData)) throw new TypeError("Invalid delivery query result")
       const knownSubmissionIds = new Set(submissionIds)
-      for (const row of actionData) {
+      for (const row of deliveryData) {
         if (
           !isRecord(row) ||
           typeof row.submission_id !== "string" ||
           !knownSubmissionIds.has(row.submission_id)
         ) {
-          throw new TypeError("Invalid action query result")
+          throw new TypeError("Invalid delivery query result")
         }
-        const existing = actionsBySubmission.get(row.submission_id)
+        const existing = deliveriesBySubmission.get(row.submission_id)
         if (existing) existing.push(row)
-        else actionsBySubmission.set(row.submission_id, [row])
+        else deliveriesBySubmission.set(row.submission_id, [row])
       }
     }
     const response = snapshotFormSubmissionsApiResponse({
       submissions: submissionData.map((submission) => ({
         ...submission,
-        action_executions:
+        event_deliveries:
           isRecord(submission) && typeof submission.id === "string"
-            ? (actionsBySubmission.get(submission.id) ?? [])
+            ? (deliveriesBySubmission.get(submission.id) ?? [])
             : [],
       })),
       routes,
@@ -110,11 +119,4 @@ export async function GET(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function missingActionExecutionTable(error: { readonly code?: string; readonly message: string }) {
-  return (
-    (error.code === "PGRST205" || error.code === "42P01") &&
-    error.message.includes("form_submission_action_executions")
-  )
 }

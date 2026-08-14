@@ -3,26 +3,13 @@ import {
   type StoredSubmission,
   type SubmissionRoutingResult,
 } from "@screeem/forms"
-
-export const formRoutingActionExecutionStatuses = [
-  "pending",
-  "running",
-  "succeeded",
-  "failed",
-] as const
+import {
+  isFormEventDeliveryStatus,
+  isFormEventDeliveryKind,
+  type FormEventDeliverySummary,
+} from "./form-delivery-contract"
+import { isFormEventType } from "./form-actions"
 export const maximumSubmissionRouteOptions = 256
-
-export type FormRoutingActionExecutionStatus =
-  (typeof formRoutingActionExecutionStatuses)[number]
-
-export interface FormRoutingActionExecutionSummary {
-  readonly submission_id: string
-  readonly action_key: string
-  readonly action_name: string
-  readonly status: FormRoutingActionExecutionStatus
-  readonly attempt_count: number
-  readonly last_error: string | null
-}
 
 export interface FormSubmissionListItem {
   readonly id: StoredSubmission["id"]
@@ -34,18 +21,12 @@ export interface FormSubmissionListItem {
   readonly routing_route: SubmissionRoutingResult["route"]
   readonly matched_rule_id: SubmissionRoutingResult["matchedRule"]
   readonly routing_error: SubmissionRoutingResult["error"]
-  readonly action_executions: readonly FormRoutingActionExecutionSummary[]
+  readonly event_deliveries: readonly FormEventDeliverySummary[]
 }
 
 export interface FormSubmissionsApiResponse {
   readonly submissions: readonly FormSubmissionListItem[]
   readonly routes: readonly string[]
-}
-
-export function isFormRoutingActionExecutionStatus(
-  value: unknown,
-): value is FormRoutingActionExecutionStatus {
-  return formRoutingActionExecutionStatuses.some((status) => status === value)
 }
 
 export function snapshotFormSubmissionsApiResponse(input: unknown): FormSubmissionsApiResponse {
@@ -67,7 +48,7 @@ function snapshotSubmission(value: unknown): FormSubmissionListItem {
   if (
     !isRecord(value) ||
     !isRecord(value.payload) ||
-    (value.action_executions !== undefined && !Array.isArray(value.action_executions))
+    (value.event_deliveries !== undefined && !Array.isArray(value.event_deliveries))
   ) {
     throw new TypeError("Invalid submission response")
   }
@@ -88,24 +69,32 @@ function snapshotSubmission(value: unknown): FormSubmissionListItem {
     routing_route: routing.route,
     matched_rule_id: routing.matchedRule,
     routing_error: routing.error,
-    action_executions: Object.freeze(
-      (value.action_executions ?? []).map((action) => snapshotAction(action, id)),
+    event_deliveries: Object.freeze(
+      (value.event_deliveries ?? []).map((delivery) => snapshotDelivery(delivery, id)),
     ),
   })
 }
 
-function snapshotAction(value: unknown, submissionId: string): FormRoutingActionExecutionSummary {
+function snapshotDelivery(value: unknown, submissionId: string): FormEventDeliverySummary {
   if (!isRecord(value) || value.submission_id !== submissionId) {
-    throw new TypeError("Invalid action execution response")
+    throw new TypeError("Invalid form event delivery response")
   }
   const status = value.status
-  if (!isFormRoutingActionExecutionStatus(status)) {
-    throw new TypeError("Invalid action execution status")
+  if (!isFormEventDeliveryStatus(status)) {
+    throw new TypeError("Invalid form event delivery status")
+  }
+  if (!isFormEventType(value.event_type)) {
+    throw new TypeError("Invalid form event type")
+  }
+  if (!isFormEventDeliveryKind(value.delivery_kind)) {
+    throw new TypeError("Invalid form event delivery kind")
   }
   return Object.freeze({
     submission_id: submissionId,
-    action_key: requiredString(value.action_key),
-    action_name: requiredString(value.action_name),
+    delivery_key: requiredString(value.delivery_key),
+    registration_name: requiredString(value.registration_name),
+    event_type: value.event_type,
+    delivery_kind: value.delivery_kind,
     status,
     attempt_count: requiredNonNegativeInteger(value.attempt_count),
     last_error: nullableString(value.last_error),

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }))
 
 import { Forms } from "../src/app/dashboard/Forms"
-import type { FormRoutingActionExecutionSummary } from "../src/lib/forms/submission-contract"
+import type { FormEventDeliverySummary } from "../src/lib/forms/form-delivery-contract"
 
 afterEach(() => {
   cleanup()
@@ -46,8 +46,10 @@ describe("form submission routing results", () => {
             submission("matched", "sales", "enterprise", [
               {
                 submission_id: "matched-submission",
-                action_key: "enterprise:0",
-                action_name: "notify",
+                delivery_key: "submission-one:routing.matched:0",
+                registration_name: "notify",
+                event_type: "routing.matched",
+                delivery_kind: "routing_action",
                 status: "succeeded",
                 attempt_count: 1,
                 last_error: null,
@@ -244,7 +246,7 @@ describe("form submission routing results", () => {
       "sales",
       "enterprise",
     )
-    Reflect.deleteProperty(olderSubmission, "action_executions")
+    Reflect.deleteProperty(olderSubmission, "event_deliveries")
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response({ forms: [form] }))
@@ -280,7 +282,7 @@ function submission(
   routingStatus: Extract<SubmissionRoutingStatus, "matched" | "fallback">,
   routingRoute: string,
   matchedRuleId: string | null,
-  actionExecutions: readonly FormRoutingActionExecutionSummary[] = [],
+  eventDeliveries: readonly FormEventDeliverySummary[] = [],
 ) {
   return {
     id: `${routingStatus}-submission`,
@@ -292,7 +294,7 @@ function submission(
     routing_route: routingRoute,
     matched_rule_id: matchedRuleId,
     routing_error: null,
-    action_executions: actionExecutions,
+    event_deliveries: eventDeliveries,
   }
 }
 

@@ -23,7 +23,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }))
 
 vi.mock("../src/lib/forms/routing-persistence", () => ({
-  createFormRoutingPersistence: () => ({
+  createFormPersistence: () => ({
     saveSubmission: mocks.saveSubmission,
     claim: mocks.claim,
     succeed: mocks.succeed,
@@ -37,7 +37,7 @@ vi.mock("@/lib/forms/schema", () => ({
 
 import { OPTIONS, POST } from "../src/app/api/forms/[endpointKey]/submissions/route"
 import { GET as GET_DEFINITION } from "../src/app/api/forms/[endpointKey]/route"
-import { productionFormRoutingRegistry } from "../src/lib/forms/routing-registrations"
+import { productionFormAutomationRegistry } from "../src/lib/forms/form-registrations"
 
 const context = { params: Promise.resolve({ endpointKey: "public-key" }) }
 const allowedOrigin = "https://forms.example"
@@ -178,7 +178,7 @@ describe("public form submission transport", () => {
         matchedRule: "enterprise",
         error: null,
       },
-      actions: [],
+      deliveries: [],
       origin: allowedOrigin,
       userAgent: null,
     })
@@ -213,6 +213,60 @@ describe("public form submission transport", () => {
     })
   })
 
+  it("plans submission events at the public API boundary without routing", async () => {
+    const plan = vi
+      .spyOn(productionFormAutomationRegistry, "planDurable")
+      .mockImplementation((event) => {
+        if (event.type !== "submission.before_save" && event.type !== "submission.accepted") {
+          return []
+        }
+        return [{
+          event,
+          kind: "event_handler",
+          registrationName: `handle-${event.type}`,
+          deliveryKey: `${event.eventId}:0`,
+          sequence: 0,
+        }]
+      })
+
+    const response = await submitStructured({ source: "unrouted" })
+
+    expect(response.status).toBe(201)
+    expect(mocks.saveSubmission.mock.calls[0]?.[0]).toMatchObject({
+      publicationVersion: null,
+      routing: { status: "not_configured" },
+      deliveries: [
+        {
+          registrationName: "handle-submission.before_save",
+          deliveryKey: expect.stringMatching(/:submission\.before_save:0$/),
+          event: { type: "submission.before_save" },
+        },
+        {
+          registrationName: "handle-submission.accepted",
+          deliveryKey: expect.stringMatching(/:submission\.accepted:0$/),
+          event: { type: "submission.accepted" },
+        },
+      ],
+    })
+    plan.mockRestore()
+  })
+
+  it("lets an inline before-save handler reject at the API boundary", async () => {
+    const inline = vi
+      .spyOn(productionFormAutomationRegistry, "runInline")
+      .mockImplementation((event) =>
+        event.type === "submission.before_save"
+          ? Promise.reject(new Error("rejected"))
+          : Promise.resolve(),
+      )
+
+    const response = await submitStructured({ source: "rejected" })
+
+    expect(response.status).toBe(500)
+    expect(mocks.saveSubmission).not.toHaveBeenCalled()
+    inline.mockRestore()
+  })
+
   it("emits lifecycle events with stable submission and tenant identifiers", async () => {
     structuredForm({
       version: 9,
@@ -220,30 +274,35 @@ describe("public form submission transport", () => {
       routing: null,
       publishedAt: "2026-08-13T00:00:00.000Z",
     })
-    const before = vi.spyOn(productionFormRoutingRegistry, "emitBefore")
-    const after = vi.spyOn(productionFormRoutingRegistry, "emitAfter")
+    const inline = vi.spyOn(productionFormAutomationRegistry, "runInline")
 
     const response = await submitStructured({ name: "Ada", employees: 20 })
 
     expect(response.status).toBe(201)
-    const beforeEvent = before.mock.calls[0]?.[0]
+    const beforeEvent = inline.mock.calls[0]?.[0]
     expect(beforeEvent).toMatchObject({
-      type: "before_evaluation",
+      type: "routing.evaluation.before",
       tenantId: "team-one",
       formId: "form-one",
-      publicationVersion: 9,
-      evaluationId: expect.any(String),
+      payload: {
+        publicationVersion: 9,
+        evaluationId: expect.any(String),
+      },
     })
-    expect(after).toHaveBeenCalledWith(
+    expect(inline).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "after_evaluation",
-        evaluationId: beforeEvent?.evaluationId,
-        outcome: "not_configured",
-        durationMs: expect.any(Number),
+        type: "routing.evaluation.after",
+        payload: expect.objectContaining({
+          evaluationId:
+            beforeEvent?.type === "routing.evaluation.before"
+              ? beforeEvent.payload.evaluationId
+              : undefined,
+          outcome: "not_configured",
+          durationMs: expect.any(Number),
+        }),
       }),
     )
-    before.mockRestore()
-    after.mockRestore()
+    inline.mockRestore()
   })
 
   it("persists matched action plans before attempting execution", async () => {
@@ -270,8 +329,12 @@ describe("public form submission transport", () => {
 
     expect(response.status).toBe(201)
     expect(mocks.saveSubmission.mock.calls[0]?.[0]).toMatchObject({
-      actions: [
-        { key: "enterprise:0", name: "notify", index: 0, ruleId: "enterprise" },
+      deliveries: [
+        expect.objectContaining({
+          registrationName: "notify",
+          sequence: 0,
+          event: expect.objectContaining({ type: "routing.matched" }),
+        }),
       ],
     })
     expect(mocks.claim).toHaveBeenCalledOnce()

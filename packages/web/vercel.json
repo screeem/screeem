@@ -3,7 +3,7 @@
   "buildCommand": "pnpm --filter @screeem/web... build",
   "crons": [
     {
-      "path": "/api/internal/form-routing-actions",
+      "path": "/api/internal/form-event-deliveries",
       "schedule": "0 3 * * *"
     }
   ]

@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import {
   snapshotFormSubmissionsApiResponse,
-  type FormRoutingActionExecutionSummary,
   type FormSubmissionListItem,
 } from "../../lib/forms/submission-contract"
+import type { FormEventDeliverySummary } from "../../lib/forms/form-delivery-contract"
 
 type FormView = {
   id: string
@@ -487,7 +487,7 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
                             {submission.routing_status === "failed" ? " · Routing failed" : ""}
                           </summary>
                           <SubmissionRouting routing={submission} />
-                          <SubmissionActions actions={submission.action_executions} />
+                          <SubmissionDeliveries deliveries={submission.event_deliveries} />
                           <pre className="mt-3 overflow-x-auto rounded bg-gray-950 p-3 text-xs leading-5 text-gray-100">
                             {JSON.stringify(submission.payload, null, 2)}
                           </pre>
@@ -505,19 +505,19 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
   )
 }
 
-function SubmissionActions({
-  actions,
+function SubmissionDeliveries({
+  deliveries,
 }: {
-  readonly actions: readonly FormRoutingActionExecutionSummary[]
+  readonly deliveries: readonly FormEventDeliverySummary[]
 }) {
-  if (actions.length === 0) return null
+  if (deliveries.length === 0) return null
   return (
     <div className="mt-3 space-y-1 text-xs text-gray-600">
-      {actions.map((action) => (
-        <p key={action.action_key}>
-          <strong className="text-gray-900">{action.action_name}</strong> · {action.status}
-          {action.attempt_count > 1 ? ` · ${action.attempt_count} attempts` : ""}
-          {action.last_error ? ` · ${action.last_error}` : ""}
+      {deliveries.map((delivery) => (
+        <p key={delivery.delivery_key}>
+          <strong className="text-gray-900">{delivery.registration_name}</strong> · {delivery.status}
+          {delivery.attempt_count > 1 ? ` · ${delivery.attempt_count} attempts` : ""}
+          {delivery.last_error ? ` · ${delivery.last_error}` : ""}
         </p>
       ))}
     </div>

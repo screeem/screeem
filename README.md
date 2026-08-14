@@ -112,12 +112,14 @@ make infra-down    # stop local Supabase; downloaded images remain cached
 
 `make docker-build`, `make docker-up`, and `make docker-test` retain the production-image workflow. The production image intentionally excludes `/_dev`, so use `make playground` for visual review.
 
-## Routing host registrations
+## Form automation registrations
 
-Application-owned routing functions, actions, and lifecycle handlers are registered in `packages/web/src/lib/forms/routing-registrations.ts`. Form authors use the registered names; they do not need the implementation details.
+Application-owned form actions and event handlers are registered in `packages/web/src/lib/forms/form-registrations.ts`. Routing-only pure functions use the same registry. Form authors use the registered names and do not need the implementation details.
 
-Build the exported registry with `registerPureFunction`, `registerAction`, `onBeforeEvaluation`, and `onAfterEvaluation`. Registrations are immutable, so chain each call when creating the exported registry.
+Build the exported registry with `registerPureFunction`, `registerAction`, and `onEvent`. Registrations are immutable, so chain each call when creating the exported registry. Event handlers choose `inline`, `isolated`, or `durable` delivery.
 
-Actions run in their configured order after the submission and route are stored. Each action receives a stable `idempotencyKey` and an `AbortSignal`. Pass both to external clients that support request deduplication and cancellation. Failed actions retry three times with delays and remain visible with the submission. `CRON_SECRET` protects the recovery worker at `/api/internal/form-routing-actions`; the included Vercel schedule is daily and can be supplemented by a more frequent external scheduler.
+Forms emit `submission.before_save` and `submission.accepted` whether routing is configured or not. Routing also emits evaluation and matched-route events. Inline handlers can reject before saving, isolated handlers run best-effort after the response, and durable handlers are stored with the submission before they run.
 
-The action store uses `DATABASE_URL` for short server-side transactions. In production, set it to the Supabase transaction-pooler URL. Its migration defines storage, constraints, indexes, and row-level access only; routing and action behavior stays in TypeScript. `make test` runs the transaction behavior against local Postgres.
+Durable deliveries run in order after the submission and route are stored. Each delivery receives a stable `idempotencyKey` and an `AbortSignal`. Pass both to external clients that support request deduplication and cancellation. Failed deliveries are attempted up to three times with delays and remain visible with the submission. `CRON_SECRET` protects the recovery worker at `/api/internal/form-event-deliveries`; the included Vercel schedule is daily and can be supplemented by a more frequent external scheduler.
+
+The delivery store uses `DATABASE_URL` for short server-side transactions. In production, set it to the Supabase transaction-pooler URL. Its migration defines storage, constraints, indexes, and row-level access only; event and action behavior stays in TypeScript. `make test` runs the transaction behavior against local Postgres.

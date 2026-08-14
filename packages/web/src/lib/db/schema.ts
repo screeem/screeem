@@ -1,6 +1,9 @@
 import type { FormAvailability, SubmissionRoutingStatus } from "@screeem/forms"
 import { sql } from "drizzle-orm"
-import { formRoutingActionExecutionStatuses } from "../forms/submission-contract"
+import {
+  formEventDeliveryKinds,
+  formEventDeliveryStatuses,
+} from "../forms/form-delivery-contract"
 import {
   bigint,
   boolean,
@@ -203,18 +206,24 @@ export const formSubmissions = pgTable(
   ],
 )
 
-export const formSubmissionActionExecutions = pgTable(
-  "form_submission_action_executions",
+export const formEventDeliveries = pgTable(
+  "form_event_deliveries",
   {
     teamId: uuid("team_id").notNull(),
     formId: uuid("form_id").notNull(),
+    publicationVersion: bigint("publication_version", { mode: "number" }),
     submissionId: uuid("submission_id").notNull(),
-    publicationVersion: bigint("publication_version", { mode: "number" }).notNull(),
-    actionKey: text("action_key").notNull(),
-    actionName: text("action_name").notNull(),
-    actionIndex: integer("action_index").notNull(),
-    ruleId: text("rule_id").notNull(),
-    status: text("status", { enum: formRoutingActionExecutionStatuses })
+    eventId: text("event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    eventOccurredAt: timestamp("event_occurred_at", { withTimezone: true }).notNull(),
+    eventPayload: jsonb("event_payload").notNull(),
+    deliveryKind: text("delivery_kind", { enum: formEventDeliveryKinds })
+      .notNull(),
+    registrationName: text("registration_name").notNull(),
+    deliveryKey: text("delivery_key").notNull(),
+    sequence: integer("sequence").notNull(),
+    streamSequence: integer("stream_sequence").notNull(),
+    status: text("status", { enum: formEventDeliveryStatuses })
       .notNull()
       .default("pending"),
     attemptCount: integer("attempt_count").notNull().default(0),
@@ -228,19 +237,24 @@ export const formSubmissionActionExecutions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    primaryKey({ columns: [table.teamId, table.submissionId, table.actionKey] }),
-    unique("form_submission_action_execution_index_key").on(
+    primaryKey({ columns: [table.teamId, table.eventId, table.deliveryKey] }),
+    unique("form_event_delivery_sequence_key").on(
+      table.teamId,
+      table.eventId,
+      table.sequence,
+    ),
+    unique("form_event_delivery_stream_sequence_key").on(
       table.teamId,
       table.submissionId,
-      table.actionIndex,
+      table.streamSequence,
     ),
-    index("form_submission_action_pending_idx")
+    index("form_event_delivery_pending_idx")
       .on(table.nextAttemptAt, table.createdAt)
       .where(sql`${table.status} = 'pending' AND ${table.attemptCount} < 3`),
-    index("form_submission_action_running_lease_idx")
+    index("form_event_delivery_running_lease_idx")
       .on(table.leaseExpiresAt, table.createdAt)
       .where(sql`${table.status} = 'running'`),
-    index("form_submission_action_team_form_created_idx").on(
+    index("form_event_delivery_team_form_created_idx").on(
       table.teamId,
       table.formId,
       table.createdAt.desc(),

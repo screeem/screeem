@@ -9,7 +9,7 @@ import {
   type FormRoutingDefinition,
   type SubmissionRoutingResult,
 } from "@screeem/forms"
-import { productionFormRoutingRegistry } from "./routing-registrations"
+import { productionFormAutomationRegistry } from "./form-registrations"
 
 const MAX_CACHED_SELECTORS = 16
 const selectorCache = new Map<string, ReturnType<typeof compileFormRoutingSelector>>()
@@ -33,7 +33,7 @@ export async function evaluatePublishedFormRouting(
       selector = compileFormRoutingSelector(
         definition,
         routing,
-        productionFormRoutingRegistry.compilationRouter(),
+        productionFormAutomationRegistry.compilationRouter(),
       )
       selectorCache.set(key, selector)
       selector.catch(() => {

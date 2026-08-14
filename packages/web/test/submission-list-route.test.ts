@@ -16,7 +16,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }))
 vi.mock("@/lib/teams/server", () => ({ getMembership: mocks.getMembership }))
 vi.mock("../src/lib/forms/routing-persistence", () => ({
-  createFormRoutingPersistence: () => ({ listRecentRoutes: mocks.listRecentRoutes }),
+  createFormPersistence: () => ({ listRecentRoutes: mocks.listRecentRoutes }),
 }))
 
 import { GET } from "../src/app/api/teams/[teamId]/forms/[formId]/submissions/route"
@@ -46,12 +46,14 @@ describe("submission routing filters", () => {
       data: [submissionRow()],
       error: null,
     })
-    const actionsQuery = query({
+    const deliveriesQuery = query({
       data: [
         {
           submission_id: "submission-one",
-          action_key: "enterprise:0",
-          action_name: "notify",
+          delivery_key: "submission-one:routing.matched:0",
+          registration_name: "notify",
+          event_type: "routing.matched",
+          delivery_kind: "routing_action",
           status: "succeeded",
           attempt_count: 1,
           last_error: null,
@@ -63,7 +65,7 @@ describe("submission routing filters", () => {
       .fn()
       .mockReturnValueOnce(formQuery)
       .mockReturnValueOnce(submissionsQuery)
-      .mockReturnValueOnce(actionsQuery)
+      .mockReturnValueOnce(deliveriesQuery)
     mocks.createAdminClient.mockReturnValue({ from })
 
     const response = await GET(request("sales"), context)
@@ -81,11 +83,13 @@ describe("submission routing filters", () => {
           routing_route: "sales",
           matched_rule_id: "enterprise",
           routing_error: null,
-          action_executions: [
+          event_deliveries: [
             {
               submission_id: "submission-one",
-              action_key: "enterprise:0",
-              action_name: "notify",
+              delivery_key: "submission-one:routing.matched:0",
+              registration_name: "notify",
+              event_type: "routing.matched",
+              delivery_kind: "routing_action",
               status: "succeeded",
               attempt_count: 1,
               last_error: null,
@@ -99,9 +103,11 @@ describe("submission routing filters", () => {
     expect(submissionsQuery.eq).toHaveBeenCalledWith("form_id", "form-one")
     expect(submissionsQuery.eq).toHaveBeenCalledWith("routing_route", "sales")
     expect(mocks.listRecentRoutes).toHaveBeenCalledWith("team-one", "form-one")
-    expect(actionsQuery.eq).toHaveBeenCalledWith("team_id", "team-one")
-    expect(actionsQuery.eq).toHaveBeenCalledWith("form_id", "form-one")
-    expect(actionsQuery.in).toHaveBeenCalledWith("submission_id", ["submission-one"])
+    expect(deliveriesQuery.eq).toHaveBeenCalledWith("team_id", "team-one")
+    expect(deliveriesQuery.eq).toHaveBeenCalledWith("form_id", "form-one")
+    expect(deliveriesQuery.in).toHaveBeenCalledWith("submission_id", ["submission-one"])
+    expect(deliveriesQuery.order).toHaveBeenCalledWith("stream_sequence", { ascending: true })
+    expect(deliveriesQuery.limit).toHaveBeenCalledWith(1000)
   })
 
   it("rejects an oversized route filter before querying storage", async () => {
@@ -111,24 +117,24 @@ describe("submission routing filters", () => {
     expect(mocks.createAdminClient).not.toHaveBeenCalled()
   })
 
-  it("returns submissions during a rolling deploy before the action table exists", async () => {
+  it("returns a storage error when event deliveries cannot be loaded", async () => {
     const formQuery = query({ data: { id: "form-one" }, error: null })
     const submissionsQuery = query({
       data: [submissionRow()],
       error: null,
     })
-    const actionsQuery = query({
+    const deliveriesQuery = query({
       data: null,
       error: {
         code: "PGRST205",
-        message: "Could not find public.form_submission_action_executions in the schema cache",
+        message: "Could not find public.form_event_deliveries in the schema cache",
       },
     })
     const from = vi
       .fn()
       .mockReturnValueOnce(formQuery)
       .mockReturnValueOnce(submissionsQuery)
-      .mockReturnValueOnce(actionsQuery)
+      .mockReturnValueOnce(deliveriesQuery)
     mocks.createAdminClient.mockReturnValue({
       from,
     })
@@ -136,16 +142,24 @@ describe("submission routing filters", () => {
 
     const response = await GET(request(), context)
 
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({
-      submissions: [{ id: "submission-one", action_executions: [] }],
-    })
+    expect(response.status).toBe(500)
   })
 
   it("rejects malformed successful storage results", async () => {
     const formQuery = query({ data: { id: "form-one" }, error: null })
     const submissionsQuery = query({ data: [submissionRow()], error: null })
-    const actionsQuery = query({ data: [{ submission_id: "submission-one" }], error: null })
+    const actionsQuery = query({
+      data: [{
+        submission_id: "submission-one",
+        delivery_key: "delivery-one",
+        registration_name: "notify",
+        event_type: "unknown.event",
+        status: "pending",
+        attempt_count: 0,
+        last_error: null,
+      }],
+      error: null,
+    })
     const from = vi
       .fn()
       .mockReturnValueOnce(formQuery)
