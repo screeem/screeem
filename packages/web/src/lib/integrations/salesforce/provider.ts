@@ -30,7 +30,7 @@ export function createSalesforceProviderDefinition(dependencies: SalesforceProvi
     name: salesforceProviderName,
     displayName: "Salesforce",
     enabled: dependencies.enabled,
-    open: async ({ connection, credential }) => {
+    open: async ({ connection, credential, signal }) => {
       const tokens = await RefreshingSalesforceAccessTokenProvider.create(
         connection,
         credential,
@@ -40,6 +40,7 @@ export function createSalesforceProviderDefinition(dependencies: SalesforceProvi
         dependencies.cipher,
         dependencies.oauth,
         dependencies.leases,
+        signal,
       )
       return new SalesforceHttpClient(
         tokens,

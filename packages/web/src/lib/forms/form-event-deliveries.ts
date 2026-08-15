@@ -7,7 +7,14 @@ import {
   type FormRoutingDefinition,
   type SubmissionRoutingResult,
 } from "@screeem/forms"
-import { schemaFromForm, type ActionOutput } from "@screeem/routing"
+import {
+  ActionExecutionError,
+  routingActionFailure,
+  routingActionFailureOrDefault,
+  schemaFromForm,
+  type ActionOutput,
+  type RoutingActionFailure,
+} from "@screeem/routing"
 import type {
   PendingFormEventDelivery,
   PlannedFormEventDelivery,
@@ -33,7 +40,7 @@ export interface FormEventDeliveryStore {
   fail(
     delivery: PendingFormEventDelivery | StoredFormEventDelivery,
     attempt: number,
-    errorCode: string,
+    failure: RoutingActionFailure,
   ): Promise<void>
 }
 
@@ -98,12 +105,18 @@ export async function executeFormEventDeliveries(options: {
 }): Promise<number> {
   const registry = options.registry ?? productionFormAutomationRegistry
   let claimed = 0
+  const blockedRoutingEvents = new Set<string>()
   for (const delivery of options.deliveries) {
+    if (delivery.kind === "routing_action" && blockedRoutingEvents.has(delivery.event.eventId)) {
+      continue
+    }
     const claim = await options.store.claim(delivery)
     if (!claim) continue
     claimed += 1
     const succeeded = await executeClaimedDelivery(options, delivery, claim.attempt, registry)
-    if (!succeeded) return claimed
+    if (!succeeded && delivery.kind === "routing_action") {
+      blockedRoutingEvents.add(delivery.event.eventId)
+    }
   }
   return claimed
 }
@@ -125,7 +138,7 @@ async function executeClaimedDelivery(
       throw new Error("Form delivery output is too large")
     }
   } catch (error) {
-    await options.store.fail(delivery, attempt, "delivery_execution_failed")
+    await options.store.fail(delivery, attempt, deliveryFailure(error))
     if (error instanceof FormEventDeliveryContractError) throw error
     return false
   }
@@ -189,6 +202,18 @@ async function executeDelivery(
 
 class FormEventDeliveryContractError extends Error {}
 
+function deliveryFailure(error: unknown): RoutingActionFailure {
+  if (error instanceof FormEventDeliveryContractError) {
+    return routingActionFailure({
+      code: "delivery_contract_invalid",
+      retryable: false,
+      retryAfterMs: null,
+    })
+  }
+  if (error instanceof ActionExecutionError) return error.failure
+  return routingActionFailureOrDefault(error)
+}
+
 function encodedBytes(value: unknown) {
   return new TextEncoder().encode(JSON.stringify(value ?? null)).byteLength
 }
@@ -217,8 +242,15 @@ export async function drainPendingFormEventDeliveries(
     try {
       let definition: FormDefinition | null = null
       let routing: FormRoutingDefinition | null = null
+      const blockedRoutingEvents = new Set<string>()
       for (const delivery of ordered) {
         if (Date.now() >= startBefore) break
+        if (
+          delivery.kind === "routing_action" &&
+          blockedRoutingEvents.has(delivery.event.eventId)
+        ) {
+          continue
+        }
         const claim = await store.claim(delivery)
         if (!claim) continue
         processed += 1
@@ -230,7 +262,11 @@ export async function drainPendingFormEventDeliveries(
               routing = snapshotFormRoutingDefinition(publication.routing)
             }
           } catch (error) {
-            await store.fail(delivery, claim.attempt, "delivery_publication_unavailable")
+            await store.fail(delivery, claim.attempt, routingActionFailure({
+              code: "delivery_publication_unavailable",
+              retryable: true,
+              retryAfterMs: null,
+            }))
             throw error
           }
         }
@@ -239,7 +275,9 @@ export async function drainPendingFormEventDeliveries(
           routing,
           store,
         }, delivery, claim.attempt, registry)
-        if (!succeeded) break
+        if (!succeeded && delivery.kind === "routing_action") {
+          blockedRoutingEvents.add(delivery.event.eventId)
+        }
       }
     } catch (error) {
       failures.push(error)

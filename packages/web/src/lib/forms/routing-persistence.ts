@@ -4,7 +4,11 @@ import {
   type FormAvailability,
   type SubmissionRoutingResult,
 } from "@screeem/forms"
-import type { ActionOutput } from "@screeem/routing"
+import {
+  routingActionFailure,
+  type ActionOutput,
+  type RoutingActionFailure,
+} from "@screeem/routing"
 import type postgres from "postgres"
 import { getDatabase } from "../db/database"
 import type {
@@ -229,10 +233,14 @@ export class PostgresFormPersistence implements FormPersistence {
       if (
         current.attempt_count >= maximumAttempts ||
         !isDue(current, now) ||
-        chain.some(
-          (earlier) =>
-            earlier.stream_sequence < current.stream_sequence && earlier.status !== "succeeded",
-        )
+        (current.delivery_kind === "routing_action" &&
+          chain.some(
+            (earlier) =>
+              earlier.event_id === current.event_id &&
+              earlier.delivery_kind === "routing_action" &&
+              earlier.sequence < current.sequence &&
+              earlier.status !== "succeeded",
+          ))
       ) {
         return null
       }
@@ -284,9 +292,9 @@ export class PostgresFormPersistence implements FormPersistence {
   async fail(
     delivery: PendingFormEventDelivery | StoredFormEventDelivery,
     attempt: number,
-    errorCode: string,
+    failure: RoutingActionFailure,
   ) {
-    if (errorCode === "" || errorCode.length > 128) throw new Error("Invalid action error")
+    const safeFailure = routingActionFailure(failure)
     await this.database.begin(async (transaction) => {
       const chain = await transaction<DeliveryRow[]>`
         SELECT
@@ -326,16 +334,17 @@ export class PostgresFormPersistence implements FormPersistence {
       const [{ now }] = await transaction<{ readonly now: Date }[]>`
         SELECT clock_timestamp() AS now
       `
-      if (attempt >= maximumAttempts) {
-        await failChain(transaction, chain, current, now, errorCode)
+      if (!safeFailure.retryable || attempt >= maximumAttempts) {
+        await failChain(transaction, chain, current, now, safeFailure.code)
         return
       }
-      const delayMs = attempt === 1 ? 60_000 : 300_000
+      const normalBackoffMs = attempt === 1 ? 60_000 : 300_000
+      const delayMs = Math.max(normalBackoffMs, safeFailure.retryAfterMs ?? 0)
       await transaction`
         UPDATE form_event_deliveries
         SET
           status = 'pending',
-          last_error = ${errorCode},
+          last_error = ${safeFailure.code},
           next_attempt_at = ${new Date(now.getTime() + delayMs)},
           lease_expires_at = NULL,
           completed_at = NULL,
@@ -366,14 +375,17 @@ export class PostgresFormPersistence implements FormPersistence {
             (head.status = 'pending' AND head.next_attempt_at <= statement_timestamp())
             OR (head.status = 'running' AND head.lease_expires_at <= statement_timestamp())
           )
-          AND NOT EXISTS (
-            SELECT 1
-            FROM form_event_deliveries AS earlier
-            WHERE earlier.team_id = head.team_id
-              AND earlier.form_id = head.form_id
-              AND earlier.submission_id = head.submission_id
-              AND earlier.stream_sequence < head.stream_sequence
-              AND earlier.status <> 'succeeded'
+          AND (
+            head.delivery_kind <> 'routing_action'
+            OR NOT EXISTS (
+              SELECT 1
+              FROM form_event_deliveries AS earlier
+              WHERE earlier.team_id = head.team_id
+                AND earlier.event_id = head.event_id
+                AND earlier.delivery_kind = 'routing_action'
+                AND earlier.sequence < head.sequence
+                AND earlier.status <> 'succeeded'
+            )
           )
         GROUP BY head.team_id, head.form_id, head.submission_id
         ORDER BY min(head.created_at)
@@ -757,8 +769,12 @@ async function failChain(
   `
   const laterKeys = chain
     .filter(
-      ({ stream_sequence, status }) =>
-        stream_sequence > failed.stream_sequence && status === "pending",
+      ({ event_id, delivery_kind, sequence, status }) =>
+        failed.delivery_kind === "routing_action" &&
+        event_id === failed.event_id &&
+        delivery_kind === "routing_action" &&
+        sequence > failed.sequence &&
+        status === "pending",
     )
     .map(({ delivery_key }) => delivery_key)
   for (const key of laterKeys) {
@@ -770,8 +786,7 @@ async function failChain(
         completed_at = ${now},
         updated_at = ${now}
       WHERE team_id = ${failed.team_id}
-        AND form_id = ${failed.form_id}
-        AND submission_id = ${failed.submission_id}
+        AND event_id = ${failed.event_id}
         AND delivery_key = ${key}
         AND status = 'pending'
     `

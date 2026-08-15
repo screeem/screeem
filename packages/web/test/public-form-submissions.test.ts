@@ -316,7 +316,14 @@ describe("public form submission transport", () => {
             id: "enterprise",
             when: "submission.employees >= 500",
             route: "sales",
-            actions: [{ use: "notify", with: "({ name: submission.name })" }],
+            actions: [{
+              use: "salesforceUpsertLead",
+              with: `({
+                lastName: submission.name,
+                company: "Example Company",
+                email: "ada@example.com"
+              })`,
+            }],
           },
         ],
         fallback: "review",
@@ -331,7 +338,7 @@ describe("public form submission transport", () => {
     expect(mocks.saveSubmission.mock.calls[0]?.[0]).toMatchObject({
       deliveries: [
         expect.objectContaining({
-          registrationName: "notify",
+          registrationName: "salesforceUpsertLead",
           sequence: 0,
           event: expect.objectContaining({ type: "routing.matched" }),
         }),
@@ -391,7 +398,14 @@ describe("public form submission transport", () => {
             id: "enterprise",
             when: "submission.employees >= 500",
             route: "sales",
-            actions: [{ use: "notify", with: "({ name: submission.name })" }],
+            actions: [{
+              use: "salesforceUpsertLead",
+              with: `({
+                lastName: submission.name,
+                company: "Example Company",
+                email: "ada@example.com"
+              })`,
+            }],
           },
         ],
         fallback: "review",

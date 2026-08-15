@@ -120,7 +120,7 @@ Build the exported registry with `registerPureFunction`, `registerAction`, and `
 
 Forms emit `submission.before_save` and `submission.accepted` whether routing is configured or not. Routing also emits evaluation and matched-route events. Inline handlers can reject before saving, isolated handlers run best-effort after the response, and durable handlers are stored with the submission before they run.
 
-Durable deliveries run in order after the submission and route are stored. Each delivery receives a stable `idempotencyKey` and an `AbortSignal`. Pass both to external clients that support request deduplication and cancellation. Failed deliveries are attempted up to three times with delays and remain visible with the submission. `CRON_SECRET` protects the recovery worker at `/api/internal/form-event-deliveries`; the included Vercel schedule is daily and can be supplemented by a more frequent external scheduler.
+Durable routing actions run in their authored order after the submission and route are stored. Event handlers are independent, so one integration failure does not block unrelated handlers. Each delivery receives a stable `idempotencyKey` and an `AbortSignal`. Pass both to external clients that support request deduplication and cancellation. Failed deliveries are attempted up to three times with delays and remain visible with the submission. `CRON_SECRET` protects the recovery worker at `/api/internal/form-event-deliveries`; the included Vercel schedule is daily and can be supplemented by a more frequent external scheduler.
 
 The delivery store uses `DATABASE_URL` for short server-side transactions. In production, set it to the Supabase transaction-pooler URL. Its migration defines storage, constraints, indexes, and row-level access only; event and action behavior stays in TypeScript. `make test` runs the transaction behavior against local Postgres.
 
@@ -135,6 +135,7 @@ Before enabling Salesforce in production:
 - Configure the External Client App with PKCE, refresh-token rotation, and the current Salesforce-required refresh-token idle TTL. The client persists rotated refresh tokens and moves expired or revoked credentials to `reauthorization_required`.
 - Enable Salesforce's refresh-token IP allowlist when the app is subject to the partner-app controls. The deployment must then use stable outbound IPs; on Vercel this requires Static IPs or Secure Compute. Add every production egress IP to Salesforce before enabling the integration.
 - Configure the app as a confidential server integration and provide `SALESFORCE_CLIENT_SECRET` through the deployment secret manager.
+- Create a unique External ID field on Salesforce Lead and set its API name as `SALESFORCE_LEAD_EXTERNAL_ID_FIELD`. The `salesforceUpsertLead` action writes the stable durable delivery key to this field so retries target the same record.
 - Keep the requested scopes to `id`, `api`, and `refresh_token`, and verify the callback URL exactly matches `NEXT_PUBLIC_SITE_URL`.
 - Complete these checks in a Salesforce sandbox before enabling the global integration switch.
 

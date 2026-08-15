@@ -550,14 +550,15 @@ describe("Salesforce integration contracts", () => {
       fetcher,
       observeLimits,
     })
+    const registry = createIntegrationProviderRegistry().register(definition)
     const resolver = new IntegrationResolver(
-      createIntegrationProviderRegistry().register(definition),
+      registry,
       connections,
       controls,
       credentials,
     )
 
-    const resolved = await resolver.resolve(teamId, definition)
+    const resolved = await resolver.resolve(teamId, registry.reference(definition))
     await expect(resolved.client.testConnection()).resolves.toEqual({
       remaining: 98,
       maximum: 100,

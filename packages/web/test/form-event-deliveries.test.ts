@@ -3,7 +3,7 @@ import {
   type FormDefinition,
   type FormRoutingDefinition,
 } from "@screeem/forms"
-import { type, type ActionOutput } from "@screeem/routing"
+import { routingActionFailure, type, type ActionOutput } from "@screeem/routing"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
@@ -108,7 +108,39 @@ describe("form event deliveries", () => {
     expect(calls).toEqual(["action", "handler"])
   })
 
-  it("does not run later deliveries when an earlier delivery fails", async () => {
+  it("preserves a durable event handler failure disposition", async () => {
+    const failure = routingActionFailure({
+      code: "integration_team_disabled",
+      retryable: false,
+      retryAfterMs: null,
+    })
+    const registry = createFormAutomationRegistry().onEvent({
+      name: "integrated-handler",
+      event: "submission.accepted",
+      delivery: "durable",
+      run: () => Effect.fail(failure),
+    })
+    const [planned] = registry.planDurable(submissionEvent("submission.accepted"))
+    const [delivery] = orderFormEventDeliveries([planned!], {
+      tenantId: "team-one",
+      formId: "form-one",
+      submissionId: "submission-one",
+      publicationVersion: 1,
+    })
+    const store = recoveryStore([])
+
+    await executeFormEventDeliveries({
+      definition,
+      routing,
+      deliveries: [delivery!],
+      store,
+      registry,
+    })
+
+    expect(store.fail).toHaveBeenCalledWith(delivery, 1, failure)
+  })
+
+  it("continues an independent accepted handler when a routing action fails", async () => {
     const calls: string[] = []
     const registry = createFormAutomationRegistry()
       .registerAction({
@@ -119,14 +151,99 @@ describe("form event deliveries", () => {
       })
       .onEvent({
         name: "later",
-        event: "routing.matched",
+        event: "submission.accepted",
         delivery: "durable",
         run: () => Effect.sync(() => void calls.push("later")),
       })
+    const deliveries = stored([
+      ...planFormRoutingDeliveries(
+        routing,
+        matchedSubmissionRouting("sales", "qualified"),
+        event,
+        registry,
+      ),
+      ...registry.planDurable(submissionEvent("submission.accepted")),
+    ])
 
-    await execute(new MemoryDeliveryStore(), registry)
+    await executeFormEventDeliveries({
+      definition,
+      routing,
+      deliveries,
+      store: recoveryStore([]),
+      registry,
+    })
+
+    expect(calls).toEqual(["later"])
+  })
+
+  it("keeps authored routing actions dependent on earlier actions", async () => {
+    const calls: string[] = []
+    const registry = createFormAutomationRegistry()
+      .registerAction({
+        name: "notify",
+        events: ["routing.matched"],
+        input: type.object({ name: type.string() }),
+        run: () => Effect.fail(new Error("stop")),
+      })
+      .registerAction({
+        name: "record",
+        events: ["routing.matched"],
+        input: type.object({ name: type.string() }),
+        run: () => Effect.sync(() => void calls.push("record")),
+      })
+    const orderedRouting: FormRoutingDefinition = {
+      ...routing,
+      rules: [{
+        ...routing.rules[0]!,
+        actions: [
+          { use: "notify", with: "({ name: submission.name })" },
+          { use: "record", with: "({ name: submission.name })" },
+        ],
+      }],
+    }
+
+    await executeFormEventDeliveries({
+      definition,
+      routing: orderedRouting,
+      deliveries: stored(planFormRoutingDeliveries(
+        orderedRouting,
+        matchedSubmissionRouting("sales", "qualified"),
+        event,
+        registry,
+      )),
+      store: recoveryStore([]),
+      registry,
+    })
 
     expect(calls).toEqual([])
+  })
+
+  it("isolates durable handlers registered for the same event", async () => {
+    const calls: string[] = []
+    const registry = createFormAutomationRegistry()
+      .onEvent({
+        name: "failing-handler",
+        event: "submission.accepted",
+        delivery: "durable",
+        run: () => Effect.fail(new Error("stop")),
+      })
+      .onEvent({
+        name: "independent-handler",
+        event: "submission.accepted",
+        delivery: "durable",
+        run: () => Effect.sync(() => void calls.push("independent")),
+      })
+    const accepted = submissionEvent("submission.accepted")
+
+    await executeFormEventDeliveries({
+      definition,
+      routing,
+      deliveries: stored(registry.planDurable(accepted)),
+      store: recoveryStore([]),
+      registry,
+    })
+
+    expect(calls).toEqual(["independent"])
   })
 
   it("fails when a persisted routing match no longer reproduces", async () => {
@@ -145,8 +262,8 @@ describe("form event deliveries", () => {
         registry,
       })).rejects.toThrow("Persisted routing event no longer matches")
 
-    expect(store.status).toBe("pending")
-    expect(store.error).toBe("delivery_execution_failed")
+    expect(store.status).toBe("failed")
+    expect(store.error).toBe("delivery_contract_invalid")
   })
 
   it("reaches terminal failure after three bounded timeouts", async () => {
@@ -188,7 +305,15 @@ describe("form event deliveries", () => {
     await expect(
       drainPendingFormEventDeliveries(store, 25, actionRegistry()),
     ).rejects.toThrow("Could not process every pending form event delivery")
-    expect(store.fail).toHaveBeenCalledWith(delivery, 1, "delivery_execution_failed")
+    expect(store.fail).toHaveBeenCalledWith(
+      delivery,
+      1,
+      routingActionFailure({
+        code: "delivery_contract_invalid",
+        retryable: false,
+        retryAfterMs: null,
+      }),
+    )
   })
 
   it("resumes a valid pending delivery", async () => {
@@ -252,7 +377,15 @@ describe("form event deliveries", () => {
     await expect(
       drainPendingFormEventDeliveries(store, 25, createFormAutomationRegistry()),
     ).resolves.toBe(1)
-    expect(store.fail).toHaveBeenCalledWith(delivery, 1, "delivery_execution_failed")
+    expect(store.fail).toHaveBeenCalledWith(
+      delivery,
+      1,
+      routingActionFailure({
+        code: "action_execution_failed",
+        retryable: true,
+        retryAfterMs: null,
+      }),
+    )
   })
 
   it("does not start recovery after its deadline", async () => {
@@ -364,9 +497,17 @@ class MemoryDeliveryStore implements FormEventDeliveryStore {
     this.output = output
   }
 
-  async fail(_delivery?: unknown, _attempt?: number, error?: string) {
-    this.error = error ?? null
-    this.status = this.attempts >= 3 ? "failed" : "pending"
+  async fail(
+    _delivery?: unknown,
+    _attempt?: number,
+    failure = routingActionFailure({
+      code: "action_execution_failed",
+      retryable: true,
+      retryAfterMs: null,
+    }),
+  ) {
+    this.error = failure.code
+    this.status = !failure.retryable || this.attempts >= 3 ? "failed" : "pending"
   }
 }
 

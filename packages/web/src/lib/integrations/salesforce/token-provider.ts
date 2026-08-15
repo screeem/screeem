@@ -56,7 +56,9 @@ export class RefreshingSalesforceAccessTokenProvider implements SalesforceAccess
     cipher: IntegrationCredentialCipher,
     oauth: SalesforceOAuthClient,
     leases: SalesforceRefreshLeaseStore,
+    signal?: AbortSignal,
   ) {
+    signal?.throwIfAborted()
     const connection = snapshotIntegrationConnection(inputConnection)
     const stored = snapshotStoredIntegrationCredential(inputCredential)
     if (
@@ -72,6 +74,7 @@ export class RefreshingSalesforceAccessTokenProvider implements SalesforceAccess
       },
       stored.credential,
     ))
+    signal?.throwIfAborted()
     return new RefreshingSalesforceAccessTokenProvider(
       connection,
       stored,

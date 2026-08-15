@@ -1,4 +1,4 @@
-import { Effect, Either } from "effect"
+import { Cause, Effect, Either, Option } from "effect"
 import {
   ActionExecutionError,
   CompilationError,
@@ -6,6 +6,7 @@ import {
   ExecutionLimitError,
   InvalidInputError,
   InvalidActionArgumentsError,
+  routingActionFailureOrDefault,
   type RoutingExecutionError,
 } from "./errors.js"
 import { evaluate } from "./evaluator.js"
@@ -299,13 +300,17 @@ function executeAction(
   return Effect.suspend(() => {
     const abortController = new AbortController()
     const actionContext = { ...context, signal: abortController.signal }
-    const failure = () => new ActionExecutionError(context.ruleId, action.definition.name)
+    const failure = (error?: unknown) => new ActionExecutionError(
+      context.ruleId,
+      action.definition.name,
+      routingActionFailureOrDefault(error),
+    )
     let implementation: Effect.Effect<ActionOutput, unknown, never>
 
     try {
       implementation = action.definition.run({ input, context: actionContext })
-    } catch {
-      return Effect.fail(failure())
+    } catch (error) {
+      return Effect.fail(failure(error))
     }
 
     if (!Effect.isEffect(implementation)) {
@@ -313,7 +318,10 @@ function executeAction(
     }
 
     const actionEffect = implementation.pipe(
-      Effect.catchAllCause(() => Effect.fail(failure())),
+      Effect.catchAllCause((cause) => {
+        const expected = Cause.failureOption(cause)
+        return Effect.fail(failure(Option.isSome(expected) ? expected.value : undefined))
+      }),
       Effect.disconnect,
     )
     const timeout = Effect.sleep(timeoutMs).pipe(

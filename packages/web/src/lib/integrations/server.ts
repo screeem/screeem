@@ -12,6 +12,7 @@ import {
   defineIntegrationProvider,
   IntegrationResolver,
 } from "./provider-registry"
+import { ResolverIntegrationAutomationRuntime } from "./automation-runtime"
 import {
   AesGcmIntegrationCredentialCipher,
   snapshotIntegrationCredentialKeyConfiguration,
@@ -34,7 +35,7 @@ import {
 import { SalesforceHttpClient } from "./salesforce/client"
 import { snapshotIntegrationIdentifier, type IntegrationIdentifier } from "./contract"
 
-const salesforceRegistration = defineIntegrationProvider({
+const salesforceIntegrationProviderDefinition = defineIntegrationProvider({
   name: salesforceProviderName,
   displayName: "Salesforce",
   enabled: salesforceEnvironmentConfigured(),
@@ -42,7 +43,24 @@ const salesforceRegistration = defineIntegrationProvider({
 })
 
 export const productionIntegrationProviderRegistry = createIntegrationProviderRegistry()
-  .register(salesforceRegistration)
+  .register(salesforceIntegrationProviderDefinition)
+
+export const salesforceIntegrationProvider = productionIntegrationProviderRegistry.reference(
+  salesforceIntegrationProviderDefinition,
+)
+
+export function createIntegrationResolver() {
+  return new IntegrationResolver(
+    productionIntegrationProviderRegistry,
+    createIntegrationConnectionStore(),
+    createIntegrationTeamControlStore(),
+    createIntegrationCredentialStore(),
+  )
+}
+
+export const productionIntegrationAutomationRuntime = new ResolverIntegrationAutomationRuntime(
+  createIntegrationResolver,
+)
 
 let salesforceProviderPromise: ReturnType<typeof buildSalesforceProvider> | null = null
 
@@ -83,7 +101,7 @@ export async function createSalesforceConnectionService() {
     execution,
     identify: (credential) => salesforceIdentityClient(credential, runtime.oauth).identity(),
     resolveClient: async (teamId) => (
-      await resolver.resolve(teamId, salesforceRegistration)
+      await resolver.resolve(teamId, salesforceIntegrationProvider)
     ).client,
   })
 }

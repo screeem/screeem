@@ -13,6 +13,7 @@ export function getDatabase() {
     prepare: false,
     idle_timeout: 20,
     connect_timeout: 10,
+    connection: { statement_timeout: 12_000 },
   })
   return database
 }

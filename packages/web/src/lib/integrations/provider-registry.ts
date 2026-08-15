@@ -31,7 +31,15 @@ export interface IntegrationProviderDefinition<Client> extends IntegrationProvid
   readonly open: (options: {
     readonly connection: IntegrationConnection
     readonly credential: StoredIntegrationCredential
+    readonly signal?: AbortSignal
   }) => Client | Promise<Client>
+}
+
+declare const integrationProviderClient: unique symbol
+
+export interface IntegrationProviderReference<Client> {
+  readonly name: IntegrationProviderName
+  readonly [integrationProviderClient]: Client
 }
 
 export interface ResolvedIntegration<Client> {
@@ -41,9 +49,15 @@ export interface ResolvedIntegration<Client> {
 }
 
 type StoredProvider = IntegrationProviderDefinition<unknown>
+type StoredRegistration = {
+  readonly definition: StoredProvider
+  readonly reference: IntegrationProviderReference<unknown>
+}
 
 export class IntegrationProviderRegistry {
-  private constructor(private readonly providers: ReadonlyMap<IntegrationProviderName, StoredProvider>) {}
+  private constructor(
+    private readonly providers: ReadonlyMap<IntegrationProviderName, StoredRegistration>,
+  ) {}
 
   static create(): IntegrationProviderRegistry {
     return new IntegrationProviderRegistry(new Map())
@@ -55,18 +69,22 @@ export class IntegrationProviderRegistry {
       throw new Error(`Integration provider ${registration.name} is already registered`)
     }
     const providers = new Map(this.providers)
-    providers.set(registration.name, registration as StoredProvider)
+    providers.set(registration.name, Object.freeze({
+      definition: registration as StoredProvider,
+      reference: providerReference(registration.name),
+    }))
     return new IntegrationProviderRegistry(providers)
   }
 
   get(name: IntegrationProviderName): IntegrationProviderDescriptor | null {
     const registration = this.providers.get(snapshotIntegrationProviderName(name))
-    return registration ? descriptor(registration) : null
+    return registration ? descriptor(registration.definition) : null
   }
 
   list(): readonly IntegrationProviderDescriptor[] {
     return Object.freeze(
       [...this.providers.values()]
+        .map(({ definition }) => definition)
         .sort((left, right) => left.name.localeCompare(right.name))
         .map(descriptor),
     )
@@ -105,13 +123,24 @@ export class IntegrationProviderRegistry {
     })
   }
 
-  registeredDefinition<Client>(
+  reference<Client>(
     definition: IntegrationProviderDefinition<Client>,
-  ): IntegrationProviderDefinition<Client> | null {
+  ): IntegrationProviderReference<Client> {
     const safe = snapshotDefinition(definition)
     const registered = this.providers.get(safe.name)
-    if (!registered || registered.open !== safe.open) return null
-    return registered as IntegrationProviderDefinition<Client>
+    if (!registered || registered.definition.open !== safe.open) {
+      throw new Error(`Integration provider ${safe.name} is not registered`)
+    }
+    return registered.reference as IntegrationProviderReference<Client>
+  }
+
+  registeredDefinition<Client>(
+    reference: IntegrationProviderReference<Client>,
+  ): IntegrationProviderDefinition<Client> | null {
+    const name = snapshotProviderReferenceName(reference)
+    const registered = this.providers.get(name)
+    if (!registered || registered.reference !== reference) return null
+    return registered.definition as IntegrationProviderDefinition<Client>
   }
 }
 
@@ -135,21 +164,25 @@ export class IntegrationResolver {
 
   async resolve<Client>(
     teamId: IntegrationIdentifier,
-    definition: IntegrationProviderDefinition<Client>,
+    reference: IntegrationProviderReference<Client>,
+    signal?: AbortSignal,
   ): Promise<ResolvedIntegration<Client>> {
     const safeTeamId = snapshotIntegrationIdentifier(teamId)
-    const requestedProvider = snapshotDefinition(definition)
-    const provider = this.registry.registeredDefinition(requestedProvider)
+    const providerName = snapshotProviderReferenceName(reference)
+    const provider = this.registry.registeredDefinition(reference)
     if (!provider) {
-      throw new IntegrationResolutionError("provider_unregistered", requestedProvider.name)
+      throw new IntegrationResolutionError("provider_unregistered", providerName)
     }
+    signal?.throwIfAborted()
     if (!provider.enabled) throw new IntegrationResolutionError("global_disabled", provider.name)
 
     const control = snapshotIntegrationTeamControl(await this.controls.get(safeTeamId))
+    signal?.throwIfAborted()
     if (control.teamId !== safeTeamId) throw new TypeError("Integration scope mismatch")
     if (!control.enabled) throw new IntegrationResolutionError("team_disabled", provider.name)
 
     const storedConnection = await this.connections.getByProvider(safeTeamId, provider.name)
+    signal?.throwIfAborted()
     if (!storedConnection) {
       throw new IntegrationResolutionError("connection_unavailable", provider.name)
     }
@@ -165,6 +198,7 @@ export class IntegrationResolver {
     }
 
     const loadedCredential = await this.credentials.load(safeTeamId, connection.id)
+    signal?.throwIfAborted()
     if (!loadedCredential) {
       throw new IntegrationResolutionError("credentials_unavailable", provider.name)
     }
@@ -178,7 +212,9 @@ export class IntegrationResolver {
     const client = await provider.open({
       connection,
       credential: snapshotStoredIntegrationCredential(storedCredential),
+      signal,
     })
+    signal?.throwIfAborted()
     return Object.freeze({ provider: descriptor(provider), connection, client })
   }
 }
@@ -240,6 +276,30 @@ function snapshotDefinition<Client>(
   if (typeof enabled !== "boolean") throw new TypeError("Invalid integration provider state")
   if (typeof open !== "function") throw new TypeError("Invalid integration provider adapter")
   return Object.freeze({ name, displayName, enabled, open }) as IntegrationProviderDefinition<Client>
+}
+
+function providerReference<Client>(
+  name: IntegrationProviderName,
+): IntegrationProviderReference<Client> {
+  return Object.freeze({ name }) as IntegrationProviderReference<Client>
+}
+
+function snapshotProviderReferenceName<Client>(
+  input: IntegrationProviderReference<Client>,
+): IntegrationProviderName {
+  let descriptors: PropertyDescriptorMap
+  let symbols: readonly symbol[]
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(input)
+    symbols = Object.getOwnPropertySymbols(input)
+  } catch {
+    throw new TypeError("Invalid integration provider reference")
+  }
+  const keys = Object.keys(descriptors)
+  if (keys.length !== 1 || keys[0] !== "name" || symbols.length > 0) {
+    throw new TypeError("Invalid integration provider reference")
+  }
+  return snapshotIntegrationProviderName(dataValue(descriptors.name))
 }
 
 function descriptor(provider: StoredProvider): IntegrationProviderDescriptor {
