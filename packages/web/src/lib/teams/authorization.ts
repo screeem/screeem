@@ -2,7 +2,7 @@ import "server-only"
 
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { canManage, getMembership } from "./server"
+import { canManage, getMembership } from "@/lib/teams/server"
 
 export async function authorizeTeam(
   teamId: string,
