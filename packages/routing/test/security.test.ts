@@ -85,6 +85,15 @@ describe("untrusted expression security", () => {
       }),
     ).not.toThrow()
 
+    expect(() =>
+      createRouter().registerPureFunction({
+        name: "crm.lookup",
+        input: [],
+        output: type.boolean(),
+        run: () => true,
+      }),
+    ).toThrow(/Invalid registration name/)
+
     for (const name of ["crm..upsertLead", "crm.__proto__", "submission.notify"]) {
       expect(() =>
         createRouter().registerAction({

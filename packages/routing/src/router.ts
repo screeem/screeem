@@ -115,7 +115,7 @@ export class Router {
   registerAction<Input extends RuntimeType, Output extends ActionOutput, Failure>(
     definition: ActionDefinition<Input, Output, Failure>,
   ): Router {
-    assertRegistrationName(definition.name)
+    assertRegistrationName(definition.name, true)
     if (
       isOptionalFieldPredicate(definition.name) ||
       this.actions.has(definition.name) ||
@@ -593,10 +593,13 @@ function validateDefinition(definition: RoutingDefinition, limits: RoutingLimits
   }
 }
 
-function assertRegistrationName(name: string): void {
+function assertRegistrationName(name: string, allowNamespace = false): void {
   const segments = name.split(".")
+  const pattern = allowNamespace
+    ? /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
+    : /^[A-Za-z_$][\w$]*$/
   if (
-    !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(name) ||
+    !pattern.test(name) ||
     segments.some((segment) =>
       ["submission", "__proto__", "prototype", "constructor"].includes(segment),
     )
