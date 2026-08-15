@@ -34,6 +34,10 @@ import Link from "next/link"
 import { useMemo, useRef, useState } from "react"
 import { DraggableField } from "../../../components/forms/DraggableField"
 import { RoutingEditor } from "../../../components/forms/RoutingEditor"
+import {
+  crmUpsertLeadActionName,
+} from "../../../lib/integrations/crm/contract"
+import { formIntegrationActions } from "../../../lib/integrations/action-catalog"
 
 type View = "builder" | "routing" | "preview" | "definition"
 type Fixture = "lead" | "contact" | "eligibility"
@@ -53,22 +57,29 @@ const fixtures: readonly { id: Fixture; label: string }[] = [
   { id: "eligibility", label: "Programme eligibility" },
 ]
 
-const notifySalesTester: FormActionTester = Object.freeze<FormActionTester>({
-  actionName: "notifySales",
-  label: "Notify sales",
-  description: "Preview the notification without sending it.",
-  async test({ definition, submission, routing }) {
-    const emailField = definition.fields.find((field) => field.control === "email")
-    const submittedEmail = emailField ? submission[emailField.name] : undefined
+const salesforceLeadTester: FormActionTester = Object.freeze<FormActionTester>({
+  actionName: crmUpsertLeadActionName,
+  label: "Salesforce Lead readiness",
+  description: "Checks a local Salesforce readiness fixture. Nothing is created or queued.",
+  async test({ action, routing }) {
+    const name = action.input.lastName
+    const company = action.input.company
+    const email = action.input.email
+    const ready =
+      typeof name === "string" && typeof company === "string" && typeof email === "string"
     return {
-      status: submittedEmail ? "success" : "warning",
-      summary: submittedEmail
-        ? "Notification preview ready — nothing was sent."
-        : "Notification preview is missing a submitted email.",
+      status: ready ? "success" : "warning",
+      summary: ready
+        ? "Salesforce is ready for this Lead action."
+        : "The Lead action needs a last name, company, and email.",
       details: [
-        { label: "Recipient", value: "routing-preview@notifications.invalid" },
+        { label: "Operation", value: "Upsert Lead" },
+        { label: "Organization", value: "Development Salesforce org" },
         { label: "Destination", value: routing.route ?? "No destination" },
-        { label: "Lead", value: typeof submittedEmail === "string" ? submittedEmail : "Not provided" },
+        { label: "External ID", value: "Screeem_Delivery_Key__c · generated when submitted" },
+        { label: "Last name", value: typeof name === "string" ? name : "Not mapped" },
+        { label: "Company", value: typeof company === "string" ? company : "Not mapped" },
+        { label: "Email", value: typeof email === "string" ? email : "Not mapped" },
       ],
     }
   },
@@ -89,13 +100,20 @@ function createLeadQualificationFixture(): FormDefinition {
     string,
     Readonly<Record<string, unknown>>,
   ][] = [
-    ["text", "full-name", "Full name", "name", { required: true, placeholder: "Ada Lovelace" }],
+    ["text", "full-name", "Last name", "last_name", { required: true, placeholder: "Lovelace" }],
     [
       "email",
       "work-email",
       "Work email",
       "email",
       { required: true, placeholder: "ada@analytical.co" },
+    ],
+    [
+      "text",
+      "company",
+      "Company",
+      "company",
+      { required: true, placeholder: "Analytical Engines" },
     ],
     [
       "number",
@@ -530,7 +548,11 @@ export function FormBuilderPlayground() {
 
   async function saveDraftSimulation() {
     try {
-      const serialized = generateFormRoutingDefinition(builder.definition, routing)
+      const serialized = generateFormRoutingDefinition(
+        builder.definition,
+        routing,
+        formIntegrationActions,
+      )
       if (!serialized.ok) {
         setMessage(serialized.issues[0]?.message ?? "Routing is incomplete.")
         return null
@@ -604,7 +626,11 @@ export function FormBuilderPlayground() {
     onMove: moveSelected,
     onReorder: reorderField,
   }
-  const serializedRouting = generateFormRoutingDefinition(builder.definition, routing)
+  const serializedRouting = generateFormRoutingDefinition(
+    builder.definition,
+    routing,
+    formIntegrationActions,
+  )
   const generatedRouting = serializedRouting.ok ? serializedRouting.routing : null
 
   return (
@@ -734,7 +760,8 @@ export function FormBuilderPlayground() {
           definition={builder.definition}
           draft={routing}
           issues={serializedRouting.ok ? [] : serializedRouting.issues}
-          actionTesters={[notifySalesTester]}
+          actionTesters={[salesforceLeadTester]}
+          integrationActions={formIntegrationActions}
           onAddRule={addRoutingRule}
           onUpdateRule={updateRoutingRule}
           onRemoveRule={removeRoutingRule}

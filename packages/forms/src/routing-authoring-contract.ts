@@ -2,14 +2,18 @@ import { InvalidFormRoutingError } from "./errors.js"
 import {
   FORM_ROUTING_AUTHORING_FORMAT_VERSION,
   type FormRoutingAuthoring,
+  type FormRoutingAuthoringAction,
   type FormRoutingAuthoringIssue,
   type FormRoutingAuthoringRule,
+  type FormRoutingActionInputMapping,
   type FormRoutingCondition,
   type FormRoutingOperator,
 } from "./model.js"
 
 export const maximumRoutingAuthoringRules = 100
 export const maximumRoutingConditionsPerRule = 20
+export const maximumRoutingActionsPerRule = 10
+export const maximumRoutingActionInputs = 32
 export const maximumRoutingConditionValueLength = 1_024
 
 const maximumIdentifierLength = 128
@@ -98,11 +102,12 @@ export function snapshotFormRoutingAuthoring(input: unknown): FormRoutingAuthori
 function snapshotRule(rules: readonly unknown[], index: number): FormRoutingAuthoringRule {
   const path = `routing.authoring.rules[${index}]`
   const rule = requireArrayItem(rules, index, path)
-  requireKeys(rule, ["id", "combinator", "conditions", "route"], path)
+  requireKeys(rule, ["id", "combinator", "conditions", "route"], path, ["actions"])
   const id = readData(rule, "id", `${path}.id`)
   const combinator = readData(rule, "combinator", `${path}.combinator`)
   const conditions = readData(rule, "conditions", `${path}.conditions`)
   const route = readData(rule, "route", `${path}.route`)
+  const actions = readOptionalData(rule, "actions", `${path}.actions`)
 
   assertString(id, `${path}.id`, maximumIdentifierLength)
   if (combinator !== "all" && combinator !== "any") {
@@ -152,12 +157,117 @@ function snapshotRule(rules: readonly unknown[], index: number): FormRoutingAuth
     return condition
   })
 
+  if (actions.present && !Array.isArray(actions.value)) {
+    fail("invalid_routing_actions", "Rule actions must be an array", `${path}.actions`, id)
+  }
+  if (Array.isArray(actions.value) && actions.value.length > maximumRoutingActionsPerRule) {
+    fail(
+      "routing_action_limit",
+      `A rule cannot contain more than ${maximumRoutingActionsPerRule} actions`,
+      `${path}.actions`,
+      id,
+    )
+  }
+  const actionIds = new Set<string>()
+  const safeActions = actions.present
+    ? Object.freeze(
+        Array.from(
+          { length: (actions.value as readonly unknown[]).length },
+          (_, actionIndex) => {
+            const action = snapshotAction(
+              actions.value as readonly unknown[],
+              actionIndex,
+              path,
+              id,
+            )
+            if (actionIds.has(action.id)) {
+              fail(
+                "duplicate_action_id",
+                "Action IDs must be unique within a rule",
+                `${path}.actions[${actionIndex}].id`,
+                id,
+              )
+            }
+            actionIds.add(action.id)
+            return action
+          },
+        ),
+      )
+    : undefined
+
   return Object.freeze({
     id,
     combinator,
     conditions: Object.freeze(safeConditions),
     route,
+    ...(safeActions === undefined ? {} : { actions: safeActions }),
   })
+}
+
+function snapshotAction(
+  actions: readonly unknown[],
+  index: number,
+  rulePath: string,
+  ruleId: string,
+): FormRoutingAuthoringAction {
+  const path = `${rulePath}.actions[${index}]`
+  const action = requireArrayItem(actions, index, path)
+  requireKeys(action, ["id", "use", "inputs"], path)
+  const id = readData(action, "id", `${path}.id`)
+  const use = readData(action, "use", `${path}.use`)
+  const inputs = readData(action, "inputs", `${path}.inputs`)
+  assertString(id, `${path}.id`, maximumIdentifierLength, ruleId)
+  assertString(use, `${path}.use`, maximumIdentifierLength, ruleId)
+  if (!Array.isArray(inputs)) {
+    fail("invalid_routing_action_inputs", "Action inputs must be an array", `${path}.inputs`, ruleId)
+  }
+  if (inputs.length > maximumRoutingActionInputs) {
+    fail(
+      "routing_action_input_limit",
+      `An action cannot contain more than ${maximumRoutingActionInputs} inputs`,
+      `${path}.inputs`,
+      ruleId,
+    )
+  }
+  const names = new Set<string>()
+  const safeInputs = Array.from({ length: inputs.length }, (_, inputIndex) => {
+    const input = snapshotActionInput(inputs, inputIndex, path, ruleId)
+    if (names.has(input.input)) {
+      fail(
+        "duplicate_action_input",
+        "Action input names must be unique",
+        `${path}.inputs[${inputIndex}].input`,
+        ruleId,
+      )
+    }
+    names.add(input.input)
+    return input
+  })
+  return Object.freeze({ id, use, inputs: Object.freeze(safeInputs) })
+}
+
+function snapshotActionInput(
+  inputs: readonly unknown[],
+  index: number,
+  actionPath: string,
+  ruleId: string,
+): FormRoutingActionInputMapping {
+  const path = `${actionPath}.inputs[${index}]`
+  const input = requireArrayItem(inputs, index, path)
+  requireKeys(input, ["input", "fieldId"], path)
+  const inputName = readData(input, "input", `${path}.input`)
+  const fieldId = readData(input, "fieldId", `${path}.fieldId`)
+  assertString(inputName, `${path}.input`, maximumIdentifierLength, ruleId)
+  assertString(fieldId, `${path}.fieldId`, maximumIdentifierLength, ruleId)
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(inputName)) {
+    fail(
+      "invalid_action_input_name",
+      "Action input names must be identifiers",
+      `${path}.input`,
+      ruleId,
+    )
+  }
+  return Object.freeze({ input: inputName, fieldId })
 }
 
 function snapshotCondition(

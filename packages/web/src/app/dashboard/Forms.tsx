@@ -1,5 +1,6 @@
 "use client"
 
+import { integrationActionNameForRegistration } from "../../lib/integrations/action-catalog"
 import type { FormAvailability } from "@screeem/forms"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -515,7 +516,10 @@ function SubmissionDeliveries({
     <div className="mt-3 space-y-1 text-xs text-gray-600">
       {deliveries.map((delivery) => (
         <p key={delivery.delivery_key}>
-          <strong className="text-gray-900">{delivery.registration_name}</strong> · {delivery.status}
+          <strong className="text-gray-900">
+            {integrationActionNameForRegistration(delivery.registration_name)}
+          </strong>{" "}
+          · {delivery.status}
           {delivery.attempt_count > 1 ? ` · ${delivery.attempt_count} attempts` : ""}
           {delivery.last_error ? ` · ${delivery.last_error}` : ""}
         </p>

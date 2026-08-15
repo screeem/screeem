@@ -42,6 +42,8 @@ export interface SalesforceFieldDescription {
   readonly createable: boolean
   readonly updateable: boolean
   readonly nillable: boolean
+  readonly externalId: boolean
+  readonly unique: boolean
 }
 
 export interface SalesforceUpsertResult {

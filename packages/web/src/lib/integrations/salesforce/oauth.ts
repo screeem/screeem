@@ -7,7 +7,7 @@ import {
   snapshotSalesforceInstanceUrl,
   type SalesforceAccessCredential,
 } from "./contract"
-import { readBoundedSalesforceResponse } from "./response"
+import { readBoundedSalesforceResponse, throwIfSalesforceAborted } from "./response"
 
 export interface SalesforceOAuthConfiguration {
   readonly clientId: string
@@ -79,6 +79,7 @@ export class SalesforceOAuthAdapter implements SalesforceOAuthClient {
 
   async revoke(token: string, signal?: AbortSignal) {
     const body = new URLSearchParams({ token: oauthValue(token, 16_384) })
+    const operationSignal = boundedSignal(signal)
     let response: Response
     try {
       response = await this.fetcher(new URL("/services/oauth2/revoke", this.#configuration.loginUrl), {
@@ -86,9 +87,10 @@ export class SalesforceOAuthAdapter implements SalesforceOAuthClient {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
         redirect: "error",
-        signal: boundedSignal(signal),
+        signal: operationSignal,
       })
-    } catch {
+    } catch (error) {
+      throwIfSalesforceAborted(operationSignal, error)
       throw new SalesforceError("provider_unavailable", true)
     }
     if (!response.ok) {
@@ -104,6 +106,7 @@ export class SalesforceOAuthAdapter implements SalesforceOAuthClient {
   ) {
     const body = new URLSearchParams({ client_id: this.#configuration.clientId, ...parameters })
     if (this.#configuration.clientSecret) body.set("client_secret", this.#configuration.clientSecret)
+    const operationSignal = boundedSignal(signal)
     let response: Response
     try {
       response = await this.fetcher(new URL("/services/oauth2/token", this.#configuration.loginUrl), {
@@ -111,16 +114,17 @@ export class SalesforceOAuthAdapter implements SalesforceOAuthClient {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
         redirect: "error",
-        signal: boundedSignal(signal),
+        signal: operationSignal,
       })
-    } catch {
+    } catch (error) {
+      throwIfSalesforceAborted(operationSignal, error)
       throw new SalesforceError("provider_unavailable", true)
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined)
       throw classifyOAuthFailure(response.status)
     }
-    const value = await boundedJson(response)
+    const value = await boundedJson(response, operationSignal)
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new SalesforceError("invalid_provider_response", true)
     }
@@ -205,8 +209,8 @@ function classifyOAuthFailure(status: number) {
   return new SalesforceError("provider_unavailable", status >= 500)
 }
 
-async function boundedJson(response: Response) {
-  const text = await readBoundedSalesforceResponse(response, 256_000)
+async function boundedJson(response: Response, signal?: AbortSignal) {
+  const text = await readBoundedSalesforceResponse(response, 256_000, signal)
   try {
     return JSON.parse(text) as unknown
   } catch {

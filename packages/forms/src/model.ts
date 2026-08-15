@@ -98,11 +98,23 @@ export interface FormRoutingCondition {
   readonly value?: string | number | boolean
 }
 
+export interface FormRoutingActionInputMapping {
+  readonly input: string
+  readonly fieldId: string
+}
+
+export interface FormRoutingAuthoringAction {
+  readonly id: string
+  readonly use: string
+  readonly inputs: readonly FormRoutingActionInputMapping[]
+}
+
 export interface FormRoutingAuthoringRule {
   readonly id: string
   readonly combinator: FormRoutingCombinator
   readonly conditions: readonly FormRoutingCondition[]
   readonly route: string
+  readonly actions?: readonly FormRoutingAuthoringAction[]
 }
 
 /** Versioned visual source used to regenerate runtime routing expressions. */
@@ -123,6 +135,8 @@ export interface FormRoutingIssue {
 
 export interface FormRoutingAuthoringIssue extends FormRoutingIssue {
   readonly conditionId?: string
+  readonly actionId?: string
+  readonly inputName?: string
 }
 
 export interface FormDraft {

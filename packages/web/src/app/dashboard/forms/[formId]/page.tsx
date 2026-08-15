@@ -29,5 +29,12 @@ export default async function FormEditorPage({
     )
   }
 
-  return <FormEditor teamId={activeTeam.id} formId={formId} initialName={name} />
+  return (
+    <FormEditor
+      key={`${activeTeam.id}:${formId}`}
+      teamId={activeTeam.id}
+      formId={formId}
+      initialName={name}
+    />
+  )
 }

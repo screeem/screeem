@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages
+        run: |
+          pnpm --filter @screeem/routing build
+          pnpm --filter @screeem/forms build
+          pnpm --filter @screeem/forms-react build
+
+      - name: Generate Next.js route types
+        run: pnpm --filter @screeem/web exec next typegen
+
+      - name: Typecheck web
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: pnpm --filter @screeem/web exec tsc --noEmit --pretty false
+
+      - name: Test forms
+        run: pnpm --filter @screeem/forms test
+
+      - name: Test web
+        run: pnpm --filter @screeem/web test

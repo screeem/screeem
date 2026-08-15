@@ -11,14 +11,19 @@ import {
   type SalesforceObjectDescription,
   type SalesforceUpsertResult,
 } from "./contract"
-import { readBoundedSalesforceResponse } from "./response"
+import { readBoundedSalesforceResponse, throwIfSalesforceAborted } from "./response"
+import {
+  IntegrationOperationError,
+} from "../action-contract"
+import type { CrmLeadWriter, CrmUpsertLeadInput, CrmOperationContext } from "../crm/contract"
+import { integrationErrorCodeForSalesforce } from "./contract"
 
 export interface SalesforceAccessTokenProvider {
   get(signal?: AbortSignal): Promise<SalesforceAccessCredential>
   refresh(rejectedAccessToken: string, signal?: AbortSignal): Promise<SalesforceAccessCredential>
 }
 
-export interface SalesforceClient {
+export interface SalesforceClient extends CrmLeadWriter {
   identity(signal?: AbortSignal): Promise<SalesforceIdentity>
   testConnection(signal?: AbortSignal): Promise<SalesforceApiLimits>
   describeObject(objectName: string, signal?: AbortSignal): Promise<SalesforceObjectDescription>
@@ -40,16 +45,45 @@ export class SalesforceHttpClient implements SalesforceClient {
     private readonly revokeToken: (token: string, signal?: AbortSignal) => Promise<void>,
     private readonly fetcher: typeof fetch = fetch,
     private readonly observeLimits?: SalesforceApiLimitObserver,
+    private readonly crmLeadExternalIdField?: string,
   ) {}
+
+  async upsertLead(input: CrmUpsertLeadInput, context: CrmOperationContext) {
+    let externalIdField: string
+    try {
+      externalIdField = snapshotSalesforceApiName(this.crmLeadExternalIdField ?? "")
+    } catch {
+      throw new IntegrationOperationError("invalid_configuration", false)
+    }
+    try {
+      return await this.upsertRecord(
+        "Lead",
+        externalIdField,
+        context.externalId,
+        { LastName: input.lastName, Company: input.company, Email: input.email },
+        context.signal,
+      )
+    } catch (error) {
+      if (error instanceof IntegrationOperationError) throw error
+      if (error instanceof SalesforceError) {
+        throw new IntegrationOperationError(
+          integrationErrorCodeForSalesforce(error),
+          error.retryable,
+          error.retryAfterMs,
+        )
+      }
+      throw new IntegrationOperationError("unknown", true)
+    }
+  }
 
   async identity(signal?: AbortSignal) {
     const response = await this.authorizedFetch((credential) => credential.identityUrl, {}, signal)
-    return snapshotSalesforceIdentityResponse(await responseJson(response))
+    return snapshotSalesforceIdentityResponse(await responseJson(response, signal))
   }
 
   async testConnection(signal?: AbortSignal) {
     const response = await this.instanceRequest(`/services/data/${salesforceApiVersion}/limits`, {}, signal)
-    await responseJson(response)
+    await responseJson(response, signal)
     return parseLimits(response.headers.get("sforce-limit-info"))
   }
 
@@ -60,7 +94,7 @@ export class SalesforceHttpClient implements SalesforceClient {
       {},
       signal,
     )
-    return snapshotDescription(await responseJson(response))
+    return snapshotDescription(await responseJson(response, signal))
   }
 
   async upsertRecord(
@@ -80,7 +114,7 @@ export class SalesforceHttpClient implements SalesforceClient {
       signal,
     )
     if (response.status === 204) return Object.freeze({ id: null, created: false })
-    const value = await responseJson(response)
+    const value = await responseJson(response, signal)
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new SalesforceError("invalid_provider_response", true)
     }
@@ -119,7 +153,7 @@ export class SalesforceHttpClient implements SalesforceClient {
       credential = await this.tokens.refresh(credential.accessToken, operationSignal)
       response = await this.fetchOnce(url(credential), init, credential.accessToken, operationSignal)
     }
-    if (!response.ok) throw await classifyResponse(response)
+    if (!response.ok) throw await classifyResponse(response, operationSignal)
     if (this.observeLimits) {
       await Promise.resolve(
         this.observeLimits(parseLimits(response.headers.get("sforce-limit-info"))),
@@ -138,7 +172,8 @@ export class SalesforceHttpClient implements SalesforceClient {
         redirect: "error",
         signal,
       })
-    } catch {
+    } catch (error) {
+      throwIfSalesforceAborted(signal, error)
       throw new SalesforceError("provider_unavailable", true)
     }
   }
@@ -163,19 +198,29 @@ export class FakeSalesforceClient implements SalesforceClient {
   ) {}
 
   async identity(signal?: AbortSignal) {
-    throwIfAborted(signal)
+    throwIfSalesforceAborted(signal)
     this.calls.push("identity")
     return this.identityValue
   }
 
+  async upsertLead(input: CrmUpsertLeadInput, context: CrmOperationContext) {
+    return this.upsertRecord(
+      "Lead",
+      "Screeem_Delivery_Key__c",
+      context.externalId,
+      { LastName: input.lastName, Company: input.company, Email: input.email },
+      context.signal,
+    )
+  }
+
   async testConnection(signal?: AbortSignal) {
-    throwIfAborted(signal)
+    throwIfSalesforceAborted(signal)
     this.calls.push("testConnection")
     return Object.freeze({ remaining: 10_000, maximum: 15_000 })
   }
 
   async describeObject(objectName: string, signal?: AbortSignal) {
-    throwIfAborted(signal)
+    throwIfSalesforceAborted(signal)
     const safeObject = snapshotSalesforceApiName(objectName)
     this.calls.push(`describeObject:${safeObject}`)
     return Object.freeze({ name: safeObject, label: safeObject, fields: Object.freeze([]) })
@@ -188,7 +233,7 @@ export class FakeSalesforceClient implements SalesforceClient {
     values: Readonly<Record<string, unknown>>,
     signal?: AbortSignal,
   ) {
-    throwIfAborted(signal)
+    throwIfSalesforceAborted(signal)
     const safeObject = snapshotSalesforceApiName(objectName)
     const safeField = snapshotSalesforceApiName(externalIdField)
     const safeExternalId = externalIdentifier(externalId)
@@ -204,7 +249,7 @@ export class FakeSalesforceClient implements SalesforceClient {
   }
 
   async revoke(signal?: AbortSignal) {
-    throwIfAborted(signal)
+    throwIfSalesforceAborted(signal)
     this.calls.push("revoke")
   }
 }
@@ -236,7 +281,9 @@ function snapshotDescription(input: unknown): SalesforceObjectDescription {
     const field = entry as Record<string, unknown>
     if (
       typeof field.name !== "string" || typeof field.label !== "string" || typeof field.type !== "string" ||
-      typeof field.createable !== "boolean" || typeof field.updateable !== "boolean" || typeof field.nillable !== "boolean"
+      typeof field.createable !== "boolean" || typeof field.updateable !== "boolean" ||
+      typeof field.nillable !== "boolean" || typeof field.externalId !== "boolean" ||
+      typeof field.unique !== "boolean"
     ) throw new SalesforceError("invalid_provider_response", true)
     return Object.freeze({
       name: snapshotSalesforceApiName(field.name),
@@ -245,6 +292,8 @@ function snapshotDescription(input: unknown): SalesforceObjectDescription {
       createable: field.createable,
       updateable: field.updateable,
       nillable: field.nillable,
+      externalId: field.externalId,
+      unique: field.unique,
     })
   })
   return Object.freeze({
@@ -288,8 +337,8 @@ function snapshotUpsertValues(input: Readonly<Record<string, unknown>>) {
   return { values, body }
 }
 
-async function responseJson(response: Response) {
-  const text = await readBoundedSalesforceResponse(response, 2_000_000)
+async function responseJson(response: Response, signal?: AbortSignal) {
+  const text = await readBoundedSalesforceResponse(response, 2_000_000, signal)
   try {
     return text.length === 0 ? null : JSON.parse(text) as unknown
   } catch {
@@ -309,18 +358,14 @@ function parseLimits(input: string | null): SalesforceApiLimits {
   return Object.freeze({ remaining: Math.max(0, maximum - used), maximum })
 }
 
-function throwIfAborted(signal?: AbortSignal) {
-  if (signal?.aborted) throw new SalesforceError("provider_unavailable", true)
-}
-
-async function classifyResponse(response: Response) {
+async function classifyResponse(response: Response, signal?: AbortSignal) {
   const retryAfter = retryAfterMs(response.headers.get("retry-after"))
   if (response.status === 401) {
     await response.body?.cancel().catch(() => undefined)
     return new SalesforceError("authentication_failed", false)
   }
   if (response.status === 403) {
-    const providerRateLimit = await hasErrorCode(response, "REQUEST_LIMIT_EXCEEDED")
+    const providerRateLimit = await hasErrorCode(response, "REQUEST_LIMIT_EXCEEDED", signal)
     return new SalesforceError(
       providerRateLimit || retryAfter !== null ? "rate_limited" : "authorization_failed",
       providerRateLimit || retryAfter !== null,
@@ -333,8 +378,8 @@ async function classifyResponse(response: Response) {
   return new SalesforceError("invalid_request", false)
 }
 
-async function hasErrorCode(response: Response, expected: string) {
-  const text = await readBoundedSalesforceResponse(response, 64_000)
+async function hasErrorCode(response: Response, expected: string, signal?: AbortSignal) {
+  const text = await readBoundedSalesforceResponse(response, 64_000, signal)
   try {
     const value = JSON.parse(text) as unknown
     return Array.isArray(value) && value.some(

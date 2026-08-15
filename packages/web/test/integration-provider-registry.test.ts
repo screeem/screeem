@@ -16,6 +16,7 @@ import {
   type IntegrationProviderReference,
 } from "../src/lib/integrations/provider-registry"
 import { snapshotSealedIntegrationCredential } from "../src/lib/integrations/stores"
+import { snapshotIntegrationType } from "@screeem/forms"
 
 const now = "2026-08-14T10:00:00.000Z"
 const teamOne = snapshotIntegrationIdentifier("72000000-0000-0000-0000-000000000001")
@@ -25,7 +26,13 @@ const providerName = snapshotIntegrationProviderName("example")
 const open = vi.fn(({ connection }) => ({ connectionId: connection.id }))
 
 function provider(enabled = true) {
-  return defineIntegrationProvider({ name: providerName, displayName: "Example", enabled, open })
+  return defineIntegrationProvider({
+    name: providerName,
+    type: snapshotIntegrationType("example"),
+    displayName: "Example",
+    enabled,
+    open,
+  })
 }
 
 describe("integration provider registry", () => {
@@ -131,7 +138,10 @@ describe("integration provider registry", () => {
     it("does not reread a hostile registration after snapshotting it", async () => {
       const definition = provider()
       const registry = createIntegrationProviderRegistry().register(definition)
-      const hostile = new Proxy({ name: providerName }, {
+      const hostile = new Proxy({
+        name: providerName,
+        type: snapshotIntegrationType("example"),
+      }, {
         get(target, property, receiver) {
           if (property === "name") throw new Error("secret from getter")
           return Reflect.get(target, property, receiver)

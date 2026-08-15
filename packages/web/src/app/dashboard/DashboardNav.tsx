@@ -7,6 +7,7 @@ const teamItems = [
   { href: "/dashboard/team", label: "Team settings" },
   { href: "/dashboard/calendar", label: "Calendar" },
   { href: "/dashboard/forms", label: "Forms" },
+  { href: "/dashboard/integrations", label: "Integrations" },
   { href: "/dashboard/api", label: "API" },
 ];
 

@@ -1,4 +1,8 @@
-import type { FormDefinition, SubmissionRoutingResult } from "./model.js"
+import type {
+  FormDefinition,
+  FormRoutingActionInputMapping,
+  SubmissionRoutingResult,
+} from "./model.js"
 import { snapshotFormDefinition } from "./definition.js"
 import { snapshotSubmissionRoutingResult } from "./routing-result.js"
 
@@ -6,7 +10,15 @@ export interface FormActionTestContext {
   readonly definition: FormDefinition
   readonly submission: Readonly<Record<string, string | number | boolean>>
   readonly routing: SubmissionRoutingResult
+  readonly action: FormActionTestOccurrence
   readonly signal: AbortSignal
+}
+
+export interface FormActionTestOccurrence {
+  readonly id: string
+  readonly use: string
+  readonly inputs: readonly FormRoutingActionInputMapping[]
+  readonly input: Readonly<Record<string, string | number | boolean>>
 }
 
 export interface FormActionTestDetail {
@@ -77,11 +89,78 @@ export function snapshotFormActionTestContext(
   signal: AbortSignal,
 ): FormActionTestContext {
   const context = requireRecord(input, "Action test context")
-  requireKeys(context, ["definition", "submission", "routing"])
+  requireKeys(context, ["definition", "submission", "routing", "action"])
   const definition = snapshotFormDefinition(readData(context, "definition"))
   const routing = snapshotSubmissionRoutingResult(readData(context, "routing"))
   const submission = snapshotSubmission(readData(context, "submission"))
-  return Object.freeze({ definition, submission, routing, signal })
+  const action = snapshotActionOccurrence(
+    readData(context, "action"),
+    definition,
+    submission,
+  )
+  return Object.freeze({ definition, submission, routing, action, signal })
+}
+
+function snapshotActionOccurrence(
+  input: unknown,
+  definition: FormDefinition,
+  submission: Readonly<Record<string, string | number | boolean>>,
+): FormActionTestOccurrence {
+  const action = requireRecord(input, "Action test occurrence")
+  requireKeys(action, ["id", "use", "inputs"], ["input"])
+  const id = readData(action, "id")
+  const use = readData(action, "use")
+  const rawInputs = readData(action, "inputs")
+  assertString(id, "Action test occurrence ID", 128)
+  assertString(use, "Action test occurrence name", 128)
+  if (!Array.isArray(rawInputs) || rawInputs.length > 32) {
+    throw new TypeError("Action test occurrence mappings are invalid")
+  }
+  const names = new Set<string>()
+  const inputs = rawInputs.map((rawInput) => {
+    const mapping = requireRecord(rawInput, "Action test occurrence mapping")
+    requireKeys(mapping, ["input", "fieldId"])
+    const inputName = readData(mapping, "input")
+    const fieldId = readData(mapping, "fieldId")
+    assertString(inputName, "Action test occurrence input", 128)
+    assertString(fieldId, "Action test occurrence field", 128)
+    if (names.has(inputName)) throw new TypeError("Action test occurrence inputs must be unique")
+    names.add(inputName)
+    return Object.freeze({ input: inputName, fieldId })
+  })
+  const evaluated: Record<string, string | number | boolean> = Object.create(null)
+  for (const mapping of inputs) {
+    const field = definition.fields.find((candidate) => candidate.id === mapping.fieldId)
+    if (!field || !Object.prototype.hasOwnProperty.call(submission, field.name)) {
+      throw new TypeError("Action test occurrence mapping is invalid")
+    }
+    evaluated[mapping.input] = submission[field.name]!
+  }
+  const safeInput = Object.freeze(evaluated)
+  const suppliedInput = readOptionalData(action, "input")
+  if (suppliedInput !== undefined) {
+    const supplied = snapshotSubmission(suppliedInput)
+    if (!scalarRecordsEqual(supplied, safeInput)) {
+      throw new TypeError("Action test occurrence input does not match its mappings")
+    }
+  }
+  return Object.freeze({
+    id,
+    use,
+    inputs: Object.freeze(inputs),
+    input: safeInput,
+  })
+}
+
+function scalarRecordsEqual(
+  left: Readonly<Record<string, string | number | boolean>>,
+  right: Readonly<Record<string, string | number | boolean>>,
+) {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  return leftKeys.length === rightKeys.length && leftKeys.every(
+    (key) => Object.prototype.hasOwnProperty.call(right, key) && left[key] === right[key],
+  )
 }
 
 export function snapshotFormActionTestResult(input: unknown): FormActionTestResult {

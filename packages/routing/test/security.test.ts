@@ -76,6 +76,35 @@ describe("untrusted expression security", () => {
     expect(() => createRouter({ limits })).toThrow(/Routing limit/)
   })
 
+  it("accepts namespaced actions and rejects unsafe namespace segments", () => {
+    expect(() =>
+      createRouter().registerAction({
+        name: "crm.upsertLead",
+        input: type.object({}),
+        run: () => Effect.succeed(undefined),
+      }),
+    ).not.toThrow()
+
+    expect(() =>
+      createRouter().registerPureFunction({
+        name: "crm.lookup",
+        input: [],
+        output: type.boolean(),
+        run: () => true,
+      }),
+    ).toThrow(/Invalid registration name/)
+
+    for (const name of ["crm..upsertLead", "crm.__proto__", "submission.notify"]) {
+      expect(() =>
+        createRouter().registerAction({
+          name,
+          input: type.object({}),
+          run: () => Effect.succeed(undefined),
+        }),
+      ).toThrow(/Invalid registration name/)
+    }
+  })
+
   it.each([
     ["zero", 0],
     ["fractional", 0.5],

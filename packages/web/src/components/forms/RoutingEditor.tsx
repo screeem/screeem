@@ -6,6 +6,7 @@ import {
   fallbackSubmissionRouting,
   matchedSubmissionRouting,
   maximumRoutingAuthoringRules,
+  maximumRoutingActionsPerRule,
   maximumRoutingConditionValueLength,
   maximumRoutingConditionsPerRule,
   routingOperatorsForField,
@@ -13,14 +14,17 @@ import {
   snapshotFormActionTestResult,
   snapshotFormActionTesters,
   testFormRouting,
+  snapshotIntegrationActionCatalog,
   type FormActionTester,
   type FormDefinition,
   type FormFieldDefinition,
   type FormRoutingAuthoring,
   type FormRoutingAuthoringIssue,
   type FormRoutingAuthoringRule,
+  type FormRoutingAuthoringAction,
   type FormRoutingCondition,
   type FormRoutingOperator,
+  type IntegrationActionDefinition,
 } from "@screeem/forms"
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { DraggableRule } from "./DraggableRule"
@@ -34,6 +38,7 @@ export interface RoutingEditorProps {
   readonly issues: readonly FormRoutingAuthoringIssue[]
   readonly disabled?: boolean
   readonly actionTesters?: readonly FormActionTester[]
+  readonly integrationActions?: readonly IntegrationActionDefinition[]
   readonly onAddRule: () => void
   readonly onUpdateRule: (ruleId: string, update: Partial<FormRoutingAuthoringRule>) => void
   readonly onRemoveRule: (ruleId: string) => void
@@ -57,6 +62,10 @@ export function RoutingEditor(props: RoutingEditorProps) {
   const actionTesters = useMemo(
     () => snapshotFormActionTesters(props.actionTesters ?? []),
     [props.actionTesters],
+  )
+  const integrationActions = useMemo(
+    () => snapshotIntegrationActionCatalog(props.integrationActions ?? []),
+    [props.integrationActions],
   )
   const actionTestersSignature = actionTesters
     .map((tester) =>
@@ -110,7 +119,12 @@ export function RoutingEditor(props: RoutingEditorProps) {
     const submittedSignature = evaluationSignature
     setTestState({ signature: submittedSignature, status: "running" })
     try {
-      const result = await testFormRouting(props.definition, props.draft, sample)
+      const result = await testFormRouting(
+        props.definition,
+        props.draft,
+        sample,
+        integrationActions,
+      )
       if (request !== testRequest.current) return
       setTestState({
         signature: submittedSignature,
@@ -204,6 +218,7 @@ export function RoutingEditor(props: RoutingEditorProps) {
                       canMoveDown={index < props.draft.rules.length - 1}
                       dragHandleRef={dragHandleRef}
                       routeSuggestions={routeSuggestions}
+                      integrationActions={integrationActions}
                       onUpdate={(update) => props.onUpdateRule(rule.id, update)}
                       onRemove={() => props.onRemoveRule(rule.id)}
                       onMove={(offset) => props.onReorderRule(rule.id, index + offset)}
@@ -275,6 +290,7 @@ function RoutingRuleEditor({
   canMoveDown,
   dragHandleRef,
   routeSuggestions,
+  integrationActions,
   onUpdate,
   onRemove,
   onMove,
@@ -290,6 +306,7 @@ function RoutingRuleEditor({
   readonly canMoveDown: boolean
   readonly dragHandleRef: RefObject<HTMLButtonElement | null>
   readonly routeSuggestions: readonly string[]
+  readonly integrationActions: readonly IntegrationActionDefinition[]
   readonly onUpdate: (update: Partial<FormRoutingAuthoringRule>) => void
   readonly onRemove: () => void
   readonly onMove: (offset: number) => void
@@ -406,8 +423,216 @@ function RoutingRuleEditor({
             : "+ Add condition"}
         </button>
       </div>
+      <RoutingActionEditor
+        definition={definition}
+        actions={rule.actions ?? []}
+        catalog={integrationActions}
+        issues={issues}
+        onChange={(actions) => onUpdate({ actions })}
+      />
     </article>
   )
+}
+
+function RoutingActionEditor({
+  definition,
+  actions,
+  catalog,
+  issues,
+  onChange,
+}: {
+  readonly definition: FormDefinition
+  readonly actions: readonly FormRoutingAuthoringAction[]
+  readonly catalog: readonly IntegrationActionDefinition[]
+  readonly issues: readonly FormRoutingAuthoringIssue[]
+  readonly onChange: (actions: readonly FormRoutingAuthoringAction[]) => void
+}) {
+  const [selectedUse, setSelectedUse] = useState(catalog[0]?.use ?? "")
+  const selected = catalog.find((action) => action.use === selectedUse) ?? catalog[0]
+
+  function addAction() {
+    if (!selected || actions.length >= maximumRoutingActionsPerRule) return
+    const inputs = selected.inputs.flatMap((input) => {
+      const field = suggestedField(definition, input)
+      if (!field) return []
+      return [Object.freeze({
+        input: input.name,
+        fieldId: field.id,
+      })]
+    })
+    let suffix = 1
+    while (actions.some((action) => action.id === `action-${suffix}`)) suffix += 1
+    onChange(Object.freeze([
+      ...actions,
+      Object.freeze({ id: `action-${suffix}`, use: selected.use, inputs: Object.freeze(inputs) }),
+    ]))
+  }
+
+  function updateAction(actionId: string, update: FormRoutingAuthoringAction) {
+    onChange(Object.freeze(actions.map((action) => action.id === actionId ? update : action)))
+  }
+
+  function moveAction(index: number, offset: number) {
+    const target = index + offset
+    if (target < 0 || target >= actions.length) return
+    const next = [...actions]
+    const [action] = next.splice(index, 1)
+    if (!action) return
+    next.splice(target, 0, action)
+    onChange(Object.freeze(next))
+  }
+
+  const canAdd = Boolean(selected) &&
+    actions.length < maximumRoutingActionsPerRule &&
+    selected!.inputs
+      .filter((input) => input.required)
+      .every((input) => suggestedField(definition, input))
+
+  return (
+    <div className="border-t border-gray-100 px-3 py-4 sm:px-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Actions</p>
+          <p className="mt-1 text-xs leading-5 text-gray-500">
+            Run durable integration actions after this rule matches.
+          </p>
+        </div>
+        {catalog.length > 0 ? (
+          <div className="flex items-center gap-2">
+            <select
+              aria-label="Integration action"
+              value={selected?.use ?? ""}
+              onChange={(event) => setSelectedUse(event.target.value)}
+              className="rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-800"
+            >
+              {catalog.map((action) => (
+                <option key={action.use} value={action.use}>{action.label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={!canAdd}
+              onClick={addAction}
+              title={!canAdd ? "Add compatible required form fields first" : undefined}
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50 disabled:text-gray-400"
+            >
+              + Add action
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-3 space-y-3">
+        {actions.map((action, index) => {
+          const actionDefinition = catalog.find((candidate) => candidate.use === action.use)
+          const actionIssues = issues.filter((issue) => issue.actionId === action.id)
+          return (
+            <div key={action.id} className={`rounded-lg border p-3 ${
+              actionIssues.length > 0 ? "border-amber-400 bg-amber-50" : "border-gray-200 bg-gray-50"
+            }`}>
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-gray-900">
+                    {actionDefinition?.label ?? action.use}
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {actionDefinition?.description ?? "This action is not available in the current catalog."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  onClick={() => moveAction(index, -1)}
+                  aria-label={`Move ${actionDefinition?.label ?? action.use} up`}
+                  className="rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-white disabled:opacity-25"
+                >↑</button>
+                <button
+                  type="button"
+                  disabled={index === actions.length - 1}
+                  onClick={() => moveAction(index, 1)}
+                  aria-label={`Move ${actionDefinition?.label ?? action.use} down`}
+                  className="rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-white disabled:opacity-25"
+                >↓</button>
+                <button
+                  type="button"
+                  onClick={() => onChange(Object.freeze(actions.filter((candidate) => candidate.id !== action.id)))}
+                  aria-label={`Remove ${actionDefinition?.label ?? action.use}`}
+                  className="rounded px-2 py-1 text-sm text-gray-400 hover:bg-red-50 hover:text-red-600"
+                >×</button>
+              </div>
+              {actionDefinition ? (
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {actionDefinition.inputs.map((input) => {
+                    const mapping = action.inputs.find((candidate) => candidate.input === input.name)
+                    const currentFieldId = mapping?.fieldId ?? ""
+                    const compatible = compatibleFields(definition, input)
+                    return (
+                      <label key={input.name} className="text-xs font-medium text-gray-600">
+                        {input.label}
+                        <select
+                          value={currentFieldId}
+                          onChange={(event) => {
+                            const nextMapping = Object.freeze({
+                              input: input.name,
+                              fieldId: event.target.value,
+                            })
+                            updateAction(action.id, Object.freeze({
+                              ...action,
+                              inputs: Object.freeze(mapping
+                                ? action.inputs.map((candidate) =>
+                                    candidate.input === input.name ? nextMapping : candidate,
+                                  )
+                                : [...action.inputs, nextMapping]),
+                            }))
+                          }}
+                          className="mt-1 w-full rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-900"
+                        >
+                          {!compatible.some((field) => field.id === currentFieldId) ? (
+                            <option value="">Choose a field</option>
+                          ) : null}
+                          {compatible.map((field) => (
+                            <option key={field.id} value={field.id}>{field.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )
+                  })}
+                </div>
+              ) : null}
+              {actionIssues[0] ? (
+                <p className="mt-2 text-xs font-medium text-amber-800">{actionIssues[0].message}</p>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function compatibleFields(
+  definition: FormDefinition,
+  input: IntegrationActionDefinition["inputs"][number],
+) {
+  return definition.fields.filter((field) =>
+    input.fieldTypes.includes(field.type) &&
+    (!input.fieldControls || input.fieldControls.includes(field.control)) &&
+    (!input.required || field.required),
+  )
+}
+
+function suggestedField(
+  definition: FormDefinition,
+  input: IntegrationActionDefinition["inputs"][number],
+) {
+  const fields = compatibleFields(definition, input)
+  return fields.find((field) =>
+    input.suggestedFieldNames.some((name) => normalizeName(name) === normalizeName(field.name)),
+  ) ?? fields[0]
+}
+
+function normalizeName(input: string) {
+  return input.toLowerCase().replace(/[^a-z0-9]/g, "")
 }
 
 function RoutingConditionEditor({
@@ -607,6 +832,12 @@ function RoutingTestPanel({
   readonly onRun: () => void
 }) {
   const matchedRuleIndex = rules.findIndex((rule) => rule.id === testState.matchedRule)
+  const matchedActions = matchedRuleIndex < 0 ? [] : rules[matchedRuleIndex]?.actions ?? []
+  const previews = matchedActions.flatMap((action) =>
+    actionTesters
+      .filter((tester) => tester.actionName === action.use)
+      .map((tester) => ({ action, tester })),
+  )
 
   return (
     <aside className="border-t border-gray-200 bg-white px-5 py-6 xl:border-l xl:border-t-0">
@@ -649,14 +880,14 @@ function RoutingTestPanel({
             </p>
           </div>
         ) : null}
-        {testState.status === "complete" && actionTesters.length > 0 ? (
+        {testState.status === "complete" && previews.length > 0 ? (
           <ActionTestPanel
             key={`${evaluationSignature}:${actionTestersSignature}`}
             definition={definition}
             sample={sample}
             route={testState.route!}
             matchedRule={testState.matchedRule ?? null}
-            testers={actionTesters}
+            previews={previews}
           />
         ) : null}
         {testState.status === "error" ? (
@@ -677,31 +908,31 @@ function ActionTestPanel({
   sample,
   route,
   matchedRule,
-  testers,
+  previews,
 }: {
   readonly definition: FormDefinition
   readonly sample: Readonly<Record<string, string | number | boolean>>
   readonly route: string
   readonly matchedRule: string | null
-  readonly testers: readonly FormActionTester[]
+  readonly previews: readonly ActionPreview[]
 }) {
   const request = useRef(0)
   const controller = useRef<AbortController | null>(null)
   const [state, setState] = useState<{
-    readonly actionName: string
+    readonly actionId: string
     readonly tester?: FormActionTester["test"]
     readonly status: "idle" | "running" | "complete" | "error"
     readonly summary?: string
     readonly resultStatus?: "success" | "warning"
     readonly details?: readonly { readonly label: string; readonly value: string }[]
-  }>({ actionName: "", status: "idle" })
+  }>({ actionId: "", status: "idle" })
   const currentState =
     state.tester === undefined ||
-    testers.some(
-      (tester) => tester.actionName === state.actionName && tester.test === state.tester,
+    previews.some(
+      ({ action, tester }) => action.id === state.actionId && tester.test === state.tester,
     )
       ? state
-      : { actionName: "", status: "idle" as const }
+      : { actionId: "", status: "idle" as const }
 
   useEffect(
     () => () => {
@@ -711,18 +942,27 @@ function ActionTestPanel({
     [],
   )
 
-  async function testAction(tester: FormActionTester) {
+  async function testAction({ action, tester }: ActionPreview) {
     const currentRequest = ++request.current
     controller.current?.abort()
     const currentController = new AbortController()
     controller.current = currentController
-    setState({ actionName: tester.actionName, tester: tester.test, status: "running" })
+    setState({ actionId: action.id, tester: tester.test, status: "running" })
     try {
       const routing = matchedRule
         ? matchedSubmissionRouting(route, matchedRule)
         : fallbackSubmissionRouting(route)
       const context = snapshotFormActionTestContext(
-        { definition, submission: sample, routing },
+        {
+          definition,
+          submission: sample,
+          routing,
+          action: {
+            id: action.id,
+            use: action.use,
+            inputs: action.inputs,
+          },
+        },
         currentController.signal,
       )
       const result = snapshotFormActionTestResult(
@@ -730,7 +970,7 @@ function ActionTestPanel({
       )
       if (currentRequest !== request.current) return
       setState({
-        actionName: tester.actionName,
+        actionId: action.id,
         tester: tester.test,
         status: "complete",
         summary: result.summary,
@@ -740,7 +980,7 @@ function ActionTestPanel({
     } catch (error) {
       if (currentRequest !== request.current) return
       setState({
-        actionName: tester.actionName,
+        actionId: action.id,
         tester: tester.test,
         status: "error",
         summary: error instanceof Error ? error.message : "The action test could not be completed.",
@@ -756,19 +996,20 @@ function ActionTestPanel({
         Action previews
       </p>
       <p className="mt-1 text-xs leading-5 text-gray-500">
-        Preview available integrations. This does not add an action or queue durable work. A remote
-        tester may receive the sample values.
+        Preview actions configured on the matched rule. Nothing is created or queued. A remote
+        preview may receive the mapped sample values.
       </p>
       <div className="mt-2 space-y-2">
-        {testers.map((tester) => {
+        {previews.map((preview) => {
+          const { action, tester } = preview
           const running =
-            currentState.status === "running" && currentState.actionName === tester.actionName
+            currentState.status === "running" && currentState.actionId === action.id
           return (
             <button
-              key={tester.actionName}
+              key={action.id}
               type="button"
               disabled={currentState.status === "running"}
-              onClick={() => void testAction(tester)}
+              onClick={() => void testAction(preview)}
               className="w-full rounded-md border border-gray-200 bg-white px-3 py-2.5 text-left transition-colors hover:border-teal-500 hover:bg-teal-50 disabled:opacity-50"
             >
               <span className="block text-sm font-semibold text-gray-900">
@@ -818,6 +1059,11 @@ function ActionTestPanel({
       ) : null}
     </div>
   )
+}
+
+interface ActionPreview {
+  readonly action: FormRoutingAuthoringAction
+  readonly tester: FormActionTester
 }
 
 function actionTesterFunctionId(test: FormActionTester["test"]): number {

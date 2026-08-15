@@ -12,6 +12,7 @@ import { salesforceProviderName } from "./contract"
 import type { SalesforceOAuthClient } from "./oauth"
 import type { SalesforceRefreshLeaseStore } from "./stores"
 import { RefreshingSalesforceAccessTokenProvider } from "./token-provider"
+import { crmIntegrationType } from "../crm/contract"
 
 export interface SalesforceProviderDependencies {
   readonly enabled: boolean
@@ -23,11 +24,13 @@ export interface SalesforceProviderDependencies {
   readonly leases: SalesforceRefreshLeaseStore
   readonly fetcher?: typeof fetch
   readonly observeLimits?: SalesforceApiLimitObserver
+  readonly leadExternalIdField?: string
 }
 
 export function createSalesforceProviderDefinition(dependencies: SalesforceProviderDependencies) {
   return defineIntegrationProvider({
     name: salesforceProviderName,
+    type: crmIntegrationType,
     displayName: "Salesforce",
     enabled: dependencies.enabled,
     open: async ({ connection, credential, signal }) => {
@@ -47,6 +50,7 @@ export function createSalesforceProviderDefinition(dependencies: SalesforceProvi
         (token, signal) => dependencies.oauth.revoke(token, signal),
         dependencies.fetcher,
         dependencies.observeLimits,
+        dependencies.leadExternalIdField,
       )
     },
   })

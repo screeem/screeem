@@ -39,6 +39,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { DraggableField } from "../../../../components/forms/DraggableField"
 import { RespondentForm } from "../../../../components/forms/RespondentForm"
 import { RoutingEditor } from "../../../../components/forms/RoutingEditor"
+import { formIntegrationActions } from "../../../../lib/integrations/action-catalog"
+import { createSalesforceLeadActionTester } from "../../../../lib/integrations/salesforce/action-preview"
 
 type EditorView = "build" | "routing" | "preview"
 type EditorIssue = FormIssue | FormRoutingIssue
@@ -157,7 +159,11 @@ export function FormEditor({
         setBuilder(createBuilderState(draft.definition as FormDefinition, draft.revision))
         const routingNeedsRepair =
           draft.routing?.authoring !== undefined &&
-          !routingAuthoringMatchesDefinition(draft.definition, draft.routing)
+          !routingAuthoringMatchesDefinition(
+            draft.definition,
+            draft.routing,
+            formIntegrationActions,
+          )
         if (draft.routing?.authoring && !routingNeedsRepair) {
           setRouting(draft.routing.authoring)
           setRoutingConfigured(true)
@@ -194,9 +200,13 @@ export function FormEditor({
   const generatedRouting = useMemo(
     () =>
       builder && routingConfigured
-        ? generateFormRoutingDefinition(builder.definition, routing)
+        ? generateFormRoutingDefinition(builder.definition, routing, formIntegrationActions)
         : null,
     [builder, routing, routingConfigured],
+  )
+  const actionTesters = useMemo(
+    () => Object.freeze([createSalesforceLeadActionTester(teamId, formId)]),
+    [teamId, formId],
   )
   const routingIssues: readonly FormRoutingAuthoringIssue[] =
     generatedRouting && !generatedRouting.ok ? generatedRouting.issues : []
@@ -430,9 +440,13 @@ export function FormEditor({
     const submittedDefinition = builder.definition
     const submittedRoutingEditVersion = routingEditVersion.current
     if (routingConfigured) {
-      const generated = generateFormRoutingDefinition(builder.definition, routing)
+      const generated = generateFormRoutingDefinition(
+        builder.definition,
+        routing,
+        formIntegrationActions,
+      )
       if (!generated.ok) {
-        setError("Fix the routing rules before saving this draft")
+        setError("Fix the routing rules and actions before saving this draft")
         setIssues(generated.issues)
         setView("routing")
         return null
@@ -867,6 +881,8 @@ export function FormEditor({
             draft={routing}
             issues={routingIssues}
             disabled={busy !== null}
+            actionTesters={actionTesters}
+            integrationActions={formIntegrationActions}
             onAddRule={addRoutingRule}
             onUpdateRule={updateRoutingRule}
             onRemoveRule={removeRoutingRule}

@@ -1,8 +1,12 @@
-import { maximumFormRoutingBytes, type FormRoutingDefinition } from "@screeem/forms"
+import {
+  maximumFormRoutingBytes,
+  snapshotFormRoutingDefinition,
+  type FormRoutingDefinition,
+} from "@screeem/forms"
 import { NextRequest, NextResponse } from "next/server"
 import { authorizeFormTeam } from "@/lib/forms/authorization"
 import { formErrorResponse } from "@/lib/forms/http"
-import { createFormDefinitionStore } from "@/lib/forms/server"
+import { assertFormRoutingAuthoring, createFormDefinitionStore } from "@/lib/forms/server"
 
 type Context = { params: Promise<{ teamId: string; formId: string }> }
 // Allow a small envelope around the shared encoded-routing budget.
@@ -33,10 +37,17 @@ export async function PUT(request: NextRequest, context: Context) {
 
   try {
     const store = createFormDefinitionStore(teamId)
+    const routing = body.routing === null || body.routing === undefined
+      ? null
+      : snapshotFormRoutingDefinition(body.routing)
+    if (routing?.authoring) {
+      const current = await store.getDraft(formId)
+      assertFormRoutingAuthoring(current.definition, routing)
+    }
     const draft = await store.saveRoutingDraft(
       formId,
       body.expectedRevision!,
-      body.routing ?? null,
+      routing,
     )
     return NextResponse.json({ draft })
   } catch (storeError) {

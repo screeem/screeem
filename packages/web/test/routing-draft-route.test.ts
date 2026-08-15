@@ -10,6 +10,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   authorizeFormTeam: vi.fn(),
+  assertFormRoutingAuthoring: vi.fn(),
+  getDraft: vi.fn(),
   saveRoutingDraft: vi.fn(),
 }))
 
@@ -18,7 +20,11 @@ vi.mock("@/lib/forms/authorization", () => ({
 }))
 
 vi.mock("@/lib/forms/server", () => ({
-  createFormDefinitionStore: () => ({ saveRoutingDraft: mocks.saveRoutingDraft }),
+  assertFormRoutingAuthoring: mocks.assertFormRoutingAuthoring,
+  createFormDefinitionStore: () => ({
+    getDraft: mocks.getDraft,
+    saveRoutingDraft: mocks.saveRoutingDraft,
+  }),
 }))
 
 vi.mock("server-only", () => ({}))
@@ -39,6 +45,17 @@ const routing = {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.authorizeFormTeam.mockResolvedValue({ error: null })
+  mocks.getDraft.mockResolvedValue({
+    revision: 2,
+    definition: {
+      formatVersion: 1,
+      title: "Qualification",
+      submitLabel: "Submit",
+      successMessage: "Thanks",
+      fields: [],
+    },
+    routing: null,
+  })
   mocks.saveRoutingDraft.mockResolvedValue({
     formId: "form-one",
     revision: 3,
@@ -88,6 +105,87 @@ describe("routing draft API", () => {
     await expect(response.json()).resolves.toMatchObject({
       issues: [{ code: "routing_expression_limit" }],
     })
+  })
+
+  it("validates visual authoring against the current form before saving", async () => {
+    const definition: FormDefinition = {
+      formatVersion: 1,
+      title: "Qualification",
+      submitLabel: "Submit",
+      successMessage: "Thanks",
+      fields: [{
+        id: "employees",
+        name: "employees",
+        label: "Employees",
+        required: true,
+        type: "number",
+        control: "number",
+      }],
+    }
+    const generated = generateFormRoutingDefinition(definition, {
+      version: 1,
+      rules: [{
+        id: "enterprise",
+        combinator: "all",
+        conditions: [{
+          id: "employees-condition",
+          fieldId: "employees",
+          operator: "greater_than_or_equal",
+          value: 500,
+        }],
+        route: "sales",
+      }],
+      fallback: "review",
+    })
+    if (!generated.ok) throw new Error("Expected visual routing")
+    mocks.getDraft.mockResolvedValueOnce({ revision: 2, definition, routing: null })
+
+    const response = await PUT(
+      request({ expectedRevision: 2, routing: generated.routing }),
+      context,
+    )
+
+    expect(response.status).toBe(200)
+    expect(mocks.getDraft).toHaveBeenCalledWith("form-one")
+    expect(mocks.assertFormRoutingAuthoring).toHaveBeenCalledWith(
+      definition,
+      generated.routing,
+    )
+  })
+
+  it("does not persist a visual runtime that fails authoritative regeneration", async () => {
+    mocks.assertFormRoutingAuthoring.mockImplementationOnce(() => {
+      throw new InvalidFormRoutingError([{
+        code: "routing_authoring_mismatch",
+        message: "Visual actions do not match runtime actions",
+      }])
+    })
+    const authoringRouting = {
+      ...routing,
+      authoring: {
+        version: 1 as const,
+        rules: [{
+          id: "enterprise",
+          combinator: "all" as const,
+          conditions: [{
+            id: "employees-condition",
+            fieldId: "employees",
+            operator: "greater_than_or_equal" as const,
+            value: 500,
+          }],
+          route: "sales",
+        }],
+        fallback: "self-serve",
+      },
+    }
+
+    const response = await PUT(
+      request({ expectedRevision: 2, routing: authoringRouting }),
+      context,
+    )
+
+    expect(response.status).toBe(400)
+    expect(mocks.saveRoutingDraft).not.toHaveBeenCalled()
   })
 
   it("maps stale shared revisions to a 409 response", async () => {

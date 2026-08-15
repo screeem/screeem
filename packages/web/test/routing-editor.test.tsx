@@ -22,7 +22,11 @@ vi.mock("@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge", () => ({
 }))
 
 import { RoutingEditor } from "../src/components/forms/RoutingEditor"
-import type { FormActionTester } from "@screeem/forms"
+import {
+  defineIntegrationAction,
+  snapshotIntegrationType,
+  type FormActionTester,
+} from "@screeem/forms"
 
 afterEach(() => {
   cleanup()
@@ -30,6 +34,47 @@ afterEach(() => {
 })
 
 describe("RoutingEditor", () => {
+  it("adds a catalog action with deterministic compatible field mappings", async () => {
+    const onUpdateRule = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <RoutingEditor
+        definition={definition}
+        draft={{
+          ...routing,
+          rules: routing.rules.map(({ actions: _actions, ...rule }) => rule),
+        }}
+        issues={[]}
+        integrationActions={[notifyAction]}
+        onAddRule={vi.fn()}
+        onUpdateRule={onUpdateRule}
+        onRemoveRule={vi.fn()}
+        onReorderRule={vi.fn()}
+        onAddCondition={vi.fn()}
+        onUpdateCondition={vi.fn()}
+        onRemoveCondition={vi.fn()}
+        onFallbackChange={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole("button", { name: /Add action/ }))
+
+    expect(onUpdateRule).toHaveBeenCalledWith("enterprise", {
+      actions: [
+        {
+          id: "action-1",
+          use: "notifier.notify",
+          inputs: [
+            {
+              input: "employees",
+              fieldId: "employees",
+            },
+          ],
+        },
+      ],
+    })
+  })
+
   it("keeps a required number included while its value is being replaced", async () => {
     mocks.testFormRouting.mockResolvedValueOnce({ route: "sales", matchedRule: null, actions: [] })
     const user = userEvent.setup()
@@ -44,7 +89,12 @@ describe("RoutingEditor", () => {
     await user.type(employees, "850")
     await user.click(screen.getByRole("button", { name: "Test this response" }))
 
-    expect(mocks.testFormRouting).toHaveBeenCalledWith(definition, routing, { employees: 850 })
+    expect(mocks.testFormRouting).toHaveBeenCalledWith(
+      definition,
+      routing,
+      { employees: 850 },
+      [notifyAction],
+    )
   })
 
   it("does not show a late result for a sample that has since changed", async () => {
@@ -55,7 +105,12 @@ describe("RoutingEditor", () => {
     renderEditor()
 
     await user.click(screen.getByRole("button", { name: "Test this response" }))
-    expect(mocks.testFormRouting).toHaveBeenCalledWith(definition, routing, { employees: 1 })
+    expect(mocks.testFormRouting).toHaveBeenCalledWith(
+      definition,
+      routing,
+      { employees: 1 },
+      [notifyAction],
+    )
     fireEvent.change(screen.getByRole("spinbutton", { name: "Employees" }), {
       target: { value: "850" },
     })
@@ -102,7 +157,7 @@ describe("RoutingEditor", () => {
       actions: [],
     })
     const tester: FormActionTester = {
-      actionName: "notifySales",
+      actionName: "notifier.notify",
       label: "Notify sales",
       description: "Preview the notification.",
       test: vi.fn().mockResolvedValue({
@@ -126,6 +181,12 @@ describe("RoutingEditor", () => {
         matchedRule: "enterprise",
         error: null,
       },
+      action: {
+        id: "action-1",
+        use: "notifier.notify",
+        inputs: [{ input: "employees", fieldId: "employees" }],
+        input: { employees: 1 },
+      },
       signal: expect.any(AbortSignal),
     }))
     expect(screen.getByText("Notification preview ready — nothing was sent.")).toBeTruthy()
@@ -133,9 +194,13 @@ describe("RoutingEditor", () => {
   })
 
   it("rejects malformed tester responses at the UI boundary", async () => {
-    mocks.testFormRouting.mockResolvedValueOnce({ route: "review", matchedRule: null, actions: [] })
+    mocks.testFormRouting.mockResolvedValueOnce({
+      route: "sales",
+      matchedRule: "enterprise",
+      actions: [],
+    })
     const tester: FormActionTester = {
-      actionName: "notifySales",
+      actionName: "notifier.notify",
       label: "Notify sales",
       test: vi.fn().mockResolvedValue({ status: "success", summary: "" }),
     }
@@ -156,7 +221,7 @@ describe("RoutingEditor", () => {
     })
     const pending = deferredActionResult()
     const tester: FormActionTester = {
-      actionName: "notifySales",
+      actionName: "notifier.notify",
       label: "Notify sales",
       test: vi.fn().mockReturnValue(pending.promise),
     }
@@ -177,10 +242,14 @@ describe("RoutingEditor", () => {
   })
 
   it("times out a tester and aborts its signal", async () => {
-    mocks.testFormRouting.mockResolvedValue({ route: "review", matchedRule: null, actions: [] })
+    mocks.testFormRouting.mockResolvedValue({
+      route: "sales",
+      matchedRule: "enterprise",
+      actions: [],
+    })
     let signal: AbortSignal | undefined
     const tester: FormActionTester = {
-      actionName: "notifySales",
+      actionName: "notifier.notify",
       label: "Notify sales",
       timeoutMs: 1,
       test: vi.fn((context) => {
@@ -199,10 +268,14 @@ describe("RoutingEditor", () => {
   })
 
   it("keeps an in-flight preview alive across an equivalent tester-list rerender", async () => {
-    mocks.testFormRouting.mockResolvedValue({ route: "review", matchedRule: null, actions: [] })
+    mocks.testFormRouting.mockResolvedValue({
+      route: "sales",
+      matchedRule: "enterprise",
+      actions: [],
+    })
     const pending = deferredActionResult()
     const tester: FormActionTester = {
-      actionName: "notifySales",
+      actionName: "notifier.notify",
       label: "Notify sales",
       test: vi.fn().mockReturnValue(pending.promise),
     }
@@ -231,6 +304,7 @@ function editor(actionTesters: readonly FormActionTester[]) {
       draft={routing}
       issues={[]}
       actionTesters={actionTesters}
+      integrationActions={[notifyAction]}
       onAddRule={vi.fn()}
       onUpdateRule={vi.fn()}
       onRemoveRule={vi.fn()}
@@ -275,10 +349,40 @@ const routing = {
         },
       ],
       route: "sales",
+      actions: [
+        {
+          id: "action-1",
+          use: "notifier.notify",
+          inputs: [
+            {
+              input: "employees",
+              fieldId: "employees",
+            },
+          ],
+        },
+      ],
     },
   ],
   fallback: "review",
 } as const
+
+const notifyAction = defineIntegrationAction({
+  use: "notifier.notify",
+  integrationType: snapshotIntegrationType("notifier"),
+  capability: "notify",
+  label: "Notify sales",
+  description: "Send the matched submission to sales.",
+  inputs: [
+    {
+      name: "employees",
+      label: "Employees",
+      required: true,
+      fieldTypes: ["number"],
+      fieldControls: ["number"],
+      suggestedFieldNames: ["employees"],
+    },
+  ],
+})
 
 function deferredResult() {
   let resolve!: (value: { route: string; matchedRule: null; actions: never[] }) => void
