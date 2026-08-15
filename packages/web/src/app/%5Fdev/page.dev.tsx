@@ -38,6 +38,25 @@ export default function DevelopmentPlaygroundPage() {
             </span>
           </span>
         </Link>
+        <Link
+          href="/_dev/integrations"
+          className="group grid gap-5 border-b border-gray-200 py-6 transition-colors hover:bg-white sm:grid-cols-[1fr_auto] sm:items-center sm:px-5"
+        >
+          <span className="space-y-1">
+            <span className="block text-base font-semibold text-gray-950">
+              Integration management
+            </span>
+            <span className="block max-w-xl text-sm leading-6 text-gray-600">
+              Review Salesforce connection, recovery, and provider-status states without external calls.
+            </span>
+          </span>
+          <span className="inline-flex items-center gap-2 text-sm font-medium text-teal-600">
+            Open playground
+            <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">
+              →
+            </span>
+          </span>
+        </Link>
       </section>
     </div>
   )

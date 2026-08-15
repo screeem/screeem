@@ -201,12 +201,22 @@ describe("Salesforce integration contracts", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify({
         name: "Lead",
         label: "Lead",
-        fields: [],
+        fields: [{
+          name: "Source_Id__c",
+          label: "Source ID",
+          type: "string",
+          createable: true,
+          updateable: true,
+          nillable: false,
+          externalId: true,
+          unique: true,
+        }],
       }), { headers: { "Sforce-Limit-Info": "api-usage=25/100" } })),
       observer,
     )
 
-    await client.describeObject("Lead")
+    const description = await client.describeObject("Lead")
+    expect(description.fields[0]).toMatchObject({ externalId: true, unique: true })
     expect(observer).toHaveBeenCalledWith({ remaining: 75, maximum: 100 })
   })
 
@@ -214,9 +224,7 @@ describe("Salesforce integration contracts", () => {
     const fake = new FakeSalesforceClient()
     const aborted = new AbortController()
     aborted.abort()
-    await expect(fake.identity(aborted.signal)).rejects.toMatchObject({
-      code: "provider_unavailable",
-    })
+    await expect(fake.identity(aborted.signal)).rejects.toMatchObject({ name: "AbortError" })
     await expect(fake.describeObject("bad-object!")).rejects.toMatchObject({
       code: "invalid_request",
     })
@@ -243,6 +251,28 @@ describe("Salesforce integration contracts", () => {
       code: "invalid_request",
     })
     expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it("preserves cancellation instead of classifying it as a provider outage", async () => {
+    const controller = new AbortController()
+    const fetcher = vi.fn().mockImplementation(
+      (_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener(
+          "abort",
+          () => reject(init.signal?.reason),
+          { once: true },
+        )
+      }),
+    )
+    const client = new SalesforceHttpClient({
+      get: vi.fn().mockResolvedValue(accessCredential("access", "refresh")),
+      refresh: vi.fn(),
+    }, vi.fn(), fetcher)
+
+    const pending = client.identity(controller.signal)
+    controller.abort(new DOMException("Cancelled", "AbortError"))
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
   })
 
   it("cancels an oversized chunked OAuth response before buffering it all", async () => {

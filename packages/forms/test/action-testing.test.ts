@@ -31,6 +31,12 @@ describe("form action testing", () => {
         definition,
         submission: { email: "person@example.com" },
         routing: fallbackSubmissionRouting("sales"),
+        action: {
+          id: "action-1",
+          use: "crm.upsertLead",
+          inputs: [{ input: "email", fieldId: "email" }],
+          input: { email: "person@example.com" },
+        },
       },
       controller.signal,
     )
@@ -44,6 +50,12 @@ describe("form action testing", () => {
       definition,
       submission: { email: "person@example.com" },
       routing: fallbackSubmissionRouting("sales"),
+      action: {
+        id: "action-1",
+        use: "crm.upsertLead",
+        inputs: [{ input: "email", fieldId: "email" }],
+        input: { email: "person@example.com" },
+      },
       signal: controller.signal,
     })
     expect(Object.isFrozen(context.submission)).toBe(true)

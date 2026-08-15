@@ -12,6 +12,10 @@ import type {
 import { snapshotFormRoutingAuthoring } from "./routing-authoring-contract.js"
 import { snapshotFormRoutingDefinition } from "./routing.js"
 import { normalizeSubmission } from "./submission.js"
+import {
+  snapshotIntegrationActionCatalog,
+  type IntegrationActionDefinition,
+} from "./integration-actions.js"
 
 export interface FormRoutingOperatorOption {
   readonly value: FormRoutingOperator
@@ -64,9 +68,10 @@ export function createEmptyRoutingAuthoring(fallback = "default"): FormRoutingAu
 export function routingAuthoringMatchesDefinition(
   form: FormDefinition,
   routing: FormRoutingDefinition,
+  integrationActions: readonly IntegrationActionDefinition[] = [],
 ): boolean {
   if (!routing.authoring) return false
-  const generated = generateFormRoutingDefinition(form, routing.authoring)
+  const generated = generateFormRoutingDefinition(form, routing.authoring, integrationActions)
   if (!generated.ok || generated.routing.fallback !== routing.fallback) return false
   if (generated.routing.rules.length !== routing.rules.length) return false
 
@@ -76,7 +81,7 @@ export function routingAuthoringMatchesDefinition(
       actual?.id === expected.id &&
       actual.when === expected.when &&
       actual.route === expected.route &&
-      (actual.actions?.length ?? 0) === 0
+      runtimeActionsMatch(actual.actions, expected.actions)
     )
   })
 }
@@ -85,6 +90,7 @@ export function routingAuthoringMatchesDefinition(
 export function generateFormRoutingDefinition(
   form: FormDefinition,
   draft: FormRoutingAuthoring,
+  integrationActions: readonly IntegrationActionDefinition[] = [],
 ):
   | { readonly ok: true; readonly routing: FormRoutingDefinition }
   | { readonly ok: false; readonly issues: readonly FormRoutingAuthoringIssue[] } {
@@ -99,6 +105,9 @@ export function generateFormRoutingDefinition(
   }
 
   const fields = new Map(form.fields.map((field) => [field.id, field]))
+  const actionCatalog = new Map(
+    snapshotIntegrationActionCatalog(integrationActions).map((action) => [action.use, action]),
+  )
   const issues: FormRoutingAuthoringIssue[] = []
   const ruleIds = new Set<string>()
   const rules = source.rules.map((rule) => {
@@ -176,10 +185,91 @@ export function generateFormRoutingDefinition(
     })
 
     const joiner = rule.combinator === "all" ? " && " : " || "
+    const actions = (rule.actions ?? []).map((action) => {
+      const actionDefinition = actionCatalog.get(action.use)
+      if (!actionDefinition) {
+        issues.push({
+          code: "unknown_integration_action",
+          message: "This integration action is not available.",
+          ruleId: rule.id,
+          actionId: action.id,
+        })
+      }
+      if (!action.use.trim()) {
+        issues.push({
+          code: "missing_action",
+          message: "Choose an action.",
+          ruleId: rule.id,
+          actionId: action.id,
+        })
+      }
+      if (actionDefinition) {
+        for (const input of actionDefinition.inputs) {
+          const mapping = action.inputs.find((candidate) => candidate.input === input.name)
+          if (!mapping && input.required) {
+            issues.push({
+              code: "missing_action_input",
+              message: `Choose a form field for ${input.label}.`,
+              ruleId: rule.id,
+              actionId: action.id,
+              inputName: input.name,
+            })
+            continue
+          }
+          if (mapping) {
+            const field = fields.get(mapping.fieldId)
+            if (
+              field &&
+              (!input.fieldTypes.includes(field.type) ||
+                (input.fieldControls && !input.fieldControls.includes(field.control)) ||
+                (input.required && !field.required))
+            ) {
+              issues.push({
+                code: "incompatible_action_field",
+                message: `${field.label} is not compatible with ${input.label}.`,
+                ruleId: rule.id,
+                actionId: action.id,
+                inputName: input.name,
+              })
+            }
+          }
+        }
+        for (const mapping of action.inputs) {
+          if (!actionDefinition.inputs.some((input) => input.name === mapping.input)) {
+            issues.push({
+              code: "unexpected_action_input",
+              message: `${mapping.input} is not accepted by this action.`,
+              ruleId: rule.id,
+              actionId: action.id,
+              inputName: mapping.input,
+            })
+          }
+        }
+      }
+      const inputs = action.inputs.map((input) => {
+        const field = fields.get(input.fieldId)
+        if (!field) {
+          issues.push({
+            code: "missing_action_field",
+            message: `Choose a form field for ${input.input}.`,
+            ruleId: rule.id,
+            actionId: action.id,
+            inputName: input.input,
+          })
+          return `${JSON.stringify(input.input)}: undefined`
+        }
+        return `${JSON.stringify(input.input)}: submission.${field.name}`
+      })
+      return Object.freeze({
+        use: actionDefinition?.runtimeUse ?? action.use.trim(),
+        ...(inputs.length === 0 ? {} : { with: `({ ${inputs.join(", ")} })` }),
+      })
+    })
     return Object.freeze({
       id: rule.id,
       when: expressions.map((expression) => `(${expression})`).join(joiner) || "false",
       route: rule.route.trim(),
+      ...(actions.length === 0 ? {} : { actions: Object.freeze(actions) }),
     })
   })
 
@@ -209,12 +299,25 @@ export function generateFormRoutingDefinition(
   }
 }
 
+function runtimeActionsMatch(
+  actual: FormRoutingDefinition["rules"][number]["actions"],
+  expected: FormRoutingDefinition["rules"][number]["actions"],
+) {
+  const left = actual ?? []
+  const right = expected ?? []
+  return left.length === right.length && left.every((action, index) => {
+    const other = right[index]
+    return other !== undefined && action.use === other.use && action.with === other.with
+  })
+}
+
 export async function testFormRouting(
   form: FormDefinition,
   draft: FormRoutingAuthoring,
   submission: Readonly<Record<string, string | number | boolean>>,
+  integrationActions: readonly IntegrationActionDefinition[] = [],
 ): Promise<RoutingResult> {
-  const generated = generateFormRoutingDefinition(form, draft)
+  const generated = generateFormRoutingDefinition(form, draft, integrationActions)
   if (!generated.ok) {
     throw new InvalidFormRoutingError(generated.issues)
   }
@@ -222,7 +325,7 @@ export async function testFormRouting(
   const compiled = await createRouter().compile({
     version: 1,
     schema: schemaFromForm(form),
-    rules: generated.routing.rules,
+    rules: generated.routing.rules.map(({ id, when, route }) => ({ id, when, route })),
     fallback: generated.routing.fallback,
   })
   return (compiled as unknown as { run(input: object): Promise<RoutingResult> }).run(normalized)

@@ -1,5 +1,6 @@
 import {
   matchedSubmissionRouting,
+  snapshotIntegrationType,
   type FormDefinition,
   type FormRoutingDefinition,
 } from "@screeem/forms"
@@ -17,6 +18,9 @@ import type {
   IntegrationAutomationAccess,
   IntegrationAutomationRuntime,
 } from "../src/lib/integrations/automation-runtime"
+import { IntegrationOperationError } from "../src/lib/integrations/action-contract"
+import { createCrmUpsertLeadAction } from "../src/lib/integrations/crm/action"
+import { crmUpsertLeadActionName } from "../src/lib/integrations/crm/contract"
 import { snapshotIntegrationProviderName } from "../src/lib/integrations/contract"
 import {
   createIntegrationProviderRegistry,
@@ -25,6 +29,7 @@ import {
 } from "../src/lib/integrations/provider-registry"
 import {
   createSalesforceUpsertLeadAction,
+  salesforceUpsertLeadActionName,
 } from "../src/lib/integrations/salesforce/action"
 import { FakeSalesforceClient } from "../src/lib/integrations/salesforce/client"
 import { SalesforceError } from "../src/lib/integrations/salesforce/contract"
@@ -32,33 +37,36 @@ import { SalesforceError } from "../src/lib/integrations/salesforce/contract"
 vi.mock("server-only", () => ({}))
 
 describe("Salesforce form action", () => {
-  it("uses the tenant-bound client and stable delivery key for one logical upsert", async () => {
-    const client = new FakeSalesforceClient()
-    const runtime = runtimeFor(client)
-    const registry = registryFor(runtime)
-    const store = new DeliveryStore()
+  it.each([crmUpsertLeadActionName, salesforceUpsertLeadActionName])(
+    "executes %s through the same tenant-bound CRM capability",
+    async (actionName) => {
+      const client = new FakeSalesforceClient()
+      const runtime = runtimeFor(client)
+      const registry = registryFor(runtime)
+      const store = new DeliveryStore()
 
-    await execute(store, registry)
-    await execute(store, registry)
+      await execute(store, registry, actionName)
+      await execute(store, registry, actionName)
 
-    expect(runtime.forTenant).toHaveBeenCalledWith(tenantId)
-    expect(client.upserts).toEqual([{
-      objectName: "Lead",
-      externalIdField: "Screeem_Delivery_Key__c",
-      externalId: `${submissionId}:routing.matched:0`,
-      values: {
-        LastName: "Lovelace",
-        Company: "Analytical Engines",
-        Email: "ada@example.com",
-      },
-    }])
-    expect(store.output).toEqual({ id: "00Q000000000001", created: true })
-  })
+      expect(runtime.forTenant).toHaveBeenCalledWith(tenantId)
+      expect(client.upserts).toEqual([{
+        objectName: "Lead",
+        externalIdField: "Screeem_Delivery_Key__c",
+        externalId: `${submissionId}:routing.matched:0`,
+        values: {
+          LastName: "Lovelace",
+          Company: "Analytical Engines",
+          Email: "ada@example.com",
+        },
+      }])
+      expect(store.output).toEqual({ id: "00Q000000000001", created: true })
+    },
+  )
 
   it("preserves a bounded Salesforce rate-limit disposition", async () => {
     const client = new FakeSalesforceClient()
-    client.upsertRecord = vi.fn().mockRejectedValue(
-      new SalesforceError("rate_limited", true, 180_000),
+    client.upsertLead = vi.fn().mockRejectedValue(
+      new IntegrationOperationError("rate_limited", true, 180_000),
     )
     const store = new DeliveryStore()
 
@@ -105,8 +113,8 @@ describe("Salesforce form action", () => {
 
   it("classifies an expired Salesforce credential as requiring reauthorization", async () => {
     const client = new FakeSalesforceClient()
-    vi.spyOn(client, "upsertRecord").mockRejectedValueOnce(
-      new SalesforceError("authentication_failed", false),
+    vi.spyOn(client, "upsertLead").mockRejectedValueOnce(
+      new IntegrationOperationError("authentication_failed", false),
     )
     const store = new DeliveryStore()
 
@@ -168,6 +176,7 @@ const submissionId = "00000000-0000-4000-8000-000000000002"
 
 const providerDefinition = defineIntegrationProvider({
   name: snapshotIntegrationProviderName("salesforce"),
+  type: snapshotIntegrationType("crm"),
   displayName: "Salesforce",
   enabled: true,
   open: async () => new FakeSalesforceClient(),
@@ -208,27 +217,31 @@ const definition: FormDefinition = {
   ],
 }
 
-const routing: FormRoutingDefinition = {
-  version: 1,
-  rules: [{
-    id: "sales",
-    when: "true",
-    route: "salesforce",
-    actions: [{
-      use: "salesforceUpsertLead",
-      with: "({ lastName: submission.lastName, company: submission.company, email: submission.email })",
+function routingFor(actionName: string): FormRoutingDefinition {
+  return {
+    version: 1,
+    rules: [{
+      id: "sales",
+      when: "true",
+      route: "salesforce",
+      actions: [{
+        use: actionName,
+        with: "({ lastName: submission.lastName, company: submission.company, email: submission.email })",
+      }],
     }],
-  }],
-  fallback: "review",
+    fallback: "review",
+  }
 }
 
 function registryFor(
   runtime: IntegrationAutomationRuntime,
   externalIdField = "Screeem_Delivery_Key__c",
 ) {
-  return createFormAutomationRegistry(runtime).registerAction(
-    createSalesforceUpsertLeadAction(provider, externalIdField),
-  )
+  return createFormAutomationRegistry(runtime)
+    .registerAction(createCrmUpsertLeadAction(provider, {
+      configured: externalIdField === "Screeem_Delivery_Key__c",
+    }))
+    .registerAction(createSalesforceUpsertLeadAction(provider, externalIdField))
 }
 
 function runtimeFor(client: FakeSalesforceClient) {
@@ -253,6 +266,7 @@ function runtimeOpening(open: () => Promise<FakeSalesforceClient>) {
 async function execute(
   store: DeliveryStore,
   registry: ReturnType<typeof registryFor>,
+  actionName = salesforceUpsertLeadActionName,
 ) {
   const event = snapshotFormEvent({
     eventId: `${submissionId}:routing.matched`,
@@ -274,7 +288,7 @@ async function execute(
   }) as import("../src/lib/forms/form-actions").FormEvent<"routing.matched">
   const deliveries = orderFormEventDeliveries(
     planFormRoutingDeliveries(
-      routing,
+      routingFor(actionName),
       matchedSubmissionRouting("salesforce", "sales"),
       event,
       registry,
@@ -286,7 +300,13 @@ async function execute(
       submissionId,
     },
   )
-  return executeFormEventDeliveries({ definition, routing, deliveries, store, registry })
+  return executeFormEventDeliveries({
+    definition,
+    routing: routingFor(actionName),
+    deliveries,
+    store,
+    registry,
+  })
 }
 
 class DeliveryStore implements FormEventDeliveryStore {

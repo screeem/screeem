@@ -8,7 +8,7 @@ Routing drafts are plain, schema-free data stored beside the form draft. Form an
 
 ## Routing authoring
 
-Use the authoring helpers to build rules without writing expressions. Conditions refer to stable field IDs, so changing a submission key regenerates the runtime rule safely.
+Use the authoring helpers to build rules without writing expressions. Conditions and integration action mappings refer to stable field IDs, so changing a submission key regenerates the runtime rule safely.
 
 ```ts
 import {
@@ -41,6 +41,8 @@ if (!result.ok) console.log(result.issues)
 ```
 
 `testFormRouting` validates a sample submission before evaluating these rules. The generated routing definition retains the authoring source for later editing.
+
+Hosts can provide a bounded `IntegrationActionDefinition` catalog to the generator and visual editor. An action identity is always `<integrationType>.<capability>`, such as `crm.upsertLead`. The authoring source stores only the action occurrence and its form-field mappings. Provider clients and credentials remain in the host application.
 
 Routing definitions are limited to 3 MiB of UTF-8 JSON.
 

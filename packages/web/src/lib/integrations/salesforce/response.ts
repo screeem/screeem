@@ -2,7 +2,22 @@ import "server-only"
 
 import { SalesforceError } from "./contract"
 
-export async function readBoundedSalesforceResponse(response: Response, maximumBytes: number) {
+export function throwIfSalesforceAborted(signal?: AbortSignal, error?: unknown) {
+  if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError")
+  if (
+    error instanceof DOMException &&
+    (error.name === "AbortError" || error.name === "TimeoutError")
+  ) {
+    throw error
+  }
+}
+
+export async function readBoundedSalesforceResponse(
+  response: Response,
+  maximumBytes: number,
+  signal?: AbortSignal,
+) {
+  throwIfSalesforceAborted(signal)
   const declared = response.headers.get("content-length")
   if (declared && (!/^\d+$/.test(declared) || Number(declared) > maximumBytes)) {
     await response.body?.cancel().catch(() => undefined)
@@ -15,6 +30,7 @@ export async function readBoundedSalesforceResponse(response: Response, maximumB
   try {
     while (true) {
       const { value, done } = await reader.read()
+      throwIfSalesforceAborted(signal)
       if (done) break
       length += value.byteLength
       if (length > maximumBytes) {
@@ -31,6 +47,7 @@ export async function readBoundedSalesforceResponse(response: Response, maximumB
     }
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
   } catch (error) {
+    throwIfSalesforceAborted(signal, error)
     if (error instanceof SalesforceError) throw error
     throw new SalesforceError("invalid_provider_response", true)
   }

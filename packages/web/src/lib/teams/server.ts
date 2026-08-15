@@ -67,14 +67,17 @@ export async function getActiveTeam(userId: string, email?: string | null) {
   return { activeTeam, teams }
 }
 
-export async function getMembership(userId: string, teamId: string) {
+export async function getMembership(userId: string, teamId: string, signal?: AbortSignal) {
+  signal?.throwIfAborted()
   const admin = createAdminClient()
-  const { data } = await admin
+  let query = admin
     .from("team_members")
     .select("role")
     .eq("team_id", teamId)
     .eq("user_id", userId)
-    .maybeSingle()
+  if (signal) query = query.abortSignal(signal)
+  const { data } = await query.maybeSingle()
+  signal?.throwIfAborted()
   return data ? { role: data.role as TeamRole } : null
 }
 

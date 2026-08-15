@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import { snapshotFormEvent } from "../src/lib/forms/form-actions"
 import { createFormAutomationRegistry } from "../src/lib/forms/form-automation-registry"
 import type { IntegrationAutomationRuntime } from "../src/lib/integrations/automation-runtime"
+import { snapshotIntegrationType } from "@screeem/forms"
 import { snapshotIntegrationProviderName } from "../src/lib/integrations/contract"
 import {
   createIntegrationProviderRegistry,
@@ -97,6 +98,7 @@ describe("form automation registry", () => {
   it("binds event handlers to the event tenant integration runtime", async () => {
     const definition = defineIntegrationProvider({
       name: snapshotIntegrationProviderName("example"),
+      type: snapshotIntegrationType("example"),
       displayName: "Example",
       enabled: true,
       open: async () => "client",

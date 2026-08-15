@@ -114,7 +114,7 @@ make infra-down    # stop local Supabase; downloaded images remain cached
 
 ## Form automation registrations
 
-Application-owned form actions and event handlers are registered in `packages/web/src/lib/forms/form-registrations.ts`. Routing-only pure functions use the same registry. Form authors use the registered names and do not need the implementation details.
+Application-owned form actions and event handlers are registered in `packages/web/src/lib/forms/form-registrations.ts`. Routing-only pure functions use the same registry. The visual builder consumes provider-neutral action descriptors such as `crm.upsertLead`, while the host registry binds each capability to its provider implementation.
 
 Build the exported registry with `registerPureFunction`, `registerAction`, and `onEvent`. Registrations are immutable, so chain each call when creating the exported registry. Event handlers choose `inline`, `isolated`, or `durable` delivery.
 
@@ -135,7 +135,7 @@ Before enabling Salesforce in production:
 - Configure the External Client App with PKCE, refresh-token rotation, and the current Salesforce-required refresh-token idle TTL. The client persists rotated refresh tokens and moves expired or revoked credentials to `reauthorization_required`.
 - Enable Salesforce's refresh-token IP allowlist when the app is subject to the partner-app controls. The deployment must then use stable outbound IPs; on Vercel this requires Static IPs or Secure Compute. Add every production egress IP to Salesforce before enabling the integration.
 - Configure the app as a confidential server integration and provide `SALESFORCE_CLIENT_SECRET` through the deployment secret manager.
-- Create a unique External ID field on Salesforce Lead and set its API name as `SALESFORCE_LEAD_EXTERNAL_ID_FIELD`. The `salesforceUpsertLead` action writes the stable durable delivery key to this field so retries target the same record.
+- Create a unique External ID field on Salesforce Lead and set its API name as `SALESFORCE_LEAD_EXTERNAL_ID_FIELD`. The public `crm.upsertLead` action writes the stable durable delivery key to this field so retries target the same record. Its first rollout uses the pre-existing `salesforceUpsertLead` runtime registration so mixed-version workers remain safe, while authors only see the CRM capability name.
 - Keep the requested scopes to `id`, `api`, and `refresh_token`, and verify the callback URL exactly matches `NEXT_PUBLIC_SITE_URL`.
 - Complete these checks in a Salesforce sandbox before enabling the global integration switch.
 

@@ -34,9 +34,12 @@ import {
 } from "./salesforce/contract"
 import { SalesforceHttpClient } from "./salesforce/client"
 import { snapshotIntegrationIdentifier, type IntegrationIdentifier } from "./contract"
+import { SalesforceActionPreviewService } from "./salesforce/action-preview-service"
+import { crmIntegrationType } from "./crm/contract"
 
 const salesforceIntegrationProviderDefinition = defineIntegrationProvider({
   name: salesforceProviderName,
+  type: crmIntegrationType,
   displayName: "Salesforce",
   enabled: salesforceEnvironmentConfigured(),
   open: async (options) => (await salesforceProvider()).open(options),
@@ -78,6 +81,17 @@ export function createIntegrationCredentialStore() {
 
 export function createIntegrationExecutionStore() {
   return new PostgresIntegrationExecutionStore()
+}
+
+export function createSalesforceActionPreviewService() {
+  const resolver = createIntegrationResolver()
+  return new SalesforceActionPreviewService({
+    externalIdField: process.env.SALESFORCE_LEAD_EXTERNAL_ID_FIELD,
+    resolve: async (teamId, signal) => {
+      const resolved = await resolver.resolve(teamId, salesforceIntegrationProvider, signal)
+      return Object.freeze({ connection: resolved.connection, client: resolved.client })
+    },
+  })
 }
 
 export async function createSalesforceConnectionService() {
@@ -176,6 +190,7 @@ async function buildSalesforceProvider() {
         console.info("Salesforce API limits", limits)
       }
     },
+    leadExternalIdField: process.env.SALESFORCE_LEAD_EXTERNAL_ID_FIELD,
   })
 }
 

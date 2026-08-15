@@ -29,10 +29,19 @@ export {
   maximumFormActionTesters,
   maximumFormActionTesterTimeoutMs,
   type FormActionTestContext,
+  type FormActionTestOccurrence,
   type FormActionTestDetail,
   type FormActionTestResult,
   type FormActionTester,
 } from "./action-testing.js"
+export {
+  defineIntegrationAction,
+  snapshotIntegrationActionCatalog,
+  snapshotIntegrationType,
+  type IntegrationActionDefinition,
+  type IntegrationActionInputDefinition,
+  type IntegrationType,
+} from "./integration-actions.js"
 export {
   FormsError,
   FormNotFoundError,
@@ -56,7 +65,9 @@ export {
   type FormIssue,
   type FormRecord,
   type FormRoutingDefinition,
+  type FormRoutingActionInputMapping,
   type FormRoutingAuthoring,
+  type FormRoutingAuthoringAction,
   type FormRoutingAuthoringIssue,
   type FormRoutingAuthoringRule,
   type FormRoutingCombinator,
@@ -86,6 +97,8 @@ export {
 } from "./routing-authoring.js"
 export {
   maximumRoutingAuthoringRules,
+  maximumRoutingActionInputs,
+  maximumRoutingActionsPerRule,
   maximumRoutingConditionValueLength,
   maximumRoutingConditionsPerRule,
   snapshotFormRoutingAuthoring,

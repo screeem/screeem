@@ -7,11 +7,13 @@ import {
   createFormDefinition,
   createRoutingCondition,
   createRoutingSample,
+  defineIntegrationAction,
   generateFormRoutingDefinition,
   routingOperatorsForField,
   routingAuthoringMatchesDefinition,
   snapshotFormRoutingAuthoring,
   snapshotFormRoutingDefinition,
+  snapshotIntegrationType,
   testFormRouting,
   updateField,
   type FormDefinition,
@@ -65,6 +67,112 @@ describe("routing authoring", () => {
     const result = generateFormRoutingDefinition(definition, authoring())
 
     expect(result.ok && result.routing.rules[0]?.when).toContain("submission.team_size >= 500")
+  })
+
+  it("generates ordered integration actions from stable field mappings", () => {
+    const result = generateFormRoutingDefinition(
+      actionFixture(),
+      authoringWithAction(),
+      [crmAction],
+    )
+
+    expect(result.ok && result.routing.rules[0]?.actions).toEqual([
+      {
+        use: "crm.upsertLead",
+        with:
+          '({ "lastName": submission.last_name, "company": submission.company, "email": submission.email })',
+      },
+    ])
+  })
+
+  it("regenerates action input expressions after a mapped field rename", () => {
+    const definition = updateField(actionFixture(), "last-name", { name: "surname" })
+    const result = generateFormRoutingDefinition(
+      definition,
+      authoringWithAction(),
+      [crmAction],
+    )
+
+    expect(result.ok && result.routing.rules[0]?.actions?.[0]?.with).toContain(
+      "submission.surname",
+    )
+  })
+
+  it("rejects missing, optional, or incompatible mapped action fields", () => {
+    const optional = updateField(actionFixture(), "company", { required: false })
+    const optionalResult = generateFormRoutingDefinition(
+      optional,
+      authoringWithAction(),
+      [crmAction],
+    )
+    expect(optionalResult).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ code: "incompatible_action_field", inputName: "company" })],
+    })
+
+    const missing = generateFormRoutingDefinition(
+      fixture(),
+      authoringWithAction(),
+      [crmAction],
+    )
+    expect(missing).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: "missing_action_field", inputName: "lastName" }),
+      ]),
+    })
+
+    const incompatible = authoringWithAction()
+    const rule = incompatible.rules[0]!
+    const action = rule.actions![0]!
+    const incompatibleResult = generateFormRoutingDefinition(
+      actionFixture(),
+      {
+        ...incompatible,
+        rules: [{
+          ...rule,
+          actions: [{
+            ...action,
+            inputs: action.inputs.map((input) =>
+              input.input === "email"
+                ? { ...input, fieldId: "company" }
+                : input,
+            ),
+          }],
+        }],
+      },
+      [crmAction],
+    )
+    expect(incompatibleResult).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ code: "incompatible_action_field", inputName: "email" })],
+    })
+  })
+
+  it("detects runtime action tampering against visual authoring", () => {
+    const generated = generateFormRoutingDefinition(
+      actionFixture(),
+      authoringWithAction(),
+      [crmAction],
+    )
+    if (!generated.ok) throw new Error("Expected generated action routing")
+
+    expect(
+      routingAuthoringMatchesDefinition(actionFixture(), generated.routing, [crmAction]),
+    ).toBe(true)
+    expect(
+      routingAuthoringMatchesDefinition(
+        actionFixture(),
+        {
+          ...generated.routing,
+          rules: generated.routing.rules.map((rule) => ({
+            ...rule,
+            actions: [{ use: "crm.upsertLead", with: "({ email: submission.email })" }],
+          })),
+        },
+        [crmAction],
+      ),
+    ).toBe(false)
   })
 
   it("round-trips visual source through draft and publication storage", async () => {
@@ -170,6 +278,19 @@ describe("routing authoring", () => {
     ).toThrow(
       expect.objectContaining({
         issues: [expect.objectContaining({ code: "routing_condition_value_limit" })],
+      }),
+    )
+
+    const withAction = authoringWithAction()
+    expect(() => snapshotFormRoutingAuthoring({
+      ...withAction,
+      rules: withAction.rules.map((rule) => ({
+        ...rule,
+        actions: [rule.actions![0]!, rule.actions![0]!],
+      })),
+    })).toThrow(
+      expect.objectContaining({
+        issues: [expect.objectContaining({ code: "duplicate_action_id" })],
       }),
     )
   })
@@ -278,3 +399,71 @@ function authoring(): FormRoutingAuthoring {
     fallback: "commercial",
   }
 }
+
+function actionFixture(): FormDefinition {
+  let definition = fixture()
+  for (const [control, id, name, label] of [
+    ["text", "last-name", "last_name", "Last name"],
+    ["text", "company", "company", "Company"],
+    ["email", "email", "email", "Email"],
+  ] as const) {
+    definition = addField(definition, createField(control, { id, name, label }))
+    definition = updateField(definition, id, { required: true })
+  }
+  return definition
+}
+
+function authoringWithAction(): FormRoutingAuthoring {
+  const source = authoring()
+  return {
+    ...source,
+    rules: source.rules.map((rule) => ({
+      ...rule,
+      actions: [
+        {
+          id: "action-1",
+          use: "crm.upsertLead",
+          inputs: [
+            { input: "lastName", fieldId: "last-name" },
+            { input: "company", fieldId: "company" },
+            { input: "email", fieldId: "email" },
+          ],
+        },
+      ],
+    })),
+  }
+}
+
+const crmAction = defineIntegrationAction({
+  use: "crm.upsertLead",
+  integrationType: snapshotIntegrationType("crm"),
+  capability: "upsertLead",
+  label: "Upsert CRM lead",
+  description: "Create or update a CRM lead.",
+  inputs: [
+    {
+      name: "lastName",
+      label: "Last name",
+      required: true,
+      fieldTypes: ["string"],
+      fieldControls: ["text"],
+      suggestedFieldNames: ["last_name"],
+    },
+    {
+      name: "company",
+      label: "Company",
+      required: true,
+      fieldTypes: ["string"],
+      fieldControls: ["text"],
+      suggestedFieldNames: ["company"],
+    },
+    {
+      name: "email",
+      label: "Email",
+      required: true,
+      fieldTypes: ["string"],
+      fieldControls: ["email"],
+      suggestedFieldNames: ["email"],
+    },
+  ],
+})
