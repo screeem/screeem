@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { activeCalendarEventIds, replayCalendar, type CalendarEvent } from "../src/lib/calendar/events"
 
 const event = (id: number, eventType: CalendarEvent["eventType"], payload = {}, revertsEventId: number | null = null): CalendarEvent => ({
-  id, eventType, payload, revertsEventId, aggregateId: "post-1", actorId: "user-1", createdAt: "2026-08-14T00:00:00Z",
+  id, eventType, payload, revertsEventId, aggregateId: "post-1", actorId: "user-1", actor: { id: "user-1", email: "ada@example.com", displayName: "Ada" }, createdAt: "2026-08-14T00:00:00Z",
 })
 
 describe("calendar event replay", () => {

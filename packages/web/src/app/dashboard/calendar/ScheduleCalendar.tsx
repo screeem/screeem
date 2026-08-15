@@ -31,6 +31,10 @@ function TargetDot({ target }: { target: Target }) {
   return <span title={target} className={`grid size-5 place-items-center rounded-full text-[9px] font-bold ring-2 ring-white ${targetStyle[target]}`}>{target === "Instagram" ? "I" : target === "LinkedIn" ? "in" : "X"}</span>
 }
 
+function actorLabel(event: CalendarEvent) {
+  return event.actor.displayName || event.actor.email || `User ${event.actorId.slice(0, 8)}`
+}
+
 export function ScheduleCalendar({ teamId }: { teamId: string }) {
   const [cursor, setCursor] = useState(new Date(Date.UTC(2026, 7, 1)))
   const [events, setEvents] = useState<CalendarEvent[]>([])
@@ -206,7 +210,7 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
                 <div className="min-w-0">
                   <span className="font-semibold text-slate-700">{event.eventType}</span>
                   <span className="ml-2 text-slate-400">#{event.id}</span>
-                  <p className="mt-0.5 truncate text-slate-400">Post {event.aggregateId.slice(0, 8)}</p>
+                  <p className="mt-0.5 truncate text-slate-400">Post {event.aggregateId.slice(0, 8)} · by {actorLabel(event)}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className={activeEventIds.has(event.id) ? "text-emerald-600" : "text-slate-400"}>
@@ -265,7 +269,7 @@ function PostEditor({
         <div className="grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-slate-600">Date<input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label><label className="text-xs font-semibold text-slate-600">Time<input type="time" value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label></div>
         <fieldset><legend className="text-xs font-semibold text-slate-600">Publish to</legend><div className="mt-2 flex flex-wrap gap-2">{(["X", "LinkedIn", "Instagram"] as Target[]).map((target) => <button type="button" key={target} onClick={() => toggleTarget(target)} className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium ${draft.targets.includes(target) ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-500"}`}><TargetDot target={target} />{target}</button>)}</div></fieldset>
         <fieldset><legend className="text-xs font-semibold text-slate-600">Label colour</legend><div className="mt-2 flex gap-2">{Object.keys(colourStyle).map((colour) => <button type="button" aria-label={colour} key={colour} onClick={() => setDraft({ ...draft, colour })} className={`size-7 rounded-full ${colour === "violet" ? "bg-violet-500" : colour === "coral" ? "bg-orange-500" : colour === "teal" ? "bg-teal-500" : "bg-blue-500"} ${draft.colour === colour ? "ring-2 ring-slate-800 ring-offset-2" : ""}`} />)}</div></fieldset>
-        {history.length > 0 ? <div><h3 className="text-xs font-semibold text-slate-600">Immutable activity</h3><div className="mt-3 border-l border-slate-200 pl-4">{[...history].sort((a, b) => b.id - a.id).map((item) => <div key={item.id} className="relative flex items-start justify-between gap-2 pb-4 text-xs text-slate-500 before:absolute before:-left-[19px] before:top-1 before:size-2 before:rounded-full before:bg-violet-400"><span><strong className="font-semibold text-slate-700">{item.eventType}</strong><br />Event #{item.id} · {activeEventIds.has(item.id) ? "active" : "reverted"}</span>{activeEventIds.has(item.id) ? <button disabled={busy} onClick={() => void onRevert(item)} className="rounded px-2 py-1 font-medium text-violet-700 hover:bg-violet-50">Revert</button> : null}</div>)}</div></div> : null}
+        {history.length > 0 ? <div><h3 className="text-xs font-semibold text-slate-600">Immutable activity</h3><div className="mt-3 border-l border-slate-200 pl-4">{[...history].sort((a, b) => b.id - a.id).map((item) => <div key={item.id} className="relative flex items-start justify-between gap-2 pb-4 text-xs text-slate-500 before:absolute before:-left-[19px] before:top-1 before:size-2 before:rounded-full before:bg-violet-400"><span><strong className="font-semibold text-slate-700">{item.eventType}</strong><br />Event #{item.id} · {activeEventIds.has(item.id) ? "active" : "reverted"} · by {actorLabel(item)}</span>{activeEventIds.has(item.id) ? <button disabled={busy} onClick={() => void onRevert(item)} className="rounded px-2 py-1 font-medium text-violet-700 hover:bg-violet-50">Revert</button> : null}</div>)}</div></div> : null}
       </div>
       <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4"><span className="text-xs text-slate-400">Append-only sync</span><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancel</button><button disabled={busy || !draft.title.trim() || draft.targets.length === 0} onClick={() => void onSave(draft)} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{busy ? "Saving…" : post.id ? "Append changes" : "Schedule post"}</button></div></div>
     </aside>
