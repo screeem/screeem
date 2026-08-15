@@ -17,7 +17,7 @@ import { authorizeTeam } from "../src/lib/teams/authorization"
 
 describe("team authorization cancellation", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
   })
 
   it("stops waiting for a deferred user lookup when the request is aborted", async () => {
