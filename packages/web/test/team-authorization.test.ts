@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}))
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }))
-vi.mock("@/lib/teams/server", () => ({
+vi.mock("../src/lib/teams/server", () => ({
   canManage: (role: string) => role === "owner" || role === "admin",
   getMembership: mocks.getMembership,
 }))
