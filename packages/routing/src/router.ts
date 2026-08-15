@@ -594,9 +594,12 @@ function validateDefinition(definition: RoutingDefinition, limits: RoutingLimits
 }
 
 function assertRegistrationName(name: string): void {
+  const segments = name.split(".")
   if (
-    !/^[A-Za-z_$][\w$]*$/.test(name) ||
-    ["submission", "__proto__", "prototype", "constructor"].includes(name)
+    !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(name) ||
+    segments.some((segment) =>
+      ["submission", "__proto__", "prototype", "constructor"].includes(segment),
+    )
   ) {
     throw new Error(`Invalid registration name ${name}`)
   }

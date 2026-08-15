@@ -1,7 +1,7 @@
 import "server-only"
 
 import { cookies } from "next/headers"
-import { createAdminClient } from "@/lib/supabase/admin"
+import { createAdminClient } from "../supabase/admin"
 
 export type TeamRole = "owner" | "admin" | "member"
 

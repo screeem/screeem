@@ -76,6 +76,26 @@ describe("untrusted expression security", () => {
     expect(() => createRouter({ limits })).toThrow(/Routing limit/)
   })
 
+  it("accepts namespaced actions and rejects unsafe namespace segments", () => {
+    expect(() =>
+      createRouter().registerAction({
+        name: "crm.upsertLead",
+        input: type.object({}),
+        run: () => Effect.succeed(undefined),
+      }),
+    ).not.toThrow()
+
+    for (const name of ["crm..upsertLead", "crm.__proto__", "submission.notify"]) {
+      expect(() =>
+        createRouter().registerAction({
+          name,
+          input: type.object({}),
+          run: () => Effect.succeed(undefined),
+        }),
+      ).toThrow(/Invalid registration name/)
+    }
+  })
+
   it.each([
     ["zero", 0],
     ["fractional", 0.5],

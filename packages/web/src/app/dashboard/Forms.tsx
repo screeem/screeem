@@ -1,6 +1,6 @@
 "use client"
 
-import { integrationActionNameForRegistration } from "@/lib/integrations/action-catalog"
+import { integrationActionNameForRegistration } from "../../lib/integrations/action-catalog"
 import type { FormAvailability } from "@screeem/forms"
 import Link from "next/link"
 import { useRouter } from "next/navigation"

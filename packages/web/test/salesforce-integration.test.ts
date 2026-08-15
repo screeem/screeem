@@ -257,6 +257,10 @@ describe("Salesforce integration contracts", () => {
     const controller = new AbortController()
     const fetcher = vi.fn().mockImplementation(
       (_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+        if (init.signal?.aborted) {
+          reject(init.signal.reason)
+          return
+        }
         init.signal?.addEventListener(
           "abort",
           () => reject(init.signal?.reason),
