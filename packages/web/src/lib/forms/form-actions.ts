@@ -10,6 +10,7 @@ import {
   type SubmissionRoutingStatus,
 } from "@screeem/forms"
 import type { Effect } from "effect"
+import type { IntegrationAutomationAccess } from "../integrations/automation-runtime"
 import type { FormEventDeliveryKind } from "./form-delivery-contract"
 
 export const formEventTypes = [
@@ -76,12 +77,22 @@ export type FormEvent<Type extends FormEventType = FormEventType> = {
   readonly [EventType in Type]: FormEventEnvelope<EventType>
 }[Type]
 
-export interface FormActionContext<Type extends FormEventType = FormEventType> {
+export interface FormDeliveryContext<Type extends FormEventType = FormEventType> {
   readonly event: FormEvent<Type>
   readonly deliveryKey: string
   readonly idempotencyKey: string
   readonly signal: AbortSignal
 }
+
+export interface FormActionContext<Type extends FormEventType = FormEventType>
+  extends FormDeliveryContext<Type> {
+  readonly integrations: IntegrationAutomationAccess
+}
+
+export type FormEventHandlerContext<
+  Type extends FormEventType,
+  Delivery extends FormEventDelivery,
+> = Delivery extends "durable" ? FormActionContext<Type> : FormDeliveryContext<Type>
 
 export interface FormActionDefinition<
   Input extends RuntimeType = RuntimeType,
@@ -106,7 +117,7 @@ export interface FormEventHandlerDefinition<
   readonly timeoutMs?: number
   readonly run: (options: {
     readonly event: FormEvent<Event>
-    readonly context: FormActionContext<Event>
+    readonly context: FormEventHandlerContext<Event, Delivery>
   }) => Effect.Effect<void, Failure, never>
 }
 

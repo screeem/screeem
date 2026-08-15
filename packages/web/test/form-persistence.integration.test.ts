@@ -1,4 +1,5 @@
 import postgres from "postgres"
+import { routingActionFailure } from "@screeem/routing"
 import { Effect } from "effect"
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { snapshotFormEvent, type StoredFormEventDelivery } from "../src/lib/forms/form-actions"
@@ -10,6 +11,12 @@ import { createFormAutomationRegistry } from "../src/lib/forms/form-automation-r
 import { PostgresFormPersistence } from "../src/lib/forms/routing-persistence"
 
 vi.mock("server-only", () => ({}))
+
+const retryableFailure = () => routingActionFailure({
+  code: "temporary_failure",
+  retryable: true,
+  retryAfterMs: null,
+})
 
 const suite = process.env.FORM_PERSISTENCE_DB_TESTS === "1" ? describe : describe.skip
 
@@ -190,7 +197,7 @@ suite("PostgresFormPersistence", () => {
         `
       }
       await expect(persistence.claim(deliveries[0]!)).resolves.toEqual({ attempt })
-      await persistence.fail(deliveries[0]!, attempt, "temporary_failure")
+      await persistence.fail(deliveries[0]!, attempt, retryableFailure())
     }
 
     const rows = await database<
@@ -207,6 +214,58 @@ suite("PostgresFormPersistence", () => {
     ])
   })
 
+  it("honors bounded provider backoff and terminalizes a non-retryable failure", async () => {
+    const deliveries = plannedDeliveries(fixture)
+    await persistence.saveSubmission(saveInput(fixture, deliveries))
+
+    await expect(persistence.claim(deliveries[0]!)).resolves.toEqual({ attempt: 1 })
+    await persistence.fail(deliveries[0]!, 1, routingActionFailure({
+      code: "salesforce_rate_limited",
+      retryable: true,
+      retryAfterMs: 180_000,
+    }))
+
+    const [deferred] = await database<{
+      readonly attempt_count: number
+      readonly next_attempt_at: Date
+      readonly now: Date
+      readonly status: string
+    }[]>`
+      SELECT attempt_count, next_attempt_at, statement_timestamp() AS now, status
+      FROM form_event_deliveries
+      WHERE team_id = ${fixture.tenantId}
+        AND delivery_key = ${deliveries[0]!.deliveryKey}
+    `
+    expect(deferred?.status).toBe("pending")
+    expect(deferred?.attempt_count).toBe(1)
+    expect(deferred!.next_attempt_at.getTime() - deferred!.now.getTime()).toBeGreaterThan(170_000)
+
+    await database`
+      UPDATE form_event_deliveries
+      SET next_attempt_at = now() - interval '1 second'
+      WHERE team_id = ${fixture.tenantId}
+        AND delivery_key = ${deliveries[0]!.deliveryKey}
+    `
+    await expect(persistence.claim(deliveries[0]!)).resolves.toEqual({ attempt: 2 })
+    await persistence.fail(deliveries[0]!, 2, routingActionFailure({
+      code: "salesforce_invalid_request",
+      retryable: false,
+      retryAfterMs: null,
+    }))
+
+    const rows = await database<{ readonly status: string; readonly last_error: string }[]>`
+      SELECT status, last_error
+      FROM form_event_deliveries
+      WHERE team_id = ${fixture.tenantId}
+        AND event_id = ${deliveries[0]!.event.eventId}
+      ORDER BY sequence
+    `
+    expect(rows).toEqual([
+      { status: "failed", last_error: "salesforce_invalid_request" },
+      { status: "failed", last_error: "earlier_delivery_failed" },
+    ])
+  })
+
   it("reconciles an expired final lease and its remaining stream", async () => {
     const deliveries = plannedDeliveries(fixture)
     await persistence.saveSubmission(saveInput(fixture, deliveries))
@@ -220,7 +279,7 @@ suite("PostgresFormPersistence", () => {
         `
       }
       await persistence.claim(deliveries[0]!)
-      await persistence.fail(deliveries[0]!, attempt, "temporary_failure")
+      await persistence.fail(deliveries[0]!, attempt, retryableFailure())
     }
     await database`
       UPDATE form_event_deliveries
@@ -291,6 +350,59 @@ suite("PostgresFormPersistence", () => {
       drainPendingFormEventDeliveries(persistence, 100, registry),
     ).resolves.toBe(2)
     expect(calls).toEqual(["before-save", "accepted"])
+  })
+
+  it("keeps unrelated durable handlers eligible after another handler fails", async () => {
+    const deliveries = lifecycleDeliveries(fixture)
+    await persistence.saveSubmission(saveInput(fixture, deliveries))
+
+    await expect(persistence.claim(deliveries[0]!)).resolves.toEqual({ attempt: 1 })
+    await persistence.fail(deliveries[0]!, 1, routingActionFailure({
+      code: "integration_connection_unavailable",
+      retryable: false,
+      retryAfterMs: null,
+    }))
+
+    await expect(persistence.listPending(100)).resolves.toEqual({
+      deliveries: [deliveries[1]],
+      invalidCount: 0,
+    })
+    await expect(persistence.claim(deliveries[1]!)).resolves.toEqual({ attempt: 1 })
+  })
+
+  it("keeps same-event handlers independent in the persisted queue", async () => {
+    const event = lifecycleDeliveries(fixture)[1]!.event
+    const deliveries = orderFormEventDeliveries([
+      {
+        event,
+        kind: "event_handler",
+        registrationName: "first-handler",
+        deliveryKey: `${event.eventId}:0`,
+        sequence: 0,
+      },
+      {
+        event,
+        kind: "event_handler",
+        registrationName: "second-handler",
+        deliveryKey: `${event.eventId}:1`,
+        sequence: 1,
+      },
+    ], {
+      tenantId: fixture.tenantId,
+      formId: fixture.formId,
+      publicationVersion: 1,
+      submissionId: fixture.submissionId,
+    })
+    await persistence.saveSubmission(saveInput(fixture, deliveries))
+
+    await expect(persistence.claim(deliveries[0]!)).resolves.toEqual({ attempt: 1 })
+    await persistence.fail(deliveries[0]!, 1, routingActionFailure({
+      code: "integration_connection_unavailable",
+      retryable: false,
+      retryAfterMs: null,
+    }))
+
+    await expect(persistence.claim(deliveries[1]!)).resolves.toEqual({ attempt: 1 })
   })
 
   it("quarantines malformed work while returning valid work and an operational error", async () => {

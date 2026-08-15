@@ -1,6 +1,13 @@
 import { Effect, Either, Fiber } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import { ActionExecutionError, createRouter, defineSchema, field, type } from "../src/index.js"
+import {
+  ActionExecutionError,
+  createRouter,
+  defineSchema,
+  field,
+  routingActionFailure,
+  type,
+} from "../src/index.js"
 
 const schema = defineSchema({
   email: field.string({ required: true }),
@@ -107,6 +114,40 @@ describe("routing engine", () => {
       expect(outcome.left).toBeInstanceOf(ActionExecutionError)
       expect(outcome.left._tag).toBe("ActionExecutionError")
       expect(String(outcome.left)).not.toContain("CRM_API_KEY")
+    }
+  })
+
+  it("preserves only a bounded action failure disposition", async () => {
+    const failure = routingActionFailure({
+      code: "salesforce_rate_limited",
+      retryable: true,
+      retryAfterMs: 120_000,
+    })
+    const router = createRouter().registerAction({
+      name: "qualifyLead",
+      input: type.object({}),
+      run: () => Effect.fail(failure),
+    })
+    const compiled = await router.compile({
+      version: 1,
+      schema,
+      rules: [{
+        id: "qualify",
+        when: "true",
+        actions: [{ use: "qualifyLead" }],
+        route: "sales",
+      }],
+      fallback: "self-serve",
+    })
+
+    const outcome = await Effect.runPromise(
+      Effect.either(compiled.runEffect({ email: "a@b.test", employees: 500, country: "UK" })),
+    )
+
+    expect(Either.isLeft(outcome)).toBe(true)
+    if (Either.isLeft(outcome)) {
+      expect(outcome.left).toBeInstanceOf(ActionExecutionError)
+      expect((outcome.left as ActionExecutionError).failure).toEqual(failure)
     }
   })
 
@@ -421,7 +462,11 @@ describe("routing engine", () => {
 
     expect(capturedError).toBeInstanceOf(ActionExecutionError)
     expect(String(capturedError)).not.toContain("API_KEY")
-    expect((capturedError as ActionExecutionError).safeCause).toEqual({ name: "ActionFailure" })
+    expect((capturedError as ActionExecutionError).safeCause).toEqual({
+      code: "action_execution_failed",
+      retryable: true,
+      retryAfterMs: null,
+    })
   })
 
   it("enforces declared pure-function output at runtime", async () => {

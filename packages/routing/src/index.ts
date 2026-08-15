@@ -21,6 +21,9 @@ export {
   ExecutionLimitError,
   InvalidActionArgumentsError,
   ActionExecutionError,
+  routingActionFailure,
+  routingActionFailureOrDefault,
+  type RoutingActionFailure,
   type RuleDiagnostic,
   type RoutingExecutionError,
 } from "./errors.js"

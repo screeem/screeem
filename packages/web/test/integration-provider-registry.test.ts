@@ -13,6 +13,7 @@ import {
   defineIntegrationProvider,
   IntegrationResolutionError,
   IntegrationResolver,
+  type IntegrationProviderReference,
 } from "../src/lib/integrations/provider-registry"
 import { snapshotSealedIntegrationCredential } from "../src/lib/integrations/stores"
 
@@ -86,17 +87,19 @@ describe("integration provider registry", () => {
         now,
       )
       const definition = provider()
+      const registry = createIntegrationProviderRegistry().register(definition)
       const resolver = new IntegrationResolver(
-        createIntegrationProviderRegistry().register(definition),
+        registry,
         connections,
         controls,
         credentials,
       )
+      const reference = registry.reference(definition)
 
-      const resolved = await resolver.resolve(teamOne, definition)
+      const resolved = await resolver.resolve(teamOne, reference)
       expect(resolved.client).toEqual({ connectionId: connection.id })
       expect(JSON.stringify(resolved)).not.toMatch(/credential|cipher|key-v1/i)
-      await expect(resolver.resolve(teamTwo, definition)).rejects.toMatchObject({
+      await expect(resolver.resolve(teamTwo, reference)).rejects.toMatchObject({
         reason: "connection_unavailable",
       })
     })
@@ -111,27 +114,31 @@ describe("integration provider registry", () => {
       vi.spyOn(connections, "getByProvider").mockResolvedValue(connection)
       const load = vi.spyOn(credentials, "load")
       const definition = provider()
+      const registry = createIntegrationProviderRegistry().register(definition)
       const resolver = new IntegrationResolver(
-        createIntegrationProviderRegistry().register(definition),
+        registry,
         connections,
         controls,
         credentials,
       )
 
-      await expect(resolver.resolve(teamOne, definition)).rejects.toThrow("scope mismatch")
+      await expect(resolver.resolve(teamOne, registry.reference(definition))).rejects.toThrow(
+        "scope mismatch",
+      )
       expect(load).not.toHaveBeenCalled()
     })
 
     it("does not reread a hostile registration after snapshotting it", async () => {
       const definition = provider()
-      const hostile = new Proxy(definition, {
+      const registry = createIntegrationProviderRegistry().register(definition)
+      const hostile = new Proxy({ name: providerName }, {
         get(target, property, receiver) {
           if (property === "name") throw new Error("secret from getter")
           return Reflect.get(target, property, receiver)
         },
-      })
+      }) as unknown as IntegrationProviderReference<unknown>
       const resolver = new IntegrationResolver(
-        createIntegrationProviderRegistry(),
+        registry,
         connections,
         controls,
         credentials,
@@ -141,6 +148,46 @@ describe("integration provider registry", () => {
         reason: "provider_unregistered",
         provider: providerName,
       })
+      expect(open).not.toHaveBeenCalled()
+    })
+
+    it("does not open a provider after resolution is aborted", async () => {
+      const connection = await connections.create(teamOne, {
+        provider: providerName,
+        status: "connected",
+        actorId: userOne,
+        createdAt: now,
+      })
+      await credentials.compareAndSet(
+        teamOne,
+        connection.id,
+        null,
+        snapshotSealedIntegrationCredential({ keyId: "key-v1", sealed: "v1.Y2lwaGVy" }),
+        now,
+      )
+      const stored = await credentials.load(teamOne, connection.id)
+      let releaseCredential!: () => void
+      const load = vi.spyOn(credentials, "load").mockImplementation(() =>
+        new Promise((resolve) => {
+          releaseCredential = () => resolve(stored)
+        }),
+      )
+      const definition = provider()
+      const registry = createIntegrationProviderRegistry().register(definition)
+      const resolver = new IntegrationResolver(registry, connections, controls, credentials)
+      const controller = new AbortController()
+
+      const resolution = resolver.resolve(
+        teamOne,
+        registry.reference(definition),
+        controller.signal,
+      )
+      await vi.waitFor(() => expect(load).toHaveBeenCalledOnce())
+      controller.abort()
+      releaseCredential()
+
+      await expect(resolution).rejects.toMatchObject({ name: "AbortError" })
+      expect(open).not.toHaveBeenCalled()
     })
 
     it.each([
@@ -158,14 +205,15 @@ describe("integration provider registry", () => {
       if (level === "team") await controls.setEnabled(teamOne, null, false, userOne, now)
       const load = vi.spyOn(credentials, "load")
       const definition = provider(level !== "global")
+      const registry = createIntegrationProviderRegistry().register(definition)
       const resolver = new IntegrationResolver(
-        createIntegrationProviderRegistry().register(definition),
+        registry,
         connections,
         controls,
         credentials,
       )
 
-      await expect(resolver.resolve(teamOne, definition)).rejects.toEqual(
+      await expect(resolver.resolve(teamOne, registry.reference(definition))).rejects.toEqual(
         expect.objectContaining<Partial<IntegrationResolutionError>>({ reason }),
       )
       expect(load).not.toHaveBeenCalled()

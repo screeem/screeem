@@ -3,6 +3,12 @@ import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { snapshotFormEvent } from "../src/lib/forms/form-actions"
 import { createFormAutomationRegistry } from "../src/lib/forms/form-automation-registry"
+import type { IntegrationAutomationRuntime } from "../src/lib/integrations/automation-runtime"
+import { snapshotIntegrationProviderName } from "../src/lib/integrations/contract"
+import {
+  createIntegrationProviderRegistry,
+  defineIntegrationProvider,
+} from "../src/lib/integrations/provider-registry"
 
 vi.mock("server-only", () => ({}))
 
@@ -86,6 +92,35 @@ describe("form automation registry", () => {
       deliveryKey: "event-one:0",
       sequence: 0,
     })
+  })
+
+  it("binds event handlers to the event tenant integration runtime", async () => {
+    const definition = defineIntegrationProvider({
+      name: snapshotIntegrationProviderName("example"),
+      displayName: "Example",
+      enabled: true,
+      open: async () => "client",
+    })
+    const providerRegistry = createIntegrationProviderRegistry().register(definition)
+    const provider = providerRegistry.reference(definition)
+    const open = vi.fn(async () => "client")
+    const runtime = {
+      forTenant: vi.fn(() => ({ open })),
+    } as unknown as IntegrationAutomationRuntime
+    const registry = createFormAutomationRegistry(runtime).onEvent({
+      name: "integrated-audit",
+      event: "routing.matched",
+      delivery: "durable",
+      run: ({ context }) => Effect.promise(async () => {
+        await context.integrations.open(provider)
+      }),
+    })
+    const [planned] = registry.planDurable(matchedEvent)
+
+    await registry.runDurableHandler(planned!)
+
+    expect(runtime.forTenant).toHaveBeenCalledWith(matchedEvent.tenantId)
+    expect(open).toHaveBeenCalledWith(provider, expect.any(AbortSignal))
   })
 
   it("propagates inline failure and isolates failed handlers", async () => {

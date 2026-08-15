@@ -54,7 +54,7 @@ export class SalesforceHttpClient implements SalesforceClient {
   }
 
   async describeObject(objectName: string, signal?: AbortSignal) {
-    const safeObject = apiName(objectName)
+    const safeObject = snapshotSalesforceApiName(objectName)
     const response = await this.instanceRequest(
       `/services/data/${salesforceApiVersion}/sobjects/${safeObject}/describe`,
       {},
@@ -70,8 +70,8 @@ export class SalesforceHttpClient implements SalesforceClient {
     values: Readonly<Record<string, unknown>>,
     signal?: AbortSignal,
   ) {
-    const safeObject = apiName(objectName)
-    const safeField = apiName(externalIdField)
+    const safeObject = snapshotSalesforceApiName(objectName)
+    const safeField = snapshotSalesforceApiName(externalIdField)
     const safeExternalId = externalIdentifier(externalId)
     const { body } = snapshotUpsertValues(values)
     const response = await this.instanceRequest(
@@ -176,7 +176,7 @@ export class FakeSalesforceClient implements SalesforceClient {
 
   async describeObject(objectName: string, signal?: AbortSignal) {
     throwIfAborted(signal)
-    const safeObject = apiName(objectName)
+    const safeObject = snapshotSalesforceApiName(objectName)
     this.calls.push(`describeObject:${safeObject}`)
     return Object.freeze({ name: safeObject, label: safeObject, fields: Object.freeze([]) })
   }
@@ -189,8 +189,8 @@ export class FakeSalesforceClient implements SalesforceClient {
     signal?: AbortSignal,
   ) {
     throwIfAborted(signal)
-    const safeObject = apiName(objectName)
-    const safeField = apiName(externalIdField)
+    const safeObject = snapshotSalesforceApiName(objectName)
+    const safeField = snapshotSalesforceApiName(externalIdField)
     const safeExternalId = externalIdentifier(externalId)
     const { values: safeValues } = snapshotUpsertValues(values)
     this.calls.push(`upsertRecord:${safeObject}:${safeField}:${safeExternalId}`)
@@ -209,7 +209,7 @@ export class FakeSalesforceClient implements SalesforceClient {
   }
 }
 
-function apiName(input: string) {
+export function snapshotSalesforceApiName(input: string) {
   if (!/^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(input)) {
     throw new SalesforceError("invalid_request", false)
   }
@@ -239,7 +239,7 @@ function snapshotDescription(input: unknown): SalesforceObjectDescription {
       typeof field.createable !== "boolean" || typeof field.updateable !== "boolean" || typeof field.nillable !== "boolean"
     ) throw new SalesforceError("invalid_provider_response", true)
     return Object.freeze({
-      name: apiName(field.name),
+      name: snapshotSalesforceApiName(field.name),
       label: bounded(field.label, 160),
       type: bounded(field.type, 64),
       createable: field.createable,
@@ -247,7 +247,11 @@ function snapshotDescription(input: unknown): SalesforceObjectDescription {
       nillable: field.nillable,
     })
   })
-  return Object.freeze({ name: apiName(value.name), label: bounded(value.label, 160), fields: Object.freeze(fields) })
+  return Object.freeze({
+    name: snapshotSalesforceApiName(value.name),
+    label: bounded(value.label, 160),
+    fields: Object.freeze(fields),
+  })
 }
 
 function snapshotRecordValues(input: Readonly<Record<string, unknown>>) {
@@ -258,7 +262,7 @@ function snapshotRecordValues(input: Readonly<Record<string, unknown>>) {
   }
   const result: Record<string, unknown> = Object.create(null)
   for (const [name, descriptor] of Object.entries(descriptors)) {
-    apiName(name)
+    snapshotSalesforceApiName(name)
     if (!("value" in descriptor)) throw new SalesforceError("invalid_request", false)
     const value = descriptor.value
     if (

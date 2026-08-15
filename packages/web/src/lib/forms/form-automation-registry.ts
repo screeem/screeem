@@ -5,7 +5,13 @@ import {
   type Router,
   type RuntimeType,
 } from "@screeem/routing"
-import { Effect } from "effect"
+import { Effect, Either } from "effect"
+import {
+  unavailableIntegrationAutomationRuntime,
+  type IntegrationAutomationAccess,
+  type IntegrationAutomationRuntime,
+} from "../integrations/automation-runtime"
+import type { IntegrationProviderReference } from "../integrations/provider-registry"
 import {
   formEventTypes,
   snapshotFormEvent,
@@ -13,6 +19,7 @@ import {
   type FormEvent,
   type FormEventDelivery,
   type FormEventHandlerDefinition,
+  type FormEventHandlerContext,
   type FormEventType,
   type PlannedFormEventDelivery,
 } from "./form-actions"
@@ -29,10 +36,11 @@ export class FormAutomationRegistry {
     private readonly functions: readonly PureFunctionDefinition[],
     private readonly actions: ReadonlyMap<string, StoredAction>,
     private readonly handlers: readonly StoredHandler[],
+    private readonly integrations: IntegrationAutomationRuntime,
   ) {}
 
-  static create() {
-    return new FormAutomationRegistry([], new Map(), [])
+  static create(integrations: IntegrationAutomationRuntime) {
+    return new FormAutomationRegistry([], new Map(), [], integrations)
   }
 
   registerPureFunction<Input extends readonly RuntimeType[], Output extends RuntimeType>(
@@ -48,7 +56,7 @@ export class FormAutomationRegistry {
     }) as PureFunctionDefinition
     const functions = Object.freeze([...this.functions, registered])
     this.buildRouter(functions, this.actions)
-    return new FormAutomationRegistry(functions, this.actions, this.handlers)
+    return new FormAutomationRegistry(functions, this.actions, this.handlers, this.integrations)
   }
 
   registerAction<
@@ -73,7 +81,7 @@ export class FormAutomationRegistry {
     const actions = new Map(this.actions)
     actions.set(registered.name, registered)
     this.buildRouter(this.functions, actions)
-    return new FormAutomationRegistry(this.functions, actions, this.handlers)
+    return new FormAutomationRegistry(this.functions, actions, this.handlers, this.integrations)
   }
 
   onEvent<Event extends FormEventType, Delivery extends FormEventDelivery, Failure>(
@@ -107,6 +115,7 @@ export class FormAutomationRegistry {
       this.functions,
       this.actions,
       Object.freeze([...this.handlers, handler]),
+      this.integrations,
     )
   }
 
@@ -121,17 +130,23 @@ export class FormAutomationRegistry {
 
   async runInline(event: FormEvent): Promise<void> {
     const safeEvent = snapshotFormEvent(event)
-    for (const handler of this.handlersFor(safeEvent, "inline")) {
+    const handlers = this.handlersFor(safeEvent, "inline")
+    for (const handler of handlers) {
       await runHandler(handler, safeEvent, `${safeEvent.eventId}:${handler.name}`)
     }
   }
 
   async runIsolated(event: FormEvent): Promise<void> {
     const safeEvent = snapshotFormEvent(event)
+    const handlers = this.handlersFor(safeEvent, "isolated")
     await Promise.all(
-      this.handlersFor(safeEvent, "isolated").map(async (handler) => {
+      handlers.map(async (handler) => {
         try {
-          await runHandler(handler, safeEvent, `${safeEvent.eventId}:${handler.name}`)
+          await runHandler(
+            handler,
+            safeEvent,
+            `${safeEvent.eventId}:${handler.name}`,
+          )
         } catch {}
       }),
     )
@@ -165,7 +180,13 @@ export class FormAutomationRegistry {
         name === delivery.registrationName && event === delivery.event.type && mode === "durable",
     )
     if (!handler) throw new Error("Durable form event handler is not registered")
-    await runHandler(handler, snapshotFormEvent(delivery.event), delivery.deliveryKey)
+    const event = snapshotFormEvent(delivery.event)
+    await runHandler(
+      handler,
+      event,
+      delivery.deliveryKey,
+      this.integrations.forTenant(event.tenantId),
+    )
     return undefined
   }
 
@@ -206,6 +227,10 @@ export class FormAutomationRegistry {
               event: execution.event,
               deliveryKey: execution.deliveryKey,
               idempotencyKey: execution.deliveryKey,
+              integrations: bindIntegrationSignal(
+                this.integrations.forTenant(execution.event.tenantId),
+                context.signal,
+              ),
               signal: context.signal,
             },
           })
@@ -220,27 +245,31 @@ async function runHandler(
   handler: StoredHandler,
   event: FormEvent,
   deliveryKey: string,
+  integrations?: IntegrationAutomationAccess,
 ) {
   const controller = new AbortController()
+  const context = {
+    event,
+    deliveryKey,
+    idempotencyKey: deliveryKey,
+    signal: controller.signal,
+    ...(integrations ? { integrations: bindIntegrationSignal(integrations, controller.signal) } : {}),
+  } as FormEventHandlerContext<FormEventType, FormEventDelivery>
   const effect = handler.run({
     event,
-    context: {
-      event,
-      deliveryKey,
-      idempotencyKey: deliveryKey,
-      signal: controller.signal,
-    },
-  })
+    context,
+  } as never)
   if (!Effect.isEffect(effect)) throw new TypeError("Form event handler must return an Effect")
   const timeoutMs = handler.timeoutMs ?? 1_000
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   const run = Effect.runPromise(
-    effect.pipe(
+    Effect.either(effect.pipe(
       Effect.disconnect,
       Effect.timeout(timeoutMs),
-    ),
+    )),
   ).finally(() => clearTimeout(timeout))
-  await run
+  const result = await run
+  if (Either.isLeft(result)) throw result.left
 }
 
 function assertRegistrationName(name: string) {
@@ -258,6 +287,16 @@ function assertTimeout(timeoutMs: number | undefined, maximum: number, label: st
 
 function duplicateRegistration(name: string): never {
   throw new Error(`A registration named ${name} already exists`)
+}
+
+function bindIntegrationSignal(
+  integrations: IntegrationAutomationAccess,
+  signal: AbortSignal,
+): IntegrationAutomationAccess {
+  return Object.freeze({
+    open: <Client>(reference: IntegrationProviderReference<Client>) =>
+      integrations.open(reference, signal),
+  })
 }
 
 function snapshotRuntimeType(runtimeType: RuntimeType): RuntimeType {
@@ -285,6 +324,8 @@ function snapshotRuntimeType(runtimeType: RuntimeType): RuntimeType {
   }
 }
 
-export function createFormAutomationRegistry() {
-  return FormAutomationRegistry.create()
+export function createFormAutomationRegistry(
+  integrations: IntegrationAutomationRuntime = unavailableIntegrationAutomationRuntime,
+) {
+  return FormAutomationRegistry.create(integrations)
 }
