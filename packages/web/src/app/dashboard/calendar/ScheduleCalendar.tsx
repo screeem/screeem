@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
+import { CalendarTagEditor } from "@/components/calendar/CalendarTagEditor"
 import { activeCalendarEventIds, isApprovalEventType, replayCalendar } from "@/lib/calendar/events"
 import type {
   CalendarApprovalStatus,
@@ -18,13 +19,6 @@ const targetStyle: Record<Target, string> = {
   X: "bg-slate-900 text-white",
   LinkedIn: "bg-blue-600 text-white",
   Instagram: "bg-gradient-to-br from-fuchsia-500 to-orange-400 text-white",
-}
-
-const colourStyle: Record<string, string> = {
-  violet: "border-l-violet-500 bg-violet-50/70",
-  coral: "border-l-orange-500 bg-orange-50/70",
-  teal: "border-l-teal-500 bg-teal-50/70",
-  blue: "border-l-blue-500 bg-blue-50/70",
 }
 
 const approvalStyle: Record<CalendarApprovalStatus, string> = {
@@ -107,7 +101,7 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
 
   function openNew(date = isoDate(year, month, 14)) {
     setSelected({
-      id: "", title: "", copy: "", date, time: "09:00", targets: ["X"], colour: "violet",
+      id: "", title: "", copy: "", date, time: "09:00", targets: ["X"], tags: [],
       createdEventId: 0, activeEventIds: [], revision: 1,
       approval: { status: "draft", reviewRevision: null, requestedBy: null, comment: "" },
     })
@@ -144,7 +138,7 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
       const aggregateId = crypto.randomUUID()
       await append([{ aggregateId, eventType: "post.created", payload: {
         title: next.title, copy: next.copy, date: next.date, time: next.time,
-        targets: next.targets, colour: next.colour,
+        targets: next.targets, tags: next.tags,
       } }])
     } else {
       const original = posts.find((post) => post.id === next.id)
@@ -156,7 +150,8 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
       if (original.title !== next.title) add("title.changed", { value: next.title })
       if (original.copy !== next.copy) add("copy.changed", { value: next.copy })
       if (original.date !== next.date || original.time !== next.time) add("schedule.changed", { date: next.date, time: next.time })
-      if (original.colour !== next.colour) add("colour.changed", { value: next.colour })
+      next.tags.filter((tag) => !original.tags.includes(tag)).forEach((value) => add("tag.added", { value }))
+      original.tags.filter((tag) => !next.tags.includes(tag)).forEach((value) => add("tag.removed", { value }))
       next.targets.filter((target) => !original.targets.includes(target)).forEach((value) => add("target.added", { value }))
       original.targets.filter((target) => !next.targets.includes(target)).forEach((value) => add("target.removed", { value }))
       if (changes.length) await append(changes)
@@ -207,8 +202,9 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
             const today = cell?.date === "2026-08-14"
             return <div key={index} onDoubleClick={() => cell && openNew(cell.date)} className={`min-h-28 border-b border-r border-slate-100 p-1.5 sm:min-h-32 ${!cell ? "bg-slate-50/50" : "bg-white hover:bg-slate-50/40"}`}>
               {cell && <div className={`mb-1 ml-1 grid size-6 place-items-center rounded-full text-xs ${today ? "bg-violet-600 font-semibold text-white" : "text-slate-500"}`}>{cell.day}</div>}
-              {dayPosts.map((post) => <Link key={post.id} href={`/dashboard/calendar/${post.id}`} className={`mb-1 block w-full rounded-md border-l-[3px] px-2 py-1.5 text-left transition hover:-translate-y-px hover:shadow-sm ${colourStyle[post.colour]}`}>
+              {dayPosts.map((post) => <Link key={post.id} href={`/dashboard/calendar/${post.id}`} className="mb-1 block w-full rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1.5 text-left transition hover:-translate-y-px hover:shadow-sm">
                 <span className="block truncate text-[11px] font-semibold text-slate-800">{post.title}</span>
+                {post.tags.length ? <span className="mt-1 flex min-w-0 gap-1 overflow-hidden text-[9px] text-slate-500">{post.tags.slice(0, 2).map((tag) => <span key={tag.toLowerCase()} className="max-w-20 truncate rounded-full bg-white px-1.5 py-0.5 ring-1 ring-slate-200">#{tag}</span>)}{post.tags.length > 2 ? <span className="py-0.5">+{post.tags.length - 2}</span> : null}</span> : null}
                 <span className="mt-1 flex items-center justify-between gap-1 text-[9px] text-slate-500"><span className={`rounded-full px-1.5 py-0.5 font-medium ${approvalStyle[post.approval.status]}`}>{approvalLabel[post.approval.status]}</span><span>{post.time}</span><span className="flex -space-x-1">{post.targets.map((target) => <TargetDot key={target} target={target} />)}</span></span>
               </Link>)}
             </div>
@@ -289,7 +285,7 @@ function PostEditor({
         <label className="block text-xs font-semibold text-slate-600">Post copy<textarea value={draft.copy} onChange={(event) => setDraft({ ...draft, copy: event.target.value })} rows={5} placeholder="What do you want to share?" className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal leading-6 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /><span className="mt-1 block text-right font-normal text-slate-400">{draft.copy.length} characters</span></label>
         <div className="grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-slate-600">Date<input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label><label className="text-xs font-semibold text-slate-600">Time<input type="time" value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label></div>
         <fieldset><legend className="text-xs font-semibold text-slate-600">Publish to</legend><div className="mt-2 flex flex-wrap gap-2">{(["X", "LinkedIn", "Instagram"] as Target[]).map((target) => <button type="button" key={target} onClick={() => toggleTarget(target)} className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium ${draft.targets.includes(target) ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-500"}`}><TargetDot target={target} />{target}</button>)}</div></fieldset>
-        <fieldset><legend className="text-xs font-semibold text-slate-600">Label colour</legend><div className="mt-2 flex gap-2">{Object.keys(colourStyle).map((colour) => <button type="button" aria-label={colour} key={colour} onClick={() => setDraft({ ...draft, colour })} className={`size-7 rounded-full ${colour === "violet" ? "bg-violet-500" : colour === "coral" ? "bg-orange-500" : colour === "teal" ? "bg-teal-500" : "bg-blue-500"} ${draft.colour === colour ? "ring-2 ring-slate-800 ring-offset-2" : ""}`} />)}</div></fieldset>
+        <CalendarTagEditor tags={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} />
       </div>
       <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4"><span className="text-xs text-slate-400">Append-only sync</span><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancel</button><button disabled={busy || !draft.title.trim() || draft.targets.length === 0} onClick={() => void onSave(draft)} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{busy ? "Saving…" : post.id ? "Append changes" : "Schedule post"}</button></div></div>
     </aside>

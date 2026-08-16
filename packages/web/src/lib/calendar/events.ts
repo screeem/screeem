@@ -2,9 +2,13 @@ export type CalendarTarget = "X" | "LinkedIn" | "Instagram"
 export type CalendarApprovalStatus = "draft" | "in_review" | "changes_requested" | "approved"
 export type CalendarEventType =
   | "post.created" | "title.changed" | "copy.changed" | "schedule.changed"
-  | "colour.changed" | "target.added" | "target.removed" | "change.reverted"
+  | "tag.added" | "tag.removed" | "target.added" | "target.removed" | "change.reverted"
+  | "colour.changed"
   | "approval.requested" | "approval.granted" | "approval.changes_requested"
   | "approval.withdrawn"
+
+export const CALENDAR_TAG_LIMIT = 10
+export const CALENDAR_TAG_MAX_LENGTH = 30
 
 export type CalendarActor = {
   id: string
@@ -29,7 +33,7 @@ export type CalendarPost = {
   date: string
   time: string
   targets: CalendarTarget[]
-  colour: string
+  tags: string[]
   createdEventId: number
   activeEventIds: number[]
   revision: number
@@ -44,7 +48,9 @@ export type CalendarPost = {
 const targets = new Set<CalendarTarget>(["X", "LinkedIn", "Instagram"])
 const contentEventTypes = new Set<CalendarEventType>([
   "post.created", "title.changed", "copy.changed", "schedule.changed",
-  "colour.changed", "target.added", "target.removed", "change.reverted",
+  "tag.added", "tag.removed", "target.added", "target.removed", "change.reverted",
+  // Kept for replaying the immutable history written before tags replaced colours.
+  "colour.changed",
 ])
 
 export const approvalEventTypes = new Set<CalendarEventType>([
@@ -57,6 +63,37 @@ export function isApprovalEventType(type: CalendarEventType) {
 
 function draftApproval(): CalendarPost["approval"] {
   return { status: "draft", reviewRevision: null, requestedBy: null, comment: "" }
+}
+
+export function normalizeCalendarTag(value: string) {
+  return value.trim()
+}
+
+export function isValidCalendarTag(value: unknown): value is string {
+  return typeof value === "string"
+    && value === normalizeCalendarTag(value)
+    && value.length > 0
+    && value.length <= CALENDAR_TAG_MAX_LENGTH
+}
+
+export function isValidCalendarTags(value: unknown): value is string[] {
+  if (!Array.isArray(value) || value.length > CALENDAR_TAG_LIMIT
+    || !value.every(isValidCalendarTag)) return false
+  return new Set(value.map((tag) => tag.toLowerCase())).size === value.length
+}
+
+function replayTags(value: unknown) {
+  if (!Array.isArray(value)) return []
+  const tags: string[] = []
+  for (const item of value) {
+    if (typeof item !== "string") continue
+    const tag = normalizeCalendarTag(item)
+    if (!tag || tag.length > CALENDAR_TAG_MAX_LENGTH
+      || tags.some((candidate) => candidate.toLowerCase() === tag.toLowerCase())) continue
+    tags.push(tag)
+    if (tags.length === CALENDAR_TAG_LIMIT) break
+  }
+  return tags
 }
 
 export function activeCalendarEventIds(events: CalendarEvent[]) {
@@ -93,7 +130,7 @@ export function replayCalendar(events: CalendarEvent[]): CalendarPost[] {
         id: event.aggregateId,
         title: String(payload.title ?? ""), copy: String(payload.copy ?? ""),
         date: String(payload.date ?? ""), time: String(payload.time ?? ""),
-        colour: String(payload.colour ?? "violet"),
+        tags: replayTags(payload.tags),
         targets: Array.isArray(payload.targets)
           ? payload.targets.filter((target): target is CalendarTarget => targets.has(target as CalendarTarget))
           : [],
@@ -108,7 +145,6 @@ export function replayCalendar(events: CalendarEvent[]): CalendarPost[] {
     if (contentEventTypes.has(event.eventType)) post.approval = draftApproval()
     if (event.eventType === "title.changed") post.title = String(value ?? "")
     if (event.eventType === "copy.changed") post.copy = String(value ?? "")
-    if (event.eventType === "colour.changed") post.colour = String(value ?? "violet")
     if (event.eventType === "schedule.changed") {
       post.date = String(event.payload.date ?? "")
       post.time = String(event.payload.time ?? "")
@@ -118,6 +154,17 @@ export function replayCalendar(events: CalendarEvent[]): CalendarPost[] {
     }
     if (event.eventType === "target.removed") {
       post.targets = post.targets.filter((target) => target !== value)
+    }
+    if (event.eventType === "tag.added" && typeof value === "string") {
+      const tag = normalizeCalendarTag(value)
+      if (tag && tag.length <= CALENDAR_TAG_MAX_LENGTH && post.tags.length < CALENDAR_TAG_LIMIT
+        && !post.tags.some((candidate) => candidate.toLowerCase() === tag.toLowerCase())) {
+        post.tags.push(tag)
+      }
+    }
+    if (event.eventType === "tag.removed" && typeof value === "string") {
+      const tag = normalizeCalendarTag(value).toLowerCase()
+      post.tags = post.tags.filter((candidate) => candidate.toLowerCase() !== tag)
     }
     const revision = Number(event.payload.revision)
     const comment = typeof event.payload.comment === "string" ? event.payload.comment : ""
