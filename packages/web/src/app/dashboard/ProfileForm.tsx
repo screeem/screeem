@@ -8,28 +8,11 @@ import {
   deleteSocialAccount,
   type SocialAccount,
 } from "@/lib/queries/profile";
-
-type Platform = "twitter" | "linkedin";
-
-const PLATFORM_CONFIG: Record<
-  Platform,
-  { name: string; prefix: string; placeholder: string; urlBase: string; avatarBase: string }
-> = {
-  twitter: {
-    name: "Twitter / X",
-    prefix: "@",
-    placeholder: "handle",
-    urlBase: "https://x.com/",
-    avatarBase: "https://unavatar.io/twitter/",
-  },
-  linkedin: {
-    name: "LinkedIn",
-    prefix: "linkedin.com/in/",
-    placeholder: "handle",
-    urlBase: "https://linkedin.com/in/",
-    avatarBase: "https://unavatar.io/linkedin/",
-  },
-};
+import {
+  socialPlatformById,
+  socialPlatformDefinitions,
+  type SocialPlatform,
+} from "@/lib/social-platforms";
 
 function AccountCard({
   account,
@@ -42,7 +25,7 @@ function AccountCard({
   isDeleting: boolean;
   canManage: boolean;
 }) {
-  const config = PLATFORM_CONFIG[account.platform];
+  const config = socialPlatformById[account.platform];
   return (
     <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
       <img
@@ -85,14 +68,14 @@ function AddAccountForm({
   teamId,
   onAdded,
 }: {
-  platform: Platform;
+  platform: SocialPlatform;
   userId: string;
   teamId: string;
   onAdded: () => void;
 }) {
   const [handle, setHandle] = useState("");
   const [label, setLabel] = useState("");
-  const config = PLATFORM_CONFIG[platform];
+  const config = socialPlatformById[platform];
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -156,7 +139,7 @@ function PlatformSection({
   deletingId,
   onDelete,
 }: {
-  platform: Platform;
+  platform: SocialPlatform;
   accounts: SocialAccount[];
   userId: string;
   teamId: string;
@@ -165,7 +148,7 @@ function PlatformSection({
   deletingId: string | null;
   onDelete: (id: string) => void;
 }) {
-  const config = PLATFORM_CONFIG[platform];
+  const config = socialPlatformById[platform];
   const platformAccounts = accounts.filter((a) => a.platform === platform);
 
   return (
@@ -222,26 +205,19 @@ export function ProfileForm({ userId, teamId, canManage }: { userId: string; tea
       </p>
 
       <div className="space-y-8 max-w-lg">
-        <PlatformSection
-          platform="twitter"
-          accounts={accounts}
-          userId={userId}
-          teamId={teamId}
-          canManage={canManage}
-          onChanged={invalidate}
-          deletingId={deletingId}
-          onDelete={handleDelete}
-        />
-        <PlatformSection
-          platform="linkedin"
-          accounts={accounts}
-          userId={userId}
-          teamId={teamId}
-          canManage={canManage}
-          onChanged={invalidate}
-          deletingId={deletingId}
-          onDelete={handleDelete}
-        />
+        {socialPlatformDefinitions.map((platform) => (
+          <PlatformSection
+            key={platform.id}
+            platform={platform.id}
+            accounts={accounts}
+            userId={userId}
+            teamId={teamId}
+            canManage={canManage}
+            onChanged={invalidate}
+            deletingId={deletingId}
+            onDelete={handleDelete}
+          />
+        ))}
       </div>
     </div>
   );

@@ -1,8 +1,15 @@
 "use client"
 
 import Link from "next/link"
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import { activeCalendarEventIds, isApprovalEventType, replayCalendar } from "@/lib/calendar/events"
+import { getSocialAccounts } from "@/lib/queries/profile"
+import {
+  calendarTargets,
+  configuredCalendarTargets,
+  socialPlatformDefinitionForTarget,
+} from "@/lib/social-platforms"
 import type {
   CalendarApprovalStatus,
   CalendarEvent,
@@ -12,7 +19,6 @@ import type {
 } from "@/lib/calendar/events"
 import type { TeamRole } from "@/lib/teams/server"
 
-const targets: CalendarTarget[] = ["X", "LinkedIn", "Instagram"]
 const colours = ["violet", "coral", "teal", "blue"]
 
 const colourClasses: Record<string, string> = {
@@ -78,6 +84,15 @@ export function CalendarPostDetail({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [reviewComment, setReviewComment] = useState("")
+  const accountsQuery = useQuery({
+    queryKey: ["social-accounts", teamId],
+    queryFn: () => getSocialAccounts(teamId),
+  })
+  const accounts = useMemo(() => accountsQuery.data ?? [], [accountsQuery.data])
+  const configuredTargets = useMemo(() => configuredCalendarTargets(accounts), [accounts])
+  const targetOptions = useMemo(() => calendarTargets.filter(
+    (target) => configuredTargets.includes(target) || Boolean(draft?.targets.includes(target)),
+  ), [configuredTargets, draft?.targets])
   const postEvents = useMemo(() => events.filter((event) => event.aggregateId === postId), [events, postId])
   const activeEventIds = useMemo(() => activeCalendarEventIds(events), [events])
   const persistedPost = useMemo(
@@ -183,6 +198,7 @@ export function CalendarPostDetail({
       <button disabled={busy || !dirty || !draft.title.trim() || draft.targets.length === 0} onClick={() => void save()} className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">{busy ? "Saving…" : "Append changes"}</button>
     </div>
     {error ? <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+    {accountsQuery.error ? <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">Could not load social accounts.</p> : null}
 
     <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,.95fr)]">
       <div className="space-y-6">
@@ -192,7 +208,14 @@ export function CalendarPostDetail({
             <label className="block text-xs font-semibold text-slate-600">Title<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /></label>
             <label className="block text-xs font-semibold text-slate-600">Post copy<textarea value={draft.copy} onChange={(event) => setDraft({ ...draft, copy: event.target.value })} rows={7} className="mt-2 w-full resize-y rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal leading-6 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /><span className="mt-1 block text-right font-normal text-slate-400">{draft.copy.length} characters</span></label>
             <div className="grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-slate-600">Date<input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label><label className="text-xs font-semibold text-slate-600">Time<input type="time" value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label></div>
-            <fieldset><legend className="text-xs font-semibold text-slate-600">Publish to</legend><div className="mt-2 flex flex-wrap gap-2">{targets.map((target) => <button type="button" key={target} onClick={() => toggleTarget(target)} className={`rounded-full border px-3 py-2 text-xs font-medium ${draft.targets.includes(target) ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-500"}`}>{target}</button>)}</div></fieldset>
+            <fieldset><legend className="text-xs font-semibold text-slate-600">Publish to</legend><div className="mt-2 flex flex-wrap gap-2">{targetOptions.map((target) => {
+              const definition = socialPlatformDefinitionForTarget(target)
+              const handles = accounts
+                .filter((account) => account.platform === definition.id)
+                .map((account) => account.label || `${definition.prefix}${account.handle}`)
+              const configured = configuredTargets.includes(target)
+              return <button type="button" key={target} onClick={() => toggleTarget(target)} className={`rounded-full border px-3 py-2 text-left text-xs font-medium ${draft.targets.includes(target) ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-500"}`}><span className="block">{target}</span><span className="block max-w-40 truncate text-[10px] font-normal opacity-70">{configured ? handles.join(", ") : "Not connected"}</span></button>
+            })}</div>{!accountsQuery.isLoading && configuredTargets.length === 0 ? <p className="mt-3 text-xs text-slate-500">No social accounts are configured. You can remove unavailable targets from this post or {role === "owner" || role === "admin" ? <Link href="/dashboard/user" className="font-semibold text-violet-700 underline">set up an account</Link> : "ask a team owner or admin to set one up"}.</p> : null}</fieldset>
             <fieldset><legend className="text-xs font-semibold text-slate-600">Label colour</legend><div className="mt-2 flex gap-3">{colours.map((colour) => <button type="button" aria-label={colour} key={colour} onClick={() => setDraft({ ...draft, colour })} className={`size-7 rounded-full ${colourClasses[colour]} ${draft.colour === colour ? "ring-2 ring-slate-800 ring-offset-2" : ""}`} />)}</div></fieldset>
           </div>
         </section>

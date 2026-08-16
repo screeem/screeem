@@ -1,10 +1,11 @@
 import { createClient } from "@/lib/supabase/client";
+import type { SocialPlatform } from "@/lib/social-platforms";
 
 export type SocialAccount = {
   id: string;
   user_id: string;
   team_id: string;
-  platform: "twitter" | "linkedin";
+  platform: SocialPlatform;
   handle: string;
   label: string | null;
 };
@@ -24,7 +25,7 @@ export async function getSocialAccounts(teamId: string): Promise<SocialAccount[]
 export async function addSocialAccount(account: {
     user_id: string;
     team_id: string;
-  platform: string;
+  platform: SocialPlatform;
   handle: string;
   label?: string;
 }): Promise<SocialAccount> {
