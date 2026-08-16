@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { getMembership } from "@/lib/teams/server"
-import type { CalendarEventType, CalendarTarget } from "@/lib/calendar/events"
+import type { CalendarActor, CalendarEventType, CalendarTarget } from "@/lib/calendar/events"
 
 const eventTypes = new Set<CalendarEventType>([
   "post.created", "title.changed", "copy.changed", "schedule.changed", "colour.changed",
@@ -38,11 +38,56 @@ function validPayload(type: CalendarEventType, payload: Record<string, unknown>)
   return type === "change.reverted"
 }
 
-function serialize(row: Record<string, unknown>) {
+type CalendarEventRow = {
+  id: unknown
+  aggregate_id: unknown
+  event_type: unknown
+  payload: unknown
+  reverts_event_id: unknown
+  actor_id: unknown
+  created_at: unknown
+}
+
+const actorFallback = (id: string): CalendarActor => ({
+  id,
+  email: null,
+  displayName: `User ${id.slice(0, 8)}`,
+})
+
+function userDisplayName(user: { email?: string | null; user_metadata?: Record<string, unknown> } | null | undefined) {
+  const metadata = user?.user_metadata ?? {}
+  for (const key of ["full_name", "name", "display_name"]) {
+    const value = metadata[key]
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return user?.email ?? null
+}
+
+async function loadActors(
+  admin: ReturnType<typeof createAdminClient>,
+  rows: readonly CalendarEventRow[],
+) {
+  const actors = new Map<string, CalendarActor>()
+  const actorIds = [...new Set(rows.map((row) => String(row.actor_id)).filter(Boolean))]
+  await Promise.all(actorIds.map(async (id) => {
+    const { data } = await admin.auth.admin.getUserById(id)
+    const user = data.user as { email?: string | null; user_metadata?: Record<string, unknown> } | null
+    actors.set(id, {
+      id,
+      email: user?.email ?? null,
+      displayName: userDisplayName(user) ?? actorFallback(id).displayName,
+    })
+  }))
+  return actors
+}
+
+function serialize(row: CalendarEventRow, actors: ReadonlyMap<string, CalendarActor>) {
+  const actorId = String(row.actor_id)
+  const actor = actors.get(actorId) ?? actorFallback(actorId)
   return {
     id: Number(row.id), aggregateId: row.aggregate_id, eventType: row.event_type,
     payload: row.payload, revertsEventId: row.reverts_event_id === null ? null : Number(row.reverts_event_id),
-    actorId: row.actor_id, createdAt: row.created_at,
+    actorId, actor, createdAt: row.created_at,
   }
 }
 
@@ -51,11 +96,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tea
   const auth = await authorize(teamId)
   if (auth.error) return auth.error
   const after = Math.max(0, Number(request.nextUrl.searchParams.get("after") ?? 0) || 0)
-  const { data, error } = await createAdminClient().from("calendar_events")
+  const admin = createAdminClient()
+  const { data, error } = await admin.from("calendar_events")
     .select("id, aggregate_id, event_type, payload, reverts_event_id, actor_id, created_at")
     .eq("team_id", teamId).gt("id", after).order("id").limit(5000)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ events: (data ?? []).map((row) => serialize(row)) })
+  const rows = (data ?? []) as CalendarEventRow[]
+  const actors = await loadActors(admin, rows)
+  return NextResponse.json({ events: rows.map((row) => serialize(row, actors)) })
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ teamId: string }> }) {
@@ -85,8 +133,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ te
       event_type: type, payload, reverts_event_id: reverts, actor_id: auth.user!.id })
   }
   const revertedIds = rows.flatMap((row) => row.reverts_event_id === null ? [] : [row.reverts_event_id])
+  const admin = createAdminClient()
   if (revertedIds.length) {
-    const { data } = await createAdminClient().from("calendar_events").select("id, aggregate_id")
+    const { data } = await admin.from("calendar_events").select("id, aggregate_id")
       .eq("team_id", teamId).in("id", revertedIds)
     if (data?.length !== new Set(revertedIds).size) {
       return NextResponse.json({ error: "Reverted event does not belong to this calendar" }, { status: 400 })
@@ -98,9 +147,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ te
       }
     }
   }
-  const { data, error } = await createAdminClient().from("calendar_events").upsert(rows, {
+  const { data, error } = await admin.from("calendar_events").upsert(rows, {
     onConflict: "team_id,client_event_id", ignoreDuplicates: true,
   }).select("id, aggregate_id, event_type, payload, reverts_event_id, actor_id, created_at")
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ events: (data ?? []).map((row) => serialize(row)) }, { status: 201 })
+  const persistedRows = (data ?? []) as CalendarEventRow[]
+  const actors = await loadActors(admin, persistedRows)
+  return NextResponse.json({ events: persistedRows.map((row) => serialize(row, actors)) }, { status: 201 })
 }

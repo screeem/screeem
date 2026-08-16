@@ -3,6 +3,12 @@ export type CalendarEventType =
   | "post.created" | "title.changed" | "copy.changed" | "schedule.changed"
   | "colour.changed" | "target.added" | "target.removed" | "change.reverted"
 
+export type CalendarActor = {
+  id: string
+  email: string | null
+  displayName: string
+}
+
 export type CalendarEvent = {
   id: number
   aggregateId: string
@@ -10,6 +16,7 @@ export type CalendarEvent = {
   payload: Record<string, unknown>
   revertsEventId: number | null
   actorId: string
+  actor: CalendarActor
   createdAt: string
 }
 export type CalendarPost = {
