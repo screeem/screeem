@@ -8,7 +8,7 @@ export default async function UserPage() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold text-gray-900">User setup</h1>
+      <h1 className="text-2xl font-semibold text-gray-900">User settings</h1>
       <p className="mt-1 text-gray-500">Manage connected accounts and your Screeem integrations.</p>
       <ProfileForm
         userId={user.id}
