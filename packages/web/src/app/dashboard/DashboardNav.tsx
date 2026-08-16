@@ -4,15 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const teamItems = [
-  { href: "/dashboard/team", label: "Team settings" },
   { href: "/dashboard/calendar", label: "Calendar" },
   { href: "/dashboard/forms", label: "Forms" },
   { href: "/dashboard/integrations", label: "Integrations" },
   { href: "/dashboard/api", label: "API" },
 ];
 
-const userItems = [
-  { href: "/dashboard/user", label: "User" },
+const settingsItems = [
+  { href: "/dashboard/team", label: "Team settings" },
 ];
 
 export function DashboardNav() {
@@ -23,7 +22,7 @@ export function DashboardNav() {
       aria-label="Dashboard sections"
       className="flex justify-between gap-6 overflow-x-auto"
     >
-      {[teamItems, userItems].map((items, index) => (
+      {[teamItems, settingsItems].map((items, index) => (
         <div key={index} className="flex gap-6">
           {items.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
