@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
-import { getMembership } from "@/lib/teams/server"
-import type { CalendarActor, CalendarEventType, CalendarTarget } from "@/lib/calendar/events"
+import { canManage, getMembership } from "@/lib/teams/server"
+import {
+  isApprovalEventType,
+  replayCalendar,
+  validateApprovalTransition,
+} from "@/lib/calendar/events"
+import type {
+  CalendarActor,
+  CalendarEvent,
+  CalendarEventType,
+  CalendarTarget,
+} from "@/lib/calendar/events"
 
 const eventTypes = new Set<CalendarEventType>([
   "post.created", "title.changed", "copy.changed", "schedule.changed", "colour.changed",
   "target.added", "target.removed", "change.reverted",
+  "approval.requested", "approval.granted", "approval.changes_requested", "approval.withdrawn",
 ])
 const targets = new Set<CalendarTarget>(["X", "LinkedIn", "Instagram"])
 const colours = new Set(["violet", "coral", "teal", "blue"])
@@ -16,10 +27,11 @@ async function authorize(teamId: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) }
-  if (!await getMembership(user.id, teamId)) {
+  const membership = await getMembership(user.id, teamId)
+  if (!membership) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
   }
-  return { user }
+  return { user, membership }
 }
 
 function validPayload(type: CalendarEventType, payload: Record<string, unknown>) {
@@ -35,6 +47,13 @@ function validPayload(type: CalendarEventType, payload: Record<string, unknown>)
   if (type === "colour.changed") return colours.has(String(payload.value))
   if (type === "target.added" || type === "target.removed") return targets.has(payload.value as CalendarTarget)
   if (type === "schedule.changed") return typeof payload.date === "string" && typeof payload.time === "string"
+  if (isApprovalEventType(type)) {
+    return Number.isSafeInteger(payload.revision) && Number(payload.revision) > 0
+      && (payload.comment === undefined
+        || (typeof payload.comment === "string" && payload.comment.length <= 2000))
+      && (type !== "approval.changes_requested"
+        || (typeof payload.comment === "string" && payload.comment.trim().length > 0))
+  }
   return type === "change.reverted"
 }
 
@@ -134,8 +153,34 @@ export async function POST(request: NextRequest, context: { params: Promise<{ te
   }
   const revertedIds = rows.flatMap((row) => row.reverts_event_id === null ? [] : [row.reverts_event_id])
   const admin = createAdminClient()
+  const approvalRows = rows.filter((row) => isApprovalEventType(row.event_type))
+  if (approvalRows.length) {
+    if (rows.length !== 1) {
+      return NextResponse.json({ error: "Approval actions must be submitted separately" }, { status: 400 })
+    }
+    const approval = approvalRows[0]
+    const { data: aggregateData, error: aggregateError } = await admin.from("calendar_events")
+      .select("id, aggregate_id, event_type, payload, reverts_event_id, actor_id, created_at")
+      .eq("team_id", teamId).eq("aggregate_id", approval.aggregate_id).order("id").limit(5000)
+    if (aggregateError) return NextResponse.json({ error: aggregateError.message }, { status: 500 })
+    const aggregateEvents = ((aggregateData ?? []) as CalendarEventRow[])
+      .map((row) => serialize(row, new Map())) as CalendarEvent[]
+    const post = replayCalendar(aggregateEvents).find((candidate) => candidate.id === approval.aggregate_id)
+    if (!post) return NextResponse.json({ error: "Post not found" }, { status: 404 })
+    const validationError = validateApprovalTransition(
+      post,
+      approval.event_type,
+      Number((approval.payload as Record<string, unknown>).revision),
+      auth.user!.id,
+      canManage(auth.membership!.role),
+    )
+    if (validationError) {
+      const status = validationError.startsWith("Only") ? 403 : 409
+      return NextResponse.json({ error: validationError }, { status })
+    }
+  }
   if (revertedIds.length) {
-    const { data } = await admin.from("calendar_events").select("id, aggregate_id")
+    const { data } = await admin.from("calendar_events").select("id, aggregate_id, event_type")
       .eq("team_id", teamId).in("id", revertedIds)
     if (data?.length !== new Set(revertedIds).size) {
       return NextResponse.json({ error: "Reverted event does not belong to this calendar" }, { status: 400 })
@@ -145,12 +190,23 @@ export async function POST(request: NextRequest, context: { params: Promise<{ te
       if (row.reverts_event_id !== null && reverted?.aggregate_id !== row.aggregate_id) {
         return NextResponse.json({ error: "Revert must target the same post" }, { status: 400 })
       }
+      if (row.reverts_event_id !== null && String(reverted?.event_type).startsWith("approval.")) {
+        return NextResponse.json({ error: "Approval decisions cannot be reverted" }, { status: 400 })
+      }
     }
   }
   const { data, error } = await admin.from("calendar_events").upsert(rows, {
     onConflict: "team_id,client_event_id", ignoreDuplicates: true,
   }).select("id, aggregate_id, event_type, payload, reverts_event_id, actor_id, created_at")
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    if (error.message.includes("calendar_approval_forbidden:")) {
+      return NextResponse.json({ error: error.message.split(": ")[1] }, { status: 403 })
+    }
+    if (error.message.includes("calendar_approval_conflict:")) {
+      return NextResponse.json({ error: error.message.split(": ")[1] }, { status: 409 })
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
   const persistedRows = (data ?? []) as CalendarEventRow[]
   const actors = await loadActors(admin, persistedRows)
   return NextResponse.json({ events: persistedRows.map((row) => serialize(row, actors)) }, { status: 201 })

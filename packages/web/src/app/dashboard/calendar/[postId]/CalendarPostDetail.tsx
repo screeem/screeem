@@ -2,14 +2,35 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { activeCalendarEventIds, replayCalendar } from "@/lib/calendar/events"
-import type { CalendarEvent, CalendarEventType, CalendarPost, CalendarTarget } from "@/lib/calendar/events"
+import { activeCalendarEventIds, isApprovalEventType, replayCalendar } from "@/lib/calendar/events"
+import type {
+  CalendarApprovalStatus,
+  CalendarEvent,
+  CalendarEventType,
+  CalendarPost,
+  CalendarTarget,
+} from "@/lib/calendar/events"
+import type { TeamRole } from "@/lib/teams/server"
 
 const targets: CalendarTarget[] = ["X", "LinkedIn", "Instagram"]
 const colours = ["violet", "coral", "teal", "blue"]
 
 const colourClasses: Record<string, string> = {
   violet: "bg-violet-500", coral: "bg-orange-500", teal: "bg-teal-500", blue: "bg-blue-500",
+}
+
+const approvalLabels: Record<CalendarApprovalStatus, string> = {
+  draft: "Draft",
+  in_review: "In review",
+  changes_requested: "Changes requested",
+  approved: "Approved",
+}
+
+const approvalClasses: Record<CalendarApprovalStatus, string> = {
+  draft: "bg-slate-100 text-slate-600",
+  in_review: "bg-amber-100 text-amber-800",
+  changes_requested: "bg-orange-100 text-orange-800",
+  approved: "bg-emerald-100 text-emerald-800",
 }
 
 const eventLabels: Record<CalendarEventType, string> = {
@@ -21,6 +42,10 @@ const eventLabels: Record<CalendarEventType, string> = {
   "target.added": "Social network added",
   "target.removed": "Social network removed",
   "change.reverted": "Change reverted",
+  "approval.requested": "Approval requested",
+  "approval.granted": "Post approved",
+  "approval.changes_requested": "Changes requested",
+  "approval.withdrawn": "Approval request withdrawn",
 }
 
 function actorLabel(event: CalendarEvent) {
@@ -32,17 +57,39 @@ function eventDetail(event: CalendarEvent) {
   if (event.eventType === "schedule.changed") return `${String(event.payload.date)} at ${String(event.payload.time)}`
   if (event.eventType === "target.added" || event.eventType === "target.removed") return String(event.payload.value)
   if (event.eventType === "change.reverted") return `Event #${event.revertsEventId}`
+  if (isApprovalEventType(event.eventType)) {
+    const comment = typeof event.payload.comment === "string" ? event.payload.comment : ""
+    return `Revision ${String(event.payload.revision)}${comment ? ` · ${comment}` : ""}`
+  }
   return String(event.payload.value ?? "")
 }
 
-export function CalendarPostDetail({ teamId, postId }: { teamId: string; postId: string }) {
+export function CalendarPostDetail({
+  teamId, postId, currentUserId, role,
+}: {
+  teamId: string
+  postId: string
+  currentUserId: string
+  role: TeamRole
+}) {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [draft, setDraft] = useState<CalendarPost | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+  const [reviewComment, setReviewComment] = useState("")
   const postEvents = useMemo(() => events.filter((event) => event.aggregateId === postId), [events, postId])
   const activeEventIds = useMemo(() => activeCalendarEventIds(events), [events])
+  const persistedPost = useMemo(
+    () => replayCalendar(events).find((post) => post.id === postId) ?? null,
+    [events, postId],
+  )
+  const dirty = Boolean(draft && persistedPost && (
+    draft.title !== persistedPost.title || draft.copy !== persistedPost.copy
+    || draft.date !== persistedPost.date || draft.time !== persistedPost.time
+    || draft.colour !== persistedPost.colour
+    || [...draft.targets].sort().join() !== [...persistedPost.targets].sort().join()
+  ))
 
   async function sync() {
     const response = await fetch(`/api/teams/${teamId}/calendar/events`)
@@ -68,7 +115,12 @@ export function CalendarPostDetail({ teamId, postId }: { teamId: string; postId:
     return () => { stopped = true }
   }, [postId, teamId])
 
-  type PendingEvent = { aggregateId: string; eventType: CalendarEventType; payload: Record<string, unknown>; revertsEventId?: number }
+  type PendingEvent = {
+    aggregateId: string
+    eventType: CalendarEventType
+    payload: Record<string, unknown>
+    revertsEventId?: number
+  }
 
   async function append(changes: PendingEvent[]) {
     setBusy(true)
@@ -82,8 +134,10 @@ export function CalendarPostDetail({ teamId, postId }: { teamId: string; postId:
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || "Could not save changes")
       await sync()
+      return true
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save changes")
+      return false
     } finally {
       setBusy(false)
     }
@@ -94,7 +148,9 @@ export function CalendarPostDetail({ teamId, postId }: { teamId: string; postId:
     const original = replayCalendar(events).find((post) => post.id === postId)
     if (!original) return
     const changes: PendingEvent[] = []
-    const add = (eventType: CalendarEventType, payload: Record<string, unknown>) => changes.push({ aggregateId: postId, eventType, payload })
+    const add = (eventType: CalendarEventType, payload: Record<string, unknown>) => {
+      changes.push({ aggregateId: postId, eventType, payload })
+    }
     if (original.title !== draft.title) add("title.changed", { value: draft.title })
     if (original.copy !== draft.copy) add("copy.changed", { value: draft.copy })
     if (original.date !== draft.date || original.time !== draft.time) add("schedule.changed", { date: draft.date, time: draft.time })
@@ -102,6 +158,15 @@ export function CalendarPostDetail({ teamId, postId }: { teamId: string; postId:
     draft.targets.filter((target) => !original.targets.includes(target)).forEach((value) => add("target.added", { value }))
     original.targets.filter((target) => !draft.targets.includes(target)).forEach((value) => add("target.removed", { value }))
     if (changes.length) await append(changes)
+  }
+
+  async function approvalAction(eventType: CalendarEventType) {
+    if (!draft || dirty) return
+    const saved = await append([{ aggregateId: postId, eventType, payload: {
+      revision: draft.revision,
+      ...(reviewComment.trim() ? { comment: reviewComment.trim() } : {}),
+    } }])
+    if (saved) setReviewComment("")
   }
 
   function toggleTarget(target: CalendarTarget) {
@@ -114,8 +179,8 @@ export function CalendarPostDetail({ teamId, postId }: { teamId: string; postId:
 
   return <div className="pb-10 text-slate-900">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div><Link href="/dashboard/calendar" className="text-sm font-medium text-slate-500 hover:text-violet-700">← Content calendar</Link><h1 className="mt-3 text-3xl font-semibold tracking-tight">{draft.title}</h1><p className="mt-2 text-sm text-slate-500">Edit the post, review its previews, and inspect its complete immutable history.</p></div>
-      <button disabled={busy || !draft.title.trim() || draft.targets.length === 0} onClick={() => void save()} className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">{busy ? "Saving…" : "Append changes"}</button>
+      <div><Link href="/dashboard/calendar" className="text-sm font-medium text-slate-500 hover:text-violet-700">← Content calendar</Link><div className="mt-3 flex flex-wrap items-center gap-3"><h1 className="text-3xl font-semibold tracking-tight">{draft.title}</h1><ApprovalBadge status={draft.approval.status} /></div><p className="mt-2 text-sm text-slate-500">Edit the post, review its previews, and inspect its complete immutable history.</p></div>
+      <button disabled={busy || !dirty || !draft.title.trim() || draft.targets.length === 0} onClick={() => void save()} className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">{busy ? "Saving…" : "Append changes"}</button>
     </div>
     {error ? <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
@@ -131,15 +196,74 @@ export function CalendarPostDetail({ teamId, postId }: { teamId: string; postId:
             <fieldset><legend className="text-xs font-semibold text-slate-600">Label colour</legend><div className="mt-2 flex gap-3">{colours.map((colour) => <button type="button" aria-label={colour} key={colour} onClick={() => setDraft({ ...draft, colour })} className={`size-7 rounded-full ${colourClasses[colour]} ${draft.colour === colour ? "ring-2 ring-slate-800 ring-offset-2" : ""}`} />)}</div></fieldset>
           </div>
         </section>
-        <History events={postEvents} activeEventIds={activeEventIds} busy={busy} onRevert={(event) => append([{ aggregateId: postId, eventType: "change.reverted", payload: {}, revertsEventId: event.id }])} />
+        <ApprovalPanel
+          post={draft}
+          dirty={dirty}
+          busy={busy}
+          currentUserId={currentUserId}
+          canApprove={role === "owner" || role === "admin"}
+          comment={reviewComment}
+          onComment={setReviewComment}
+          onAction={approvalAction}
+        />
+        <History events={postEvents} activeEventIds={activeEventIds} busy={busy} onRevert={async (event) => {
+          await append([{
+            aggregateId: postId, eventType: "change.reverted", payload: {}, revertsEventId: event.id,
+          }])
+        }} />
       </div>
       <SocialPreviews post={draft} />
     </div>
   </div>
 }
 
-function History({ events, activeEventIds, busy, onRevert }: { events: CalendarEvent[]; activeEventIds: Set<number>; busy: boolean; onRevert: (event: CalendarEvent) => Promise<void> }) {
-  return <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Post history</h2><p className="mt-1 text-xs text-slate-500">Every edit is retained. Reverting creates another event.</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500">{events.length} events</span></div><div className="mt-5 border-l border-slate-200 pl-5">{[...events].sort((a, b) => b.id - a.id).map((event) => { const active = activeEventIds.has(event.id); return <div key={event.id} className="relative flex items-start justify-between gap-4 pb-5 text-xs before:absolute before:-left-[25px] before:top-1 before:size-2 before:rounded-full before:bg-violet-400"><div><strong className="font-semibold text-slate-700">{eventLabels[event.eventType]}</strong><p className="mt-1 max-w-md break-words text-slate-500">{eventDetail(event)}</p><p className="mt-1 text-slate-400">#{event.id} · {active ? "Active" : "Reverted"} · {actorLabel(event)} · {new Date(event.createdAt).toLocaleString()}</p></div>{active ? <button disabled={busy} onClick={() => void onRevert(event)} className="rounded-md px-2 py-1 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-40">Revert</button> : null}</div>})}</div></section>
+function ApprovalBadge({ status }: { status: CalendarApprovalStatus }) {
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${approvalClasses[status]}`}>
+    {approvalLabels[status]}
+  </span>
+}
+
+function ApprovalPanel({
+  post, dirty, busy, currentUserId, canApprove, comment, onComment, onAction,
+}: {
+  post: CalendarPost
+  dirty: boolean
+  busy: boolean
+  currentUserId: string
+  canApprove: boolean
+  comment: string
+  onComment: (value: string) => void
+  onAction: (eventType: CalendarEventType) => Promise<void>
+}) {
+  const { approval } = post
+  const canWithdraw = canApprove || approval.requestedBy === currentUserId
+  return <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="flex items-start justify-between gap-4">
+      <div><h2 className="text-base font-semibold">Approval</h2><p className="mt-1 text-xs text-slate-500">Decisions apply only to revision {post.revision}.</p></div>
+      <ApprovalBadge status={approval.status} />
+    </div>
+    {approval.comment ? <blockquote className="mt-4 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">{approval.comment}</blockquote> : null}
+    {dirty ? <p className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-xs text-amber-800">Save your edits before changing approval. Saving creates a new revision and returns the post to Draft.</p> : null}
+    <label className="mt-4 block text-xs font-semibold text-slate-600">Review note<textarea value={comment} maxLength={2000} onChange={(event) => onComment(event.target.value)} rows={3} placeholder={approval.status === "in_review" ? "Add context for the decision" : "Add context for reviewers"} className="mt-2 w-full resize-y rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal outline-none focus:border-violet-400" /></label>
+    <div className="mt-4 flex flex-wrap gap-2">
+      {(approval.status === "draft" || approval.status === "changes_requested") ? <button disabled={busy || dirty} onClick={() => void onAction("approval.requested")} className="rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-40">Request approval</button> : null}
+      {approval.status === "in_review" && canApprove ? <button disabled={busy || dirty} onClick={() => void onAction("approval.granted")} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-40">Approve revision</button> : null}
+      {approval.status === "in_review" && canApprove ? <button disabled={busy || dirty || !comment.trim()} onClick={() => void onAction("approval.changes_requested")} className="rounded-lg border border-orange-200 px-3.5 py-2 text-sm font-semibold text-orange-700 disabled:opacity-40">Request changes</button> : null}
+      {approval.status === "in_review" && canWithdraw ? <button disabled={busy || dirty} onClick={() => void onAction("approval.withdrawn")} className="rounded-lg border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-600 disabled:opacity-40">Withdraw</button> : null}
+    </div>
+    {approval.status === "in_review" && !canApprove ? <p className="mt-3 text-xs text-slate-500">A team owner or admin must review this revision.</p> : null}
+  </section>
+}
+
+function History({
+  events, activeEventIds, busy, onRevert,
+}: {
+  events: CalendarEvent[]
+  activeEventIds: Set<number>
+  busy: boolean
+  onRevert: (event: CalendarEvent) => Promise<void>
+}) {
+  return <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Post history</h2><p className="mt-1 text-xs text-slate-500">Every edit and approval decision is retained.</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500">{events.length} events</span></div><div className="mt-5 border-l border-slate-200 pl-5">{[...events].sort((a, b) => b.id - a.id).map((event) => { const active = activeEventIds.has(event.id); return <div key={event.id} className="relative flex items-start justify-between gap-4 pb-5 text-xs before:absolute before:-left-[25px] before:top-1 before:size-2 before:rounded-full before:bg-violet-400"><div><strong className="font-semibold text-slate-700">{eventLabels[event.eventType]}</strong><p className="mt-1 max-w-md break-words text-slate-500">{eventDetail(event)}</p><p className="mt-1 text-slate-400">#{event.id} · {active ? "Active" : "Reverted"} · {actorLabel(event)} · {new Date(event.createdAt).toLocaleString()}</p></div>{active && !isApprovalEventType(event.eventType) ? <button disabled={busy} onClick={() => void onRevert(event)} className="rounded-md px-2 py-1 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-40">Revert</button> : null}</div>})}</div></section>
 }
 
 function SocialPreviews({ post }: { post: CalendarPost }) {

@@ -2,8 +2,14 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { activeCalendarEventIds, replayCalendar } from "@/lib/calendar/events"
-import type { CalendarEvent, CalendarEventType, CalendarPost, CalendarTarget } from "@/lib/calendar/events"
+import { activeCalendarEventIds, isApprovalEventType, replayCalendar } from "@/lib/calendar/events"
+import type {
+  CalendarApprovalStatus,
+  CalendarEvent,
+  CalendarEventType,
+  CalendarPost,
+  CalendarTarget,
+} from "@/lib/calendar/events"
 
 type Target = CalendarTarget
 type Post = CalendarPost
@@ -19,6 +25,18 @@ const colourStyle: Record<string, string> = {
   coral: "border-l-orange-500 bg-orange-50/70",
   teal: "border-l-teal-500 bg-teal-50/70",
   blue: "border-l-blue-500 bg-blue-50/70",
+}
+
+const approvalStyle: Record<CalendarApprovalStatus, string> = {
+  draft: "bg-slate-200 text-slate-600",
+  in_review: "bg-amber-200 text-amber-800",
+  changes_requested: "bg-orange-200 text-orange-800",
+  approved: "bg-emerald-200 text-emerald-800",
+}
+
+const approvalLabel: Record<CalendarApprovalStatus, string> = {
+  draft: "Draft", in_review: "In review",
+  changes_requested: "Changes", approved: "Approved",
 }
 
 const monthName = new Intl.DateTimeFormat("en", { month: "long", year: "numeric", timeZone: "UTC" })
@@ -42,6 +60,7 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
   const [selected, setSelected] = useState<Post | null>(null)
   const [composing, setComposing] = useState(false)
   const [filter, setFilter] = useState<Target | "All">("All")
+  const [approvalFilter, setApprovalFilter] = useState<CalendarApprovalStatus | "All">("All")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const posts = useMemo(() => replayCalendar(events), [events])
@@ -79,14 +98,19 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
     })
   }, [year, month])
 
-  const visible = posts.filter((post) => filter === "All" || post.targets.includes(filter))
+  const visible = posts.filter((post) => (filter === "All" || post.targets.includes(filter))
+    && (approvalFilter === "All" || post.approval.status === approvalFilter))
 
   function shiftMonth(amount: number) {
     setCursor(new Date(Date.UTC(year, month + amount, 1)))
   }
 
   function openNew(date = isoDate(year, month, 14)) {
-    setSelected({ id: "", title: "", copy: "", date, time: "09:00", targets: ["X"], colour: "violet", createdEventId: 0, activeEventIds: [] })
+    setSelected({
+      id: "", title: "", copy: "", date, time: "09:00", targets: ["X"], colour: "violet",
+      createdEventId: 0, activeEventIds: [], revision: 1,
+      approval: { status: "draft", reviewRevision: null, requestedBy: null, comment: "" },
+    })
     setComposing(true)
   }
 
@@ -171,6 +195,9 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
             {(["All", "X", "LinkedIn", "Instagram"] as const).map((target) => <button key={target} onClick={() => setFilter(target)} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${filter === target ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{target}</button>)}
           </div>
         </div>
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-3">
+          {(["All", "draft", "in_review", "changes_requested", "approved"] as const).map((status) => <button key={status} onClick={() => setApprovalFilter(status)} className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${approvalFilter === status ? "bg-violet-600 text-white" : "bg-white text-slate-500 ring-1 ring-slate-200 hover:text-slate-800"}`}>{status === "All" ? "All approvals" : approvalLabel[status]}</button>)}
+        </div>
         <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/70">
           {weekdays.map((day) => <div key={day} className="px-2 py-2.5 text-center text-[10px] font-bold tracking-widest text-slate-400">{day}</div>)}
         </div>
@@ -182,7 +209,7 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
               {cell && <div className={`mb-1 ml-1 grid size-6 place-items-center rounded-full text-xs ${today ? "bg-violet-600 font-semibold text-white" : "text-slate-500"}`}>{cell.day}</div>}
               {dayPosts.map((post) => <Link key={post.id} href={`/dashboard/calendar/${post.id}`} className={`mb-1 block w-full rounded-md border-l-[3px] px-2 py-1.5 text-left transition hover:-translate-y-px hover:shadow-sm ${colourStyle[post.colour]}`}>
                 <span className="block truncate text-[11px] font-semibold text-slate-800">{post.title}</span>
-                <span className="mt-1 flex items-center justify-between gap-1 text-[9px] text-slate-500"><span>{post.time}</span><span className="flex -space-x-1">{post.targets.map((target) => <TargetDot key={target} target={target} />)}</span></span>
+                <span className="mt-1 flex items-center justify-between gap-1 text-[9px] text-slate-500"><span className={`rounded-full px-1.5 py-0.5 font-medium ${approvalStyle[post.approval.status]}`}>{approvalLabel[post.approval.status]}</span><span>{post.time}</span><span className="flex -space-x-1">{post.targets.map((target) => <TargetDot key={target} target={target} />)}</span></span>
               </Link>)}
             </div>
           })}
@@ -217,7 +244,7 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
                   <span className={activeEventIds.has(event.id) ? "text-emerald-600" : "text-slate-400"}>
                     {activeEventIds.has(event.id) ? "Active" : "Reverted"}
                   </span>
-                  {activeEventIds.has(event.id) ? (
+                  {activeEventIds.has(event.id) && !isApprovalEventType(event.eventType) ? (
                     <button disabled={busy} onClick={() => void revert(event)} className="rounded-md border border-slate-200 px-2.5 py-1.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-40">Revert</button>
                   ) : null}
                 </div>

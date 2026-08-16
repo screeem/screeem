@@ -64,6 +64,25 @@ export const calendarEvents = pgTable(
   ],
 )
 
+export const calendarPostWorkflows = pgTable(
+  "calendar_post_workflows",
+  {
+    teamId: uuid("team_id").notNull(),
+    aggregateId: uuid("aggregate_id").notNull(),
+    revision: bigint("revision", { mode: "number" }).notNull(),
+    status: text("status", {
+      enum: ["draft", "in_review", "changes_requested", "approved"],
+    }).notNull().default("draft"),
+    reviewRevision: bigint("review_revision", { mode: "number" }),
+    requestedBy: uuid("requested_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.aggregateId] }),
+    index("calendar_post_workflows_team_status_idx").on(table.teamId, table.status),
+  ],
+)
+
 export const apiKeys = pgTable(
   "api_keys",
   {
