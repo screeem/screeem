@@ -1,4 +1,6 @@
-export type CalendarTarget = "X" | "LinkedIn" | "Instagram"
+import { calendarTargets, type CalendarTarget } from "../social-platforms"
+
+export type { CalendarTarget } from "../social-platforms"
 export type CalendarApprovalStatus = "draft" | "in_review" | "changes_requested" | "approved"
 export type CalendarEventType =
   | "post.created" | "title.changed" | "copy.changed" | "schedule.changed"
@@ -41,7 +43,7 @@ export type CalendarPost = {
   }
 }
 
-const targets = new Set<CalendarTarget>(["X", "LinkedIn", "Instagram"])
+const targets = new Set<CalendarTarget>(calendarTargets)
 const contentEventTypes = new Set<CalendarEventType>([
   "post.created", "title.changed", "copy.changed", "schedule.changed",
   "colour.changed", "target.added", "target.removed", "change.reverted",

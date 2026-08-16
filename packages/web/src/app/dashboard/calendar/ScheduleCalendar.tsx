@@ -1,8 +1,14 @@
 "use client"
 
 import Link from "next/link"
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import { activeCalendarEventIds, isApprovalEventType, replayCalendar } from "@/lib/calendar/events"
+import { getSocialAccounts, type SocialAccount } from "@/lib/queries/profile"
+import {
+  configuredCalendarTargets,
+  socialPlatformDefinitionForTarget,
+} from "@/lib/social-platforms"
 import type {
   CalendarApprovalStatus,
   CalendarEvent,
@@ -47,14 +53,21 @@ function isoDate(year: number, month: number, day: number) {
 }
 
 function TargetDot({ target }: { target: Target }) {
-  return <span title={target} className={`grid size-5 place-items-center rounded-full text-[9px] font-bold ring-2 ring-white ${targetStyle[target]}`}>{target === "Instagram" ? "I" : target === "LinkedIn" ? "in" : "X"}</span>
+  const definition = socialPlatformDefinitionForTarget(target)
+  return <span title={target} className={`grid size-5 place-items-center rounded-full text-[9px] font-bold ring-2 ring-white ${targetStyle[target]}`}>{definition.badge}</span>
 }
 
 function actorLabel(event: CalendarEvent) {
   return event.actor.displayName || event.actor.email || `User ${event.actorId.slice(0, 8)}`
 }
 
-export function ScheduleCalendar({ teamId }: { teamId: string }) {
+export function ScheduleCalendar({
+  teamId,
+  canManageAccounts,
+}: {
+  teamId: string
+  canManageAccounts: boolean
+}) {
   const [cursor, setCursor] = useState(new Date(Date.UTC(2026, 7, 1)))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [selected, setSelected] = useState<Post | null>(null)
@@ -63,6 +76,12 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
   const [approvalFilter, setApprovalFilter] = useState<CalendarApprovalStatus | "All">("All")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const accountsQuery = useQuery({
+    queryKey: ["social-accounts", teamId],
+    queryFn: () => getSocialAccounts(teamId),
+  })
+  const accounts = useMemo(() => accountsQuery.data ?? [], [accountsQuery.data])
+  const availableTargets = useMemo(() => configuredCalendarTargets(accounts), [accounts])
   const posts = useMemo(() => replayCalendar(events), [events])
   const activeEventIds = useMemo(() => activeCalendarEventIds(events), [events])
 
@@ -98,7 +117,8 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
     })
   }, [year, month])
 
-  const visible = posts.filter((post) => (filter === "All" || post.targets.includes(filter))
+  const activeFilter = filter !== "All" && !availableTargets.includes(filter) ? "All" : filter
+  const visible = posts.filter((post) => (activeFilter === "All" || post.targets.includes(activeFilter))
     && (approvalFilter === "All" || post.approval.status === approvalFilter))
 
   function shiftMonth(amount: number) {
@@ -106,8 +126,10 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
   }
 
   function openNew(date = isoDate(year, month, 14)) {
+    const defaultTarget = availableTargets[0]
+    if (!defaultTarget) return
     setSelected({
-      id: "", title: "", copy: "", date, time: "09:00", targets: ["X"], colour: "violet",
+      id: "", title: "", copy: "", date, time: "09:00", targets: [defaultTarget], colour: "violet",
       createdEventId: 0, activeEventIds: [], revision: 1,
       approval: { status: "draft", reviewRevision: null, requestedBy: null, comment: "" },
     })
@@ -180,9 +202,23 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
           <h1 className="text-3xl font-semibold tracking-tight">Content calendar</h1>
           <p className="mt-2 text-sm text-slate-500">Plan once, publish everywhere. Every change stays in the timeline.</p>
         </div>
-        <button onClick={() => openNew()} className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700">+ Schedule post</button>
+        {availableTargets.length > 0 ? (
+          <button disabled={accountsQuery.isLoading} onClick={() => openNew()} className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700 disabled:opacity-50">+ Schedule post</button>
+        ) : accountsQuery.isLoading ? (
+          <button disabled className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white opacity-50">Loading accounts…</button>
+        ) : canManageAccounts ? (
+          <Link href="/dashboard/user" className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700">Set up accounts</Link>
+        ) : (
+          <button disabled className="rounded-lg bg-slate-300 px-4 py-2.5 text-sm font-semibold text-white">Accounts required</button>
+        )}
       </div>
       {error ? <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+      {accountsQuery.error ? <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">Could not load social accounts.</p> : null}
+      {!accountsQuery.isLoading && !accountsQuery.error && availableTargets.length === 0 ? (
+        <p className="mt-4 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-800">
+          {canManageAccounts ? <>Set up at least one social account before scheduling a post. <Link href="/dashboard/user" className="font-semibold underline">Open user settings</Link></> : "Ask a team owner or admin to set up a social account before scheduling a post."}
+        </p>
+      ) : null}
 
       <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
@@ -192,7 +228,7 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
             <h2 className="ml-2 text-base font-semibold">{monthName.format(cursor)}</h2>
           </div>
           <div className="flex rounded-lg bg-slate-100 p-1">
-            {(["All", "X", "LinkedIn", "Instagram"] as const).map((target) => <button key={target} onClick={() => setFilter(target)} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${filter === target ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{target}</button>)}
+            {(["All", ...availableTargets] as const).map((target) => <button key={target} onClick={() => setFilter(target)} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${activeFilter === target ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{target}</button>)}
           </div>
         </div>
         <div className="flex flex-wrap gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-3">
@@ -205,7 +241,7 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
           {cells.map((cell, index) => {
             const dayPosts = cell ? visible.filter((post) => post.date === cell.date) : []
             const today = cell?.date === "2026-08-14"
-            return <div key={index} onDoubleClick={() => cell && openNew(cell.date)} className={`min-h-28 border-b border-r border-slate-100 p-1.5 sm:min-h-32 ${!cell ? "bg-slate-50/50" : "bg-white hover:bg-slate-50/40"}`}>
+            return <div key={index} onDoubleClick={() => cell && availableTargets.length > 0 && openNew(cell.date)} className={`min-h-28 border-b border-r border-slate-100 p-1.5 sm:min-h-32 ${!cell ? "bg-slate-50/50" : "bg-white hover:bg-slate-50/40"}`}>
               {cell && <div className={`mb-1 ml-1 grid size-6 place-items-center rounded-full text-xs ${today ? "bg-violet-600 font-semibold text-white" : "text-slate-500"}`}>{cell.day}</div>}
               {dayPosts.map((post) => <Link key={post.id} href={`/dashboard/calendar/${post.id}`} className={`mb-1 block w-full rounded-md border-l-[3px] px-2 py-1.5 text-left transition hover:-translate-y-px hover:shadow-sm ${colourStyle[post.colour]}`}>
                 <span className="block truncate text-[11px] font-semibold text-slate-800">{post.title}</span>
@@ -257,6 +293,8 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
       {composing && selected ? (
         <PostEditor
           post={selected}
+          accounts={accounts}
+          availableTargets={availableTargets}
           busy={busy}
           onClose={() => setComposing(false)}
           onSave={save}
@@ -267,9 +305,11 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
 }
 
 function PostEditor({
-  post, busy, onClose, onSave,
+  post, accounts, availableTargets, busy, onClose, onSave,
 }: {
   post: Post
+  accounts: SocialAccount[]
+  availableTargets: Target[]
   busy: boolean
   onClose: () => void
   onSave: (post: Post) => Promise<void>
@@ -288,7 +328,13 @@ function PostEditor({
         <label className="block text-xs font-semibold text-slate-600">Title<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Give this post a name" className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /></label>
         <label className="block text-xs font-semibold text-slate-600">Post copy<textarea value={draft.copy} onChange={(event) => setDraft({ ...draft, copy: event.target.value })} rows={5} placeholder="What do you want to share?" className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal leading-6 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /><span className="mt-1 block text-right font-normal text-slate-400">{draft.copy.length} characters</span></label>
         <div className="grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-slate-600">Date<input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label><label className="text-xs font-semibold text-slate-600">Time<input type="time" value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label></div>
-        <fieldset><legend className="text-xs font-semibold text-slate-600">Publish to</legend><div className="mt-2 flex flex-wrap gap-2">{(["X", "LinkedIn", "Instagram"] as Target[]).map((target) => <button type="button" key={target} onClick={() => toggleTarget(target)} className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium ${draft.targets.includes(target) ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-500"}`}><TargetDot target={target} />{target}</button>)}</div></fieldset>
+        <fieldset><legend className="text-xs font-semibold text-slate-600">Publish to</legend><div className="mt-2 flex flex-wrap gap-2">{availableTargets.map((target) => {
+          const definition = socialPlatformDefinitionForTarget(target)
+          const handles = accounts
+            .filter((account) => account.platform === definition.id)
+            .map((account) => account.label || `${definition.prefix}${account.handle}`)
+          return <button type="button" key={target} onClick={() => toggleTarget(target)} className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium ${draft.targets.includes(target) ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-500"}`}><TargetDot target={target} /><span className="text-left"><span className="block">{target}</span><span className="block max-w-40 truncate text-[10px] font-normal opacity-70">{handles.join(", ")}</span></span></button>
+        })}</div></fieldset>
         <fieldset><legend className="text-xs font-semibold text-slate-600">Label colour</legend><div className="mt-2 flex gap-2">{Object.keys(colourStyle).map((colour) => <button type="button" aria-label={colour} key={colour} onClick={() => setDraft({ ...draft, colour })} className={`size-7 rounded-full ${colour === "violet" ? "bg-violet-500" : colour === "coral" ? "bg-orange-500" : colour === "teal" ? "bg-teal-500" : "bg-blue-500"} ${draft.colour === colour ? "ring-2 ring-slate-800 ring-offset-2" : ""}`} />)}</div></fieldset>
       </div>
       <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4"><span className="text-xs text-slate-400">Append-only sync</span><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancel</button><button disabled={busy || !draft.title.trim() || draft.targets.length === 0} onClick={() => void onSave(draft)} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{busy ? "Saving…" : post.id ? "Append changes" : "Schedule post"}</button></div></div>

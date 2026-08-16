@@ -13,13 +13,14 @@ import type {
   CalendarEventType,
   CalendarTarget,
 } from "@/lib/calendar/events"
+import { calendarTargets, configuredCalendarTargets } from "@/lib/social-platforms"
 
 const eventTypes = new Set<CalendarEventType>([
   "post.created", "title.changed", "copy.changed", "schedule.changed", "colour.changed",
   "target.added", "target.removed", "change.reverted",
   "approval.requested", "approval.granted", "approval.changes_requested", "approval.withdrawn",
 ])
-const targets = new Set<CalendarTarget>(["X", "LinkedIn", "Instagram"])
+const targets = new Set<CalendarTarget>(calendarTargets)
 const colours = new Set(["violet", "coral", "teal", "blue"])
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -153,6 +154,29 @@ export async function POST(request: NextRequest, context: { params: Promise<{ te
   }
   const revertedIds = rows.flatMap((row) => row.reverts_event_id === null ? [] : [row.reverts_event_id])
   const admin = createAdminClient()
+  const newlyTargetedPlatforms = new Set<CalendarTarget>()
+  for (const row of rows) {
+    if (row.event_type === "post.created") {
+      for (const target of (row.payload as Record<string, unknown>).targets as CalendarTarget[]) {
+        newlyTargetedPlatforms.add(target)
+      }
+    }
+    if (row.event_type === "target.added") {
+      newlyTargetedPlatforms.add((row.payload as Record<string, unknown>).value as CalendarTarget)
+    }
+  }
+  if (newlyTargetedPlatforms.size > 0) {
+    const { data: accounts, error: accountsError } = await admin.from("social_accounts")
+      .select("platform").eq("team_id", teamId)
+    if (accountsError) return NextResponse.json({ error: accountsError.message }, { status: 500 })
+    const configuredTargets = new Set(configuredCalendarTargets(accounts ?? []))
+    const missingTargets = [...newlyTargetedPlatforms].filter((target) => !configuredTargets.has(target))
+    if (missingTargets.length > 0) {
+      return NextResponse.json({
+        error: `Set up ${missingTargets.join(", ")} ${missingTargets.length === 1 ? "account" : "accounts"} before scheduling to ${missingTargets.length === 1 ? "it" : "them"}.`,
+      }, { status: 400 })
+    }
+  }
   const approvalRows = rows.filter((row) => isApprovalEventType(row.event_type))
   if (approvalRows.length) {
     if (rows.length !== 1) {
