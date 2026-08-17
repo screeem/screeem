@@ -3,6 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { canManage, getMembership } from "@/lib/teams/server"
 import {
+  isValidCalendarTag,
+  isValidCalendarTags,
   isApprovalEventType,
   replayCalendar,
   validateApprovalTransition,
@@ -15,12 +17,12 @@ import type {
 } from "@/lib/calendar/events"
 
 const eventTypes = new Set<CalendarEventType>([
-  "post.created", "title.changed", "copy.changed", "schedule.changed", "colour.changed",
+  "post.created", "title.changed", "copy.changed", "schedule.changed",
+  "tag.added", "tag.removed",
   "target.added", "target.removed", "change.reverted",
   "approval.requested", "approval.granted", "approval.changes_requested", "approval.withdrawn",
 ])
 const targets = new Set<CalendarTarget>(["X", "LinkedIn", "Instagram"])
-const colours = new Set(["violet", "coral", "teal", "blue"])
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 async function authorize(teamId: string) {
@@ -39,12 +41,12 @@ function validPayload(type: CalendarEventType, payload: Record<string, unknown>)
     return typeof payload.title === "string" && payload.title.trim().length > 0
       && payload.title.length <= 160 && typeof payload.copy === "string" && payload.copy.length <= 10000
       && typeof payload.date === "string" && typeof payload.time === "string"
-      && colours.has(String(payload.colour)) && Array.isArray(payload.targets)
+      && isValidCalendarTags(payload.tags) && Array.isArray(payload.targets)
       && payload.targets.length > 0 && payload.targets.every((target) => targets.has(target as CalendarTarget))
   }
   if (type === "title.changed") return typeof payload.value === "string" && payload.value.trim().length > 0 && payload.value.length <= 160
   if (type === "copy.changed") return typeof payload.value === "string" && payload.value.length <= 10000
-  if (type === "colour.changed") return colours.has(String(payload.value))
+  if (type === "tag.added" || type === "tag.removed") return isValidCalendarTag(payload.value)
   if (type === "target.added" || type === "target.removed") return targets.has(payload.value as CalendarTarget)
   if (type === "schedule.changed") return typeof payload.date === "string" && typeof payload.time === "string"
   if (isApprovalEventType(type)) {

@@ -97,6 +97,17 @@ describe("calendar events API", () => {
     expect(response.status).toBe(409)
     expect((await response.json()).error).toContain("changed since")
   })
+
+  it.each([
+    [[" launch"]],
+    [["Launch", "launch"]],
+    [Array.from({ length: 11 }, (_, index) => `tag-${index}`)],
+  ])("rejects invalid post tags", async (tags) => {
+    const response = await POST(postCreationRequest(tags), context)
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: "Invalid calendar event" })
+  })
 })
 
 function request() {
@@ -123,7 +134,7 @@ function approvalHistory() {
       event_type: "post.created",
       payload: {
         title: "Launch", copy: "Hello", date: "2026-08-20", time: "09:00",
-        colour: "violet", targets: ["X"],
+        tags: ["launch"], targets: ["X"],
       },
       reverts_event_id: null,
       actor_id: actorId,
@@ -139,6 +150,22 @@ function approvalHistory() {
       created_at: "2026-08-14T11:00:00.000Z",
     },
   ]
+}
+
+function postCreationRequest(tags: string[]) {
+  return new NextRequest(`http://localhost/api/teams/${teamId}/calendar/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ events: [{
+      aggregateId: "74000000-0000-4000-8000-000000000001",
+      clientEventId: "75000000-0000-4000-8000-000000000001",
+      eventType: "post.created",
+      payload: {
+        title: "Launch", copy: "Hello", date: "2026-08-20", time: "09:00",
+        tags, targets: ["X"],
+      },
+    }] }),
+  })
 }
 
 function approvalRequest(eventType: string, revision: number) {

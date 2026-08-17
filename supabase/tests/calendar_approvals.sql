@@ -25,7 +25,7 @@ SELECT id,
   '82000000-0000-0000-0000-000000000001',
   '83000000-0000-0000-0000-000000000001',
   'post.created',
-  '{"title":"Launch","copy":"Hello","date":"2026-08-20","time":"09:00","colour":"violet","targets":["X"]}',
+  '{"title":"Launch","copy":"Hello","date":"2026-08-20","time":"09:00","tags":["launch"],"targets":["X"]}',
   '81000000-0000-0000-0000-000000000002'
 FROM teams WHERE created_by = '81000000-0000-0000-0000-000000000001';
 
@@ -92,7 +92,7 @@ INSERT INTO calendar_events (
 SELECT id,
   '82000000-0000-0000-0000-000000000001',
   '83000000-0000-0000-0000-000000000005',
-  'copy.changed', '{"value":"Updated"}',
+  'tag.added', '{"value":"campaign"}',
   '81000000-0000-0000-0000-000000000002'
 FROM teams WHERE created_by = '81000000-0000-0000-0000-000000000001';
 
@@ -100,7 +100,7 @@ SELECT results_eq(
   $$ SELECT revision, status FROM calendar_post_workflows
      WHERE aggregate_id = '82000000-0000-0000-0000-000000000001' $$,
   $$ VALUES (2::bigint, 'draft'::text) $$,
-  'editing approved content creates a new draft revision'
+  'tagging approved content creates a new draft revision'
 );
 
 SELECT throws_ok(

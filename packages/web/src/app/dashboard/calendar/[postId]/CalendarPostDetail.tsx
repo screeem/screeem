@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
+import { CalendarTagEditor } from "@/components/calendar/CalendarTagEditor"
 import { activeCalendarEventIds, isApprovalEventType, replayCalendar } from "@/lib/calendar/events"
 import type {
   CalendarApprovalStatus,
@@ -13,11 +14,6 @@ import type {
 import type { TeamRole } from "@/lib/teams/server"
 
 const targets: CalendarTarget[] = ["X", "LinkedIn", "Instagram"]
-const colours = ["violet", "coral", "teal", "blue"]
-
-const colourClasses: Record<string, string> = {
-  violet: "bg-violet-500", coral: "bg-orange-500", teal: "bg-teal-500", blue: "bg-blue-500",
-}
 
 const approvalLabels: Record<CalendarApprovalStatus, string> = {
   draft: "Draft",
@@ -38,7 +34,9 @@ const eventLabels: Record<CalendarEventType, string> = {
   "title.changed": "Title changed",
   "copy.changed": "Copy changed",
   "schedule.changed": "Schedule changed",
-  "colour.changed": "Label colour changed",
+  "tag.added": "Tag added",
+  "tag.removed": "Tag removed",
+  "colour.changed": "Legacy label changed",
   "target.added": "Social network added",
   "target.removed": "Social network removed",
   "change.reverted": "Change reverted",
@@ -55,7 +53,9 @@ function actorLabel(event: CalendarEvent) {
 function eventDetail(event: CalendarEvent) {
   if (event.eventType === "post.created") return "Initial content and schedule"
   if (event.eventType === "schedule.changed") return `${String(event.payload.date)} at ${String(event.payload.time)}`
-  if (event.eventType === "target.added" || event.eventType === "target.removed") return String(event.payload.value)
+  if (event.eventType === "target.added" || event.eventType === "target.removed"
+    || event.eventType === "tag.added" || event.eventType === "tag.removed") return String(event.payload.value)
+  if (event.eventType === "colour.changed") return "This legacy label is no longer used"
   if (event.eventType === "change.reverted") return `Event #${event.revertsEventId}`
   if (isApprovalEventType(event.eventType)) {
     const comment = typeof event.payload.comment === "string" ? event.payload.comment : ""
@@ -87,7 +87,7 @@ export function CalendarPostDetail({
   const dirty = Boolean(draft && persistedPost && (
     draft.title !== persistedPost.title || draft.copy !== persistedPost.copy
     || draft.date !== persistedPost.date || draft.time !== persistedPost.time
-    || draft.colour !== persistedPost.colour
+    || [...draft.tags].sort().join() !== [...persistedPost.tags].sort().join()
     || [...draft.targets].sort().join() !== [...persistedPost.targets].sort().join()
   ))
 
@@ -154,7 +154,8 @@ export function CalendarPostDetail({
     if (original.title !== draft.title) add("title.changed", { value: draft.title })
     if (original.copy !== draft.copy) add("copy.changed", { value: draft.copy })
     if (original.date !== draft.date || original.time !== draft.time) add("schedule.changed", { date: draft.date, time: draft.time })
-    if (original.colour !== draft.colour) add("colour.changed", { value: draft.colour })
+    draft.tags.filter((tag) => !original.tags.includes(tag)).forEach((value) => add("tag.added", { value }))
+    original.tags.filter((tag) => !draft.tags.includes(tag)).forEach((value) => add("tag.removed", { value }))
     draft.targets.filter((target) => !original.targets.includes(target)).forEach((value) => add("target.added", { value }))
     original.targets.filter((target) => !draft.targets.includes(target)).forEach((value) => add("target.removed", { value }))
     if (changes.length) await append(changes)
@@ -179,7 +180,7 @@ export function CalendarPostDetail({
 
   return <div className="pb-10 text-slate-900">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div><Link href="/dashboard/calendar" className="text-sm font-medium text-slate-500 hover:text-violet-700">← Content calendar</Link><div className="mt-3 flex flex-wrap items-center gap-3"><h1 className="text-3xl font-semibold tracking-tight">{draft.title}</h1><ApprovalBadge status={draft.approval.status} /></div><p className="mt-2 text-sm text-slate-500">Edit the post, review its previews, and inspect its complete immutable history.</p></div>
+      <div><Link href="/dashboard/calendar" className="text-sm font-medium text-slate-500 hover:text-violet-700">← Content calendar</Link><div className="mt-3 flex flex-wrap items-center gap-3"><h1 className="text-3xl font-semibold tracking-tight">{draft.title}</h1><ApprovalBadge status={draft.approval.status} /></div><p className="mt-2 text-sm text-slate-500">Edit the post, review its previews, and inspect its complete immutable history.</p>{draft.tags.length ? <div className="mt-3 flex flex-wrap gap-2">{draft.tags.map((tag) => <span key={tag.toLowerCase()} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">#{tag}</span>)}</div> : null}</div>
       <button disabled={busy || !dirty || !draft.title.trim() || draft.targets.length === 0} onClick={() => void save()} className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">{busy ? "Saving…" : "Append changes"}</button>
     </div>
     {error ? <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
@@ -193,7 +194,7 @@ export function CalendarPostDetail({
             <label className="block text-xs font-semibold text-slate-600">Post copy<textarea value={draft.copy} onChange={(event) => setDraft({ ...draft, copy: event.target.value })} rows={7} className="mt-2 w-full resize-y rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal leading-6 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /><span className="mt-1 block text-right font-normal text-slate-400">{draft.copy.length} characters</span></label>
             <div className="grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-slate-600">Date<input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label><label className="text-xs font-semibold text-slate-600">Time<input type="time" value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label></div>
             <fieldset><legend className="text-xs font-semibold text-slate-600">Publish to</legend><div className="mt-2 flex flex-wrap gap-2">{targets.map((target) => <button type="button" key={target} onClick={() => toggleTarget(target)} className={`rounded-full border px-3 py-2 text-xs font-medium ${draft.targets.includes(target) ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-500"}`}>{target}</button>)}</div></fieldset>
-            <fieldset><legend className="text-xs font-semibold text-slate-600">Label colour</legend><div className="mt-2 flex gap-3">{colours.map((colour) => <button type="button" aria-label={colour} key={colour} onClick={() => setDraft({ ...draft, colour })} className={`size-7 rounded-full ${colourClasses[colour]} ${draft.colour === colour ? "ring-2 ring-slate-800 ring-offset-2" : ""}`} />)}</div></fieldset>
+            <CalendarTagEditor tags={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} />
           </div>
         </section>
         <ApprovalPanel
