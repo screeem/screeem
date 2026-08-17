@@ -39,6 +39,7 @@ jobs:
           pnpm --filter @screeem/routing build
           pnpm --filter @screeem/forms build
           pnpm --filter @screeem/forms-react build
+          pnpm --filter @screeem/object-storage build
 
       - name: Generate Next.js route types
         run: pnpm --filter @screeem/web exec next typegen
@@ -50,6 +51,9 @@ jobs:
 
       - name: Test forms
         run: pnpm --filter @screeem/forms test
+
+      - name: Test object storage
+        run: pnpm --filter @screeem/object-storage test
 
       - name: Test web
         run: pnpm --filter @screeem/web test

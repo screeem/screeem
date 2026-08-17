@@ -11,6 +11,7 @@ COPY packages/blog_components/package.json packages/blog_components/package.json
 COPY packages/forms/package.json packages/forms/package.json
 COPY packages/forms-react/package.json packages/forms-react/package.json
 COPY packages/mcp_post_preview/package.json packages/mcp_post_preview/package.json
+COPY packages/object-storage/package.json packages/object-storage/package.json
 COPY packages/routing/package.json packages/routing/package.json
 COPY packages/sample_blog/package.json packages/sample_blog/package.json
 COPY packages/web/package.json packages/web/package.json
@@ -21,7 +22,7 @@ COPY . .
 
 FROM source AS test
 ENV NODE_ENV=test
-CMD ["sh", "-c", "pnpm --filter @screeem/routing build && pnpm --filter @screeem/forms build && pnpm --filter @screeem/forms-react build && pnpm --filter @screeem/routing test && pnpm --filter @screeem/forms test && pnpm --filter @screeem/forms-react test && pnpm --filter @screeem/web exec tsc --noEmit && pnpm --filter @screeem/web test && pnpm --filter @screeem/web test:routing-db"]
+CMD ["sh", "-c", "pnpm --filter @screeem/routing build && pnpm --filter @screeem/forms build && pnpm --filter @screeem/forms-react build && pnpm --filter @screeem/object-storage build && pnpm --filter @screeem/routing test && pnpm --filter @screeem/forms test && pnpm --filter @screeem/forms-react test && pnpm --filter @screeem/object-storage test && pnpm --filter @screeem/web exec tsc --noEmit && pnpm --filter @screeem/web test && pnpm --filter @screeem/web test:routing-db"]
 
 FROM source AS build
 ARG NEXT_PUBLIC_SUPABASE_URL
@@ -34,6 +35,7 @@ ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 RUN pnpm --filter @screeem/routing build \
   && pnpm --filter @screeem/forms build \
   && pnpm --filter @screeem/forms-react build \
+  && pnpm --filter @screeem/object-storage build \
   && pnpm --filter @screeem/web build
 
 FROM node:22-bookworm-slim AS runner

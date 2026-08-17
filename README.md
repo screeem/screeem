@@ -53,6 +53,7 @@ Screeem is an MCP server that gives Claude a `create_or_update_post` tool. When 
 packages/
   web/              Next.js app — dashboard, MCP HTTP server, OAuth endpoints
   mcp_post_preview/ Standalone MCP stdio server + Vite-built preview UI
+  object-storage/   Tenant-scoped object storage port, policy layer, and adapters
   blog_components/  Shared blog UI components
   sample_blog/      Example blog built with blog_components
   shared/           Shared types and utilities
@@ -123,6 +124,37 @@ Forms emit `submission.before_save` and `submission.accepted` whether routing is
 Durable routing actions run in their authored order after the submission and route are stored. Event handlers are independent, so one integration failure does not block unrelated handlers. Each delivery receives a stable `idempotencyKey` and an `AbortSignal`. Pass both to external clients that support request deduplication and cancellation. Failed deliveries are attempted up to three times with delays and remain visible with the submission. `CRON_SECRET` protects the recovery worker at `/api/internal/form-event-deliveries`; the included Vercel schedule is daily and can be supplemented by a more frequent external scheduler.
 
 The delivery store uses `DATABASE_URL` for short server-side transactions. In production, set it to the Supabase transaction-pooler URL. Its migration defines storage, constraints, indexes, and row-level access only; event and action behavior stays in TypeScript. `make test` runs the transaction behavior against local Postgres.
+
+## Object storage
+
+`@screeem/object-storage` holds the storage port: keys are `{ teamId, scope, path }`
+rendered as `teams/<teamId>/<scope>/<...>`, each scope declares the content types
+and byte ceiling it accepts, and every operation is validated before a backend is
+reached. Operations return Effects, so hosts run them the same way they run form
+validation.
+
+Screeem's backend binding is `packages/web/src/lib/storage/supabase-object-store.ts`,
+selected by `packages/web/src/lib/storage/server.ts`. Outside production, a host
+with no Supabase credentials falls back to the in-process adapter and says so, so
+the playground and tests need no bucket; in production the missing configuration
+is an error instead. `SUPABASE_OBJECT_STORAGE_BUCKET` overrides the `team-objects`
+bucket name and `SUPABASE_OBJECT_STORAGE_MAX_BYTES` reports the bucket ceiling on
+oversized payloads.
+
+Server-side storage calls use the service role, which bypasses row level security.
+The first feature to store objects must therefore take `ObjectKey.teamId` from the
+authenticated session's team and never from request input — the key is the only
+thing separating teams on that path.
+
+Objects live in the private `team-objects` bucket. Reads are open to team members
+and direct writes to managers, enforced on the second path segment by policies in
+`supabase/migrations/0023_team_object_storage.sql` and covered by
+`supabase/tests/team_object_storage.sql`. Server-side writes go through the
+service role, which applies the scope policy first.
+
+Adapters share one behavioural suite from `@screeem/object-storage/testing`. Run
+it against local Supabase Storage with `make infra-up` followed by
+`pnpm --filter @screeem/web test:object-storage-db`; it is skipped by default.
 
 ## Salesforce integration development
 

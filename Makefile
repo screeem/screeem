@@ -24,6 +24,7 @@ packages:
 	$(PNPM) --filter @screeem/routing build
 	$(PNPM) --filter @screeem/forms build
 	$(PNPM) --filter @screeem/forms-react build
+	$(PNPM) --filter @screeem/object-storage build
 
 playground: packages ## Run the development-only visual form and routing playground.
 	@printf '\nOpen $(PLAYGROUND_URL)\n\n'
@@ -50,10 +51,11 @@ infra-status: ## Show local Supabase service URLs and status.
 db-reset: ## Reset the local database and seed it from current migrations.
 	sh scripts/docker-local.sh reset
 
-test: infra-up ## Run routing, forms, React, web, and local database tests.
+test: infra-up ## Run routing, forms, React, object storage, web, and local database tests.
 	$(PNPM) --filter @screeem/routing test
 	$(PNPM) --filter @screeem/forms test
 	$(PNPM) --filter @screeem/forms-react test
+	$(PNPM) --filter @screeem/object-storage test
 	$(PNPM) --filter @screeem/web test
 	$(PNPM) --filter @screeem/web test:forms-db
 	$(PNPM) supabase test db
