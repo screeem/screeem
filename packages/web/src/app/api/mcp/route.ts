@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  CALENDAR_RESOURCE_URI,
+  CalendarMcpError,
+  calendarMcpToolDefinitions,
+  createSupabaseCalendarMcpStore,
+  executeCalendarMcpTool,
+  isCalendarMcpTool,
+} from "@/lib/calendar/mcp";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const RESOURCE_URI = "ui://tweet-preview/app";
+const PREVIEW_RESOURCE_URI = "ui://tweet-preview/app";
 const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 
-const TOOL_DEFINITION = {
+const PREVIEW_TOOL_DEFINITION = {
   name: "create_or_update_post",
   description:
     "Create or update a social media post and preview it. Supports Twitter/X and LinkedIn. Supports @mentions, #hashtags, and links which are auto-highlighted. Includes a character count indicator.",
@@ -26,9 +34,12 @@ const TOOL_DEFINITION = {
     required: ["platform", "text"],
   },
   _meta: {
-    "ui/resourceUri": RESOURCE_URI,
+    "ui/resourceUri": PREVIEW_RESOURCE_URI,
+    ui: { resourceUri: PREVIEW_RESOURCE_URI, visibility: ["model"] },
   },
 };
+
+const TOOL_DEFINITIONS = [PREVIEW_TOOL_DEFINITION, ...calendarMcpToolDefinitions];
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -49,7 +60,7 @@ type SocialAccount = {
 
 async function resolveApiKey(
   request: NextRequest
-): Promise<{ userId: string; accounts: SocialAccount[] } | null> {
+): Promise<{ userId: string; teamId: string; accounts: SocialAccount[] } | null> {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) return null;
 
@@ -80,6 +91,7 @@ async function resolveApiKey(
 
   return {
     userId: apiKey.user_id,
+    teamId: apiKey.team_id,
     accounts: accounts ?? [],
   };
 }
@@ -135,8 +147,13 @@ export async function POST(request: NextRequest) {
     return jsonRpcResult(id, {
       resources: [
         {
-          uri: RESOURCE_URI,
+          uri: PREVIEW_RESOURCE_URI,
           name: "Post Preview App",
+          mimeType: RESOURCE_MIME_TYPE,
+        },
+        {
+          uri: CALENDAR_RESOURCE_URI,
+          name: "Content Calendar App",
           mimeType: RESOURCE_MIME_TYPE,
         },
       ],
@@ -144,12 +161,16 @@ export async function POST(request: NextRequest) {
   }
 
   if (method === "resources/read") {
+    const uri = (body.params as { uri?: unknown } | undefined)?.uri;
+    if (uri !== PREVIEW_RESOURCE_URI && uri !== CALENDAR_RESOURCE_URI) {
+      return jsonRpcError(id, -32602, "Unknown resource URI");
+    }
     const html = await fs.readFile(
       path.join(process.cwd(), "public", "mcp-app.html"),
       "utf-8"
     );
     return jsonRpcResult(id, {
-      contents: [{ uri: RESOURCE_URI, mimeType: RESOURCE_MIME_TYPE, text: html }],
+      contents: [{ uri, mimeType: RESOURCE_MIME_TYPE, text: html }],
     });
   }
 
@@ -158,7 +179,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (method === "tools/list") {
-    return jsonRpcResult(id, { tools: [TOOL_DEFINITION] });
+    return jsonRpcResult(id, { tools: TOOL_DEFINITIONS });
   }
 
   if (method === "tools/call") {
@@ -170,16 +191,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const params = body.params as {
-      name: string;
-      arguments: { platform: "twitter" | "linkedin"; text: string };
-    };
+    const params = body.params as { name?: unknown; arguments?: unknown } | undefined;
+    if (!params || typeof params.name !== "string") {
+      return jsonRpcError(id, -32602, "Tool name is required");
+    }
+
+    if (isCalendarMcpTool(params.name)) {
+      try {
+        const result = await executeCalendarMcpTool(
+          createSupabaseCalendarMcpStore(createAdminClient()),
+          { teamId: user.teamId, userId: user.userId },
+          params.name,
+          params.arguments,
+        );
+        return jsonRpcResult(id, result);
+      } catch (reason) {
+        const message = reason instanceof CalendarMcpError
+          ? reason.message
+          : "The calendar operation could not be completed.";
+        return jsonRpcResult(id, {
+          isError: true,
+          content: [{ type: "text", text: message }],
+        });
+      }
+    }
 
     if (params.name !== "create_or_update_post") {
       return jsonRpcError(id, -32601, `Unknown tool: ${params.name}`);
     }
 
-    const { platform, text } = params.arguments;
+    const previewArgs = params.arguments as { platform?: unknown; text?: unknown } | undefined;
+    if (!previewArgs || (previewArgs.platform !== "twitter" && previewArgs.platform !== "linkedin")
+      || typeof previewArgs.text !== "string") {
+      return jsonRpcResult(id, {
+        isError: true,
+        content: [{ type: "text", text: "platform and text are required." }],
+      });
+    }
+    const { platform, text } = previewArgs as { platform: "twitter" | "linkedin"; text: string };
     const platformAccounts = user.accounts.filter((a) => a.platform === platform);
 
     if (platform === "linkedin") {

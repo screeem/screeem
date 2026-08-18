@@ -32,3 +32,27 @@ export interface AccountData extends Record<string, unknown> {
   accountLabel?: string;
   accountId?: string;
 }
+
+export interface CalendarPost {
+  id: string;
+  title: string;
+  copy: string;
+  date: string;
+  time: string;
+  targets: string[];
+  tags: string[];
+  revision: number;
+  approval: {
+    status: "draft" | "in_review" | "changes_requested" | "approved";
+    reviewRevision: number | null;
+    requestedBy: string | null;
+    comment: string;
+  };
+}
+
+export interface CalendarData extends Record<string, unknown> {
+  _type: "calendar";
+  operation: "list" | "create" | "update" | "reschedule" | "remove";
+  posts: CalendarPost[];
+  changedPostId?: string;
+}

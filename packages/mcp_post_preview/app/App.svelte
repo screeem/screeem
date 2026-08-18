@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { App as McpApp } from "@modelcontextprotocol/ext-apps";
-  import type { TweetData, LinkedInPostData, AccountData } from "./lib/types";
+  import type { TweetData, LinkedInPostData, AccountData, CalendarData } from "./lib/types";
   import AccountSwitcher from "./lib/AccountSwitcher.svelte";
+  import CalendarManager from "./lib/CalendarManager.svelte";
   import TweetPreview from "./lib/TweetPreview.svelte";
   import LinkedInPreview from "./lib/LinkedInPreview.svelte";
 
@@ -16,6 +17,7 @@
   let isLinkedin = $derived(
     postData?._type === "linkedin" || currentAccount?._type === "linkedin"
   );
+  let isCalendar = $derived(postData?._type === "calendar");
 
   function applyTheme(theme: string | undefined) {
     if (theme === "dark") {
@@ -26,7 +28,12 @@
   }
 
   onMount(() => {
-    app.ontoolresult = (params: { content?: Array<{ type: string; text?: string }> }) => {
+    app.ontoolresult = (params: { structuredContent?: Record<string, unknown>; content?: Array<{ type: string; text?: string }> }) => {
+      if (params.structuredContent?._type === "calendar") {
+        postData = params.structuredContent;
+        accounts = [];
+        return;
+      }
       const text = params.content?.find((c) => c.type === "text") as { type: string; text: string } | undefined;
       if (!text?.text) return;
 
@@ -50,7 +57,9 @@
   });
 </script>
 
-{#if currentAccount}
+{#if isCalendar}
+  <CalendarManager {app} data={postData as CalendarData} />
+{:else if currentAccount}
   <AccountSwitcher
     accounts={accounts}
     {selectedIndex}
