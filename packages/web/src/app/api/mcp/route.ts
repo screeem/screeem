@@ -8,6 +8,7 @@ import {
   executeCalendarMcpTool,
   isCalendarMcpTool,
 } from "@/lib/calendar/mcp";
+import { socialAvatarDataUrl } from "@/lib/storage/social-avatars";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -94,21 +95,6 @@ async function resolveApiKey(
     teamId: apiKey.team_id,
     accounts: accounts ?? [],
   };
-}
-
-async function fetchAvatarDataUrl(handle: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(`https://unavatar.io/twitter/${handle}`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) return undefined;
-    const buffer = await res.arrayBuffer();
-    const contentType = res.headers.get("content-type") ?? "image/jpeg";
-    const base64 = Buffer.from(buffer).toString("base64");
-    return `data:${contentType};base64,${base64}`;
-  } catch {
-    return undefined;
-  }
 }
 
 function jsonRpcError(id: unknown, code: number, message: string) {
@@ -254,7 +240,12 @@ export async function POST(request: NextRequest) {
     } else {
       const variants = await Promise.all(
         platformAccounts.map(async (account) => {
-          const avatarUrl = await fetchAvatarDataUrl(account.handle);
+          const avatarUrl = await socialAvatarDataUrl({
+            teamId: user.teamId,
+            accountId: account.id,
+            platform: "twitter",
+            handle: account.handle,
+          });
           return {
             text,
             handle: account.handle,
