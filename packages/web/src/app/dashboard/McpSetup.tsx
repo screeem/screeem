@@ -94,7 +94,7 @@ export function McpSetup({ teamId }: { teamId: string }) {
       <div className="px-6 pt-6 pb-4 border-b border-gray-100">
         <h2 className="text-lg font-semibold text-gray-900 mb-1">Connect to Claude</h2>
         <p className="text-sm text-gray-500">
-          Use the Screeem MCP server to draft and preview social posts in any conversation.
+          Use the Screeem MCP server to draft, preview, schedule, and manage social posts in any conversation.
         </p>
       </div>
 
@@ -176,8 +176,8 @@ export function McpSetup({ teamId }: { teamId: string }) {
                   authorize access.
                 </li>
                 <li>
-                  In any conversation, ask Claude to draft a post — e.g.,{" "}
-                  <em>&ldquo;Draft me a tweet about shipping a new feature&rdquo;</em>.
+                  In any conversation, ask Claude to open or update your calendar — e.g.,{" "}
+                  <em>&ldquo;Open my content calendar and schedule a launch post for Friday&rdquo;</em>.
                 </li>
               </ol>
             </div>
