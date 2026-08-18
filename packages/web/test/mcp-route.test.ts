@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({ createAdminClient: vi.fn() }))
 
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: mocks.createAdminClient }))
 vi.mock("@/lib/calendar/mcp", async () => import("../src/lib/calendar/mcp"))
+vi.mock("@/lib/storage/social-avatars", () => ({
+  socialAvatarDataUrl: vi.fn(async () => undefined),
+}))
 
 import { POST } from "../src/app/api/mcp/route"
 
