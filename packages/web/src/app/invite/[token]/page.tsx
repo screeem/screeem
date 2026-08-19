@@ -16,15 +16,15 @@ export default async function InvitationPage({ params }: { params: Promise<{ tok
   const teamName = Array.isArray(teamValue) ? teamValue[0]?.name : teamValue?.name;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
+    <main className="flex min-h-screen items-center justify-center bg-muted p-4">
+      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8">
         <div className="mb-6 text-lg font-semibold">Screeem</div>
         {!valid ? (
-          <><h1 className="text-xl font-semibold text-gray-900">Invitation unavailable</h1><p className="mt-2 text-sm text-gray-500">This invitation is invalid or has expired.</p></>
+          <><h1 className="text-xl font-semibold text-foreground">Invitation unavailable</h1><p className="mt-2 text-sm text-muted-foreground">This invitation is invalid or has expired.</p></>
         ) : invitation.email.toLowerCase() !== user.email?.toLowerCase() ? (
-          <><h1 className="text-xl font-semibold text-gray-900">Wrong account</h1><p className="mt-2 text-sm text-gray-500">This invitation was sent to {invitation.email}. Sign in with that address to accept it.</p></>
+          <><h1 className="text-xl font-semibold text-foreground">Wrong account</h1><p className="mt-2 text-sm text-muted-foreground">This invitation was sent to {invitation.email}. Sign in with that address to accept it.</p></>
         ) : (
-          <><h1 className="text-xl font-semibold text-gray-900">Join {teamName ?? "this team"}</h1><p className="mt-2 text-sm text-gray-500">You’ll join as {invitation.role === "admin" ? "an admin" : "a member"} and share access to its connected social accounts.</p><form action={acceptInvitation} className="mt-6"><input type="hidden" name="token" value={token} /><button className="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-700">Accept invitation</button></form></>
+          <><h1 className="text-xl font-semibold text-foreground">Join {teamName ?? "this team"}</h1><p className="mt-2 text-sm text-muted-foreground">You’ll join as {invitation.role === "admin" ? "an admin" : "a member"} and share access to its connected social accounts.</p><form action={acceptInvitation} className="mt-6"><input type="hidden" name="token" value={token} /><button className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover">Accept invitation</button></form></>
         )}
       </div>
     </main>

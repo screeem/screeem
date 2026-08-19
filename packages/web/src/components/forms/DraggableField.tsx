@@ -94,7 +94,7 @@ export function DraggableField({
       {closestEdge ? (
         <span
           aria-hidden="true"
-          className={`pointer-events-none absolute inset-x-2 z-20 h-0.5 rounded-full bg-teal-500 ${
+          className={`pointer-events-none absolute inset-x-2 z-20 h-0.5 rounded-full bg-primary ${
             closestEdge === "top" ? "-top-1" : "-bottom-1"
           }`}
         />

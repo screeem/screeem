@@ -49,8 +49,8 @@ export default async function TeamPage() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold text-gray-900">Team settings</h1>
-      <p className="mt-1 text-gray-500">Manage {activeTeam.name}&apos;s name, members, and invitations.</p>
+      <h1 className="text-2xl font-semibold text-foreground">Team settings</h1>
+      <p className="mt-1 text-muted-foreground">Manage {activeTeam.name}&apos;s name, members, and invitations.</p>
       <TeamSettings team={activeTeam} members={members} invitations={invitations} />
     </>
   );

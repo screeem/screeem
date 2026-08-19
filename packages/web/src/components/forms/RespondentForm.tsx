@@ -87,11 +87,11 @@ export function RespondentForm({
                       {definitionField.control !== "checkbox" ? (
                         <label
                           htmlFor={inputId}
-                          className="mb-2 block text-sm font-medium text-gray-900"
+                          className="mb-2 block text-sm font-medium text-foreground"
                         >
                           {definitionField.label}
                           {definitionField.required ? (
-                            <span className="ml-1 text-teal-600" aria-hidden="true">
+                            <span className="ml-1 text-primary" aria-hidden="true">
                               *
                             </span>
                           ) : null}
@@ -110,7 +110,7 @@ export function RespondentForm({
                       })}
 
                       {definitionField.description ? (
-                        <p id={descriptionId} className="mt-1.5 text-xs leading-5 text-gray-500">
+                        <p id={descriptionId} className="mt-1.5 text-xs leading-5 text-muted-foreground">
                           {definitionField.description}
                         </p>
                       ) : null}
@@ -118,7 +118,7 @@ export function RespondentForm({
                         <p
                           id={errorId}
                           role="alert"
-                          className="mt-1.5 text-xs font-medium text-red-600"
+                          className="mt-1.5 text-xs font-medium text-error-text"
                         >
                           {String(error)}
                         </p>
@@ -135,7 +135,7 @@ export function RespondentForm({
       {submissionError ? (
         <p
           role="alert"
-          className="mt-5 border-l-2 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-700"
+          className="mt-5 border-l-2 border-error bg-error-subtle px-3 py-2 text-sm text-error-text"
         >
           {submissionError}
         </p>
@@ -146,7 +146,7 @@ export function RespondentForm({
           <button
             type="submit"
             disabled={!canSubmit || isSubmitting}
-            className="mt-8 w-full rounded-lg bg-teal-600 px-4 py-3 text-sm font-semibold text-white transition-[background-color,transform] duration-150 hover:bg-teal-700 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-8 w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-[background-color,transform] duration-150 hover:bg-primary-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSubmitting ? "Sending…" : definition.submitLabel}
           </button>
@@ -174,7 +174,7 @@ function DefaultControl({
     "aria-required": field.required,
     onBlur,
     className:
-      "w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-950 outline-none transition-[border-color,box-shadow] focus:border-teal-500 focus:ring-2 focus:ring-teal-100 disabled:bg-gray-50",
+      "w-full rounded-lg border border-border bg-card px-3 py-2.5 text-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-primary focus:ring-2 focus:ring-ring/30 disabled:bg-muted",
   }
 
   switch (field.control) {
@@ -207,7 +207,7 @@ function DefaultControl({
 
     case "checkbox":
       return (
-        <label className="flex cursor-pointer items-start gap-3 text-sm text-gray-800">
+        <label className="flex cursor-pointer items-start gap-3 text-sm text-foreground">
           <input
             id={id}
             type="checkbox"
@@ -218,12 +218,12 @@ function DefaultControl({
             aria-required={field.required}
             onBlur={onBlur}
             onChange={(event) => onChange(event.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-teal-600"
+            className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
           />
           <span>
             {field.label}
             {field.required ? (
-              <span className="ml-1 text-teal-600" aria-hidden="true">
+              <span className="ml-1 text-primary" aria-hidden="true">
                 *
               </span>
             ) : null}

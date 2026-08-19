@@ -16,16 +16,16 @@ type Target = CalendarTarget
 type Post = CalendarPost
 
 const targetStyle: Record<Target, string> = {
-  X: "bg-slate-900 text-white",
-  LinkedIn: "bg-blue-600 text-white",
-  Instagram: "bg-gradient-to-br from-fuchsia-500 to-orange-400 text-white",
+  X: "bg-platform-x text-platform-x-foreground",
+  LinkedIn: "bg-platform-linkedin text-platform-linkedin-foreground",
+  Instagram: "bg-gradient-to-br from-platform-instagram-from via-platform-instagram-via to-platform-instagram-to text-platform-instagram-foreground",
 }
 
 const approvalStyle: Record<CalendarApprovalStatus, string> = {
-  draft: "bg-slate-200 text-slate-600",
-  in_review: "bg-amber-200 text-amber-800",
-  changes_requested: "bg-orange-200 text-orange-800",
-  approved: "bg-emerald-200 text-emerald-800",
+  draft: "bg-secondary text-secondary-foreground",
+  in_review: "bg-warning-subtle text-warning-text",
+  changes_requested: "bg-error-subtle text-error-text",
+  approved: "bg-success-subtle text-success-text",
 }
 
 const approvalLabel: Record<CalendarApprovalStatus, string> = {
@@ -41,7 +41,7 @@ function isoDate(year: number, month: number, day: number) {
 }
 
 function TargetDot({ target }: { target: Target }) {
-  return <span title={target} className={`grid size-5 place-items-center rounded-full text-[9px] font-bold ring-2 ring-white ${targetStyle[target]}`}>{target === "Instagram" ? "I" : target === "LinkedIn" ? "in" : "X"}</span>
+  return <span title={target} className={`grid size-5 place-items-center rounded-full text-[9px] font-bold ring-2 ring-card ${targetStyle[target]}`}>{target === "Instagram" ? "I" : target === "LinkedIn" ? "in" : "X"}</span>
 }
 
 function actorLabel(event: CalendarEvent) {
@@ -168,80 +168,80 @@ export function ScheduleCalendar({ teamId }: { teamId: string }) {
   }
 
   return (
-    <div className="pb-10 text-slate-900">
+    <div className="pb-10 text-foreground">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.18em] text-violet-600"><span className="size-2 rounded-full bg-violet-500" /> Publishing workspace</div>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.18em] text-muted-foreground"><span className="size-2 rounded-full bg-muted-foreground" /> Publishing workspace</div>
           <h1 className="text-3xl font-semibold tracking-tight">Content calendar</h1>
-          <p className="mt-2 text-sm text-slate-500">Plan once, publish everywhere. Every change stays in the timeline.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Plan once, publish everywhere. Every change stays in the timeline.</p>
         </div>
-        <button onClick={() => openNew()} className="rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-700">+ Schedule post</button>
+        <button onClick={() => openNew()} className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:bg-primary-hover">+ Schedule post</button>
       </div>
-      {error ? <p role="alert" className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+      {error ? <p role="alert" className="mt-4 rounded-lg bg-error-subtle px-4 py-3 text-sm text-error-text">{error}</p> : null}
 
-      <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+      <div className="mt-8 overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
           <div className="flex items-center gap-2">
-            <button onClick={() => shiftMonth(-1)} aria-label="Previous month" className="grid size-8 place-items-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50">‹</button>
-            <button onClick={() => shiftMonth(1)} aria-label="Next month" className="grid size-8 place-items-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50">›</button>
+            <button onClick={() => shiftMonth(-1)} aria-label="Previous month" className="grid size-8 place-items-center rounded-md border border-border text-muted-foreground hover:bg-accent">‹</button>
+            <button onClick={() => shiftMonth(1)} aria-label="Next month" className="grid size-8 place-items-center rounded-md border border-border text-muted-foreground hover:bg-accent">›</button>
             <h2 className="ml-2 text-base font-semibold">{monthName.format(cursor)}</h2>
           </div>
-          <div className="flex rounded-lg bg-slate-100 p-1">
-            {(["All", "X", "LinkedIn", "Instagram"] as const).map((target) => <button key={target} onClick={() => setFilter(target)} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${filter === target ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{target}</button>)}
+          <div className="flex rounded-lg bg-muted p-1">
+            {(["All", "X", "LinkedIn", "Instagram"] as const).map((target) => <button key={target} onClick={() => setFilter(target)} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${filter === target ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{target}</button>)}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-3">
-          {(["All", "draft", "in_review", "changes_requested", "approved"] as const).map((status) => <button key={status} onClick={() => setApprovalFilter(status)} className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${approvalFilter === status ? "bg-violet-600 text-white" : "bg-white text-slate-500 ring-1 ring-slate-200 hover:text-slate-800"}`}>{status === "All" ? "All approvals" : approvalLabel[status]}</button>)}
+        <div className="flex flex-wrap gap-2 border-b border-border bg-muted/60 px-5 py-3">
+          {(["All", "draft", "in_review", "changes_requested", "approved"] as const).map((status) => <button key={status} onClick={() => setApprovalFilter(status)} className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${approvalFilter === status ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground ring-1 ring-border hover:text-foreground"}`}>{status === "All" ? "All approvals" : approvalLabel[status]}</button>)}
         </div>
-        <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/70">
-          {weekdays.map((day) => <div key={day} className="px-2 py-2.5 text-center text-[10px] font-bold tracking-widest text-slate-400">{day}</div>)}
+        <div className="grid grid-cols-7 border-b border-border bg-muted/70">
+          {weekdays.map((day) => <div key={day} className="px-2 py-2.5 text-center text-[10px] font-bold tracking-widest text-muted-foreground">{day}</div>)}
         </div>
         <div className="grid grid-cols-7">
           {cells.map((cell, index) => {
             const dayPosts = cell ? visible.filter((post) => post.date === cell.date) : []
             const today = cell?.date === "2026-08-14"
-            return <div key={index} onDoubleClick={() => cell && openNew(cell.date)} className={`min-h-28 border-b border-r border-slate-100 p-1.5 sm:min-h-32 ${!cell ? "bg-slate-50/50" : "bg-white hover:bg-slate-50/40"}`}>
-              {cell && <div className={`mb-1 ml-1 grid size-6 place-items-center rounded-full text-xs ${today ? "bg-violet-600 font-semibold text-white" : "text-slate-500"}`}>{cell.day}</div>}
-              {dayPosts.map((post) => <Link key={post.id} href={`/dashboard/calendar/${post.id}`} className="mb-1 block w-full rounded-md border border-slate-200 bg-slate-50/70 px-2 py-1.5 text-left transition hover:-translate-y-px hover:shadow-sm">
-                <span className="block truncate text-[11px] font-semibold text-slate-800">{post.title}</span>
-                {post.tags.length ? <span className="mt-1 flex min-w-0 gap-1 overflow-hidden text-[9px] text-slate-500">{post.tags.slice(0, 2).map((tag) => <span key={tag.toLowerCase()} className="max-w-20 truncate rounded-full bg-white px-1.5 py-0.5 ring-1 ring-slate-200">#{tag}</span>)}{post.tags.length > 2 ? <span className="py-0.5">+{post.tags.length - 2}</span> : null}</span> : null}
-                <span className="mt-1 flex items-center justify-between gap-1 text-[9px] text-slate-500"><span className={`rounded-full px-1.5 py-0.5 font-medium ${approvalStyle[post.approval.status]}`}>{approvalLabel[post.approval.status]}</span><span>{post.time}</span><span className="flex -space-x-1">{post.targets.map((target) => <TargetDot key={target} target={target} />)}</span></span>
+            return <div key={index} onDoubleClick={() => cell && openNew(cell.date)} className={`min-h-28 border-b border-r border-border p-1.5 sm:min-h-32 ${!cell ? "bg-muted/50" : "bg-card hover:bg-accent/40"}`}>
+              {cell && <div className={`mb-1 ml-1 grid size-6 place-items-center rounded-full text-xs ${today ? "bg-primary font-semibold text-primary-foreground" : "text-muted-foreground"}`}>{cell.day}</div>}
+              {dayPosts.map((post) => <Link key={post.id} href={`/dashboard/calendar/${post.id}`} className="mb-1 block w-full rounded-md border border-border bg-muted/70 px-2 py-1.5 text-left transition hover:-translate-y-px hover:shadow-sm">
+                <span className="block truncate text-[11px] font-semibold text-foreground">{post.title}</span>
+                {post.tags.length ? <span className="mt-1 flex min-w-0 gap-1 overflow-hidden text-[9px] text-muted-foreground">{post.tags.slice(0, 2).map((tag) => <span key={tag.toLowerCase()} className="max-w-20 truncate rounded-full bg-card px-1.5 py-0.5 ring-1 ring-border">#{tag}</span>)}{post.tags.length > 2 ? <span className="py-0.5">+{post.tags.length - 2}</span> : null}</span> : null}
+                <span className="mt-1 flex items-center justify-between gap-1 text-[9px] text-muted-foreground"><span className={`rounded-full px-1.5 py-0.5 font-medium ${approvalStyle[post.approval.status]}`}>{approvalLabel[post.approval.status]}</span><span>{post.time}</span><span className="flex -space-x-1">{post.targets.map((target) => <TargetDot key={target} target={target} />)}</span></span>
               </Link>)}
             </div>
           })}
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
         <span>Tip: double-click any day to schedule there.</span>
-        <span className="flex items-center gap-4"><i className="size-2 rounded-full bg-emerald-500" /> {busy ? "Syncing…" : "Synced"} <span className="text-slate-300">•</span> {visible.length} active posts</span>
+        <span className="flex items-center gap-4"><i className="size-2 rounded-full bg-success" /> {busy ? "Syncing…" : "Synced"} <span className="text-muted-foreground">•</span> {visible.length} active posts</span>
       </div>
 
       {events.length ? (
-        <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="mt-6 rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-sm font-semibold">Calendar event log</h2>
-              <p className="mt-1 text-xs text-slate-500">Append-only history, including reverted changes.</p>
+              <p className="mt-1 text-xs text-muted-foreground">Append-only history, including reverted changes.</p>
             </div>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500">
+            <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
               {events.length} events
             </span>
           </div>
-          <div className="mt-4 divide-y divide-slate-100">
+          <div className="mt-4 divide-y divide-border">
             {[...events].sort((a, b) => b.id - a.id).slice(0, 12).map((event) => (
               <div key={event.id} className="flex items-center justify-between gap-4 py-3 text-xs">
                 <div className="min-w-0">
-                  <span className="font-semibold text-slate-700">{event.eventType}</span>
-                  <span className="ml-2 text-slate-400">#{event.id}</span>
-                  <p className="mt-0.5 truncate text-slate-400">Post {event.aggregateId.slice(0, 8)} · by {actorLabel(event)}</p>
+                  <span className="font-semibold text-foreground">{event.eventType}</span>
+                  <span className="ml-2 text-muted-foreground">#{event.id}</span>
+                  <p className="mt-0.5 truncate text-muted-foreground">Post {event.aggregateId.slice(0, 8)} · by {actorLabel(event)}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className={activeEventIds.has(event.id) ? "text-emerald-600" : "text-slate-400"}>
+                  <span className={activeEventIds.has(event.id) ? "text-success-text" : "text-muted-foreground"}>
                     {activeEventIds.has(event.id) ? "Active" : "Reverted"}
                   </span>
                   {activeEventIds.has(event.id) && !isApprovalEventType(event.eventType) ? (
-                    <button disabled={busy} onClick={() => void revert(event)} className="rounded-md border border-slate-200 px-2.5 py-1.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-40">Revert</button>
+                    <button disabled={busy} onClick={() => void revert(event)} className="rounded-md border border-border px-2.5 py-1.5 font-medium text-primary hover:bg-primary-subtle disabled:opacity-40">Revert</button>
                   ) : null}
                 </div>
               </div>
@@ -277,17 +277,17 @@ function PostEditor({
       ? current.targets.filter((item) => item !== target)
       : [...current.targets, target],
   }))
-  return <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/25 backdrop-blur-[2px]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <aside className="flex h-full w-full max-w-md flex-col bg-white shadow-2xl">
-      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-600">{post.id ? "Edit incrementally" : "New calendar entry"}</p><h2 className="mt-1 text-xl font-semibold">{post.id ? post.title : "Schedule a post"}</h2></div><button onClick={onClose} className="grid size-9 place-items-center rounded-full bg-slate-100 text-xl text-slate-500">×</button></div>
+  return <div className="fixed inset-0 z-50 flex justify-end bg-overlay backdrop-blur-[2px]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <aside className="flex h-full w-full max-w-md flex-col bg-card shadow-lg">
+      <div className="flex items-center justify-between border-b border-border px-6 py-5"><div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{post.id ? "Edit incrementally" : "New calendar entry"}</p><h2 className="mt-1 text-xl font-semibold">{post.id ? post.title : "Schedule a post"}</h2></div><button onClick={onClose} className="grid size-9 place-items-center rounded-full bg-muted text-xl text-muted-foreground">×</button></div>
       <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
-        <label className="block text-xs font-semibold text-slate-600">Title<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Give this post a name" className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /></label>
-        <label className="block text-xs font-semibold text-slate-600">Post copy<textarea value={draft.copy} onChange={(event) => setDraft({ ...draft, copy: event.target.value })} rows={5} placeholder="What do you want to share?" className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal leading-6 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" /><span className="mt-1 block text-right font-normal text-slate-400">{draft.copy.length} characters</span></label>
-        <div className="grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-slate-600">Date<input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label><label className="text-xs font-semibold text-slate-600">Time<input type="time" value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal" /></label></div>
-        <fieldset><legend className="text-xs font-semibold text-slate-600">Publish to</legend><div className="mt-2 flex flex-wrap gap-2">{(["X", "LinkedIn", "Instagram"] as Target[]).map((target) => <button type="button" key={target} onClick={() => toggleTarget(target)} className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium ${draft.targets.includes(target) ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-500"}`}><TargetDot target={target} />{target}</button>)}</div></fieldset>
+        <label className="block text-xs font-semibold text-muted-foreground">Title<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Give this post a name" className="mt-2 w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal outline-none focus:border-primary focus:ring-2 focus:ring-ring/30" /></label>
+        <label className="block text-xs font-semibold text-muted-foreground">Post copy<textarea value={draft.copy} onChange={(event) => setDraft({ ...draft, copy: event.target.value })} rows={5} placeholder="What do you want to share?" className="mt-2 w-full resize-none rounded-lg border border-border px-3 py-2.5 text-sm font-normal leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-ring/30" /><span className="mt-1 block text-right font-normal text-muted-foreground">{draft.copy.length} characters</span></label>
+        <div className="grid grid-cols-2 gap-3"><label className="text-xs font-semibold text-muted-foreground">Date<input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} className="mt-2 w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal" /></label><label className="text-xs font-semibold text-muted-foreground">Time<input type="time" value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} className="mt-2 w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal" /></label></div>
+        <fieldset><legend className="text-xs font-semibold text-muted-foreground">Publish to</legend><div className="mt-2 flex flex-wrap gap-2">{(["X", "LinkedIn", "Instagram"] as Target[]).map((target) => <button type="button" key={target} onClick={() => toggleTarget(target)} className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium ${draft.targets.includes(target) ? "border-primary bg-primary-subtle text-primary" : "border-border text-muted-foreground"}`}><TargetDot target={target} />{target}</button>)}</div></fieldset>
         <CalendarTagEditor tags={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} />
       </div>
-      <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4"><span className="text-xs text-slate-400">Append-only sync</span><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancel</button><button disabled={busy || !draft.title.trim() || draft.targets.length === 0} onClick={() => void onSave(draft)} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{busy ? "Saving…" : post.id ? "Append changes" : "Schedule post"}</button></div></div>
+      <div className="flex items-center justify-between border-t border-border px-6 py-4"><span className="text-xs text-muted-foreground">Append-only sync</span><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-semibold text-muted-foreground hover:bg-accent">Cancel</button><button disabled={busy || !draft.title.trim() || draft.targets.length === 0} onClick={() => void onSave(draft)} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40">{busy ? "Saving…" : post.id ? "Append changes" : "Schedule post"}</button></div></div>
     </aside>
   </div>
 }

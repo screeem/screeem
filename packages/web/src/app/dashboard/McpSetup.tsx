@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { CodeBlock } from "@/components/ui/code-block";
+import { Notice } from "@/components/ui/notice";
 
 async function fetchApiKey(): Promise<string> {
   const res = await fetch("/api/profile/api-key");
@@ -24,7 +27,6 @@ export function McpSetup({ teamId }: { teamId: string }) {
   const [tab, setTab] = useState<Tab>("claude-ai");
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [configCopied, setConfigCopied] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
 
   const { data: apiKey, isLoading } = useQuery({
@@ -76,12 +78,6 @@ export function McpSetup({ teamId }: { teamId: string }) {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function copyConfig() {
-    navigator.clipboard.writeText(configJson);
-    setConfigCopied(true);
-    setTimeout(() => setConfigCopied(false), 2000);
-  }
-
   function copyUrl() {
     navigator.clipboard.writeText(mcpUrl);
     setUrlCopied(true);
@@ -89,23 +85,23 @@ export function McpSetup({ teamId }: { teamId: string }) {
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 mt-6">
+    <div className="bg-card rounded-lg border border-border mt-6">
       {/* Header */}
-      <div className="px-6 pt-6 pb-4 border-b border-gray-100">
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">Connect to Claude</h2>
-        <p className="text-sm text-gray-500">
+      <div className="px-6 pt-6 pb-4 border-b border-border">
+        <h2 className="text-lg font-semibold text-foreground mb-1">Connect to Claude</h2>
+        <p className="text-sm text-muted-foreground">
           Use the Screeem MCP server to draft, preview, schedule, and manage social posts in any conversation.
         </p>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-100">
+      <div className="flex border-b border-border">
         <button
           onClick={() => setTab("claude-ai")}
           className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
             tab === "claude-ai"
-              ? "border-gray-900 text-gray-900"
-              : "border-transparent text-gray-500 hover:text-gray-700"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
           Claude.ai
@@ -114,8 +110,8 @@ export function McpSetup({ teamId }: { teamId: string }) {
           onClick={() => setTab("desktop")}
           className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
             tab === "desktop"
-              ? "border-gray-900 text-gray-900"
-              : "border-transparent text-gray-500 hover:text-gray-700"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
           Claude Desktop
@@ -125,40 +121,37 @@ export function McpSetup({ teamId }: { teamId: string }) {
       <div className="p-6">
         {tab === "claude-ai" && (
           <div>
-            <p className="text-sm text-gray-500 mb-6">
+            <p className="text-sm text-muted-foreground mb-6">
               Add Screeem as a custom connector on Claude.ai. Claude will prompt you to
               sign in and authorize access automatically.
             </p>
 
             {/* MCP URL */}
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-foreground mb-2">
                 Connector URL
               </label>
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm font-mono text-gray-800 overflow-hidden text-ellipsis whitespace-nowrap">
+                <code className="flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-sm text-foreground">
                   {mcpUrl}
                 </code>
-                <button
-                  onClick={copyUrl}
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
-                >
+                <Button variant="outline" size="sm" onClick={copyUrl}>
                   {urlCopied ? "Copied!" : "Copy"}
-                </button>
+                </Button>
               </div>
             </div>
 
             {/* Steps */}
             <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-3">Setup Instructions</h3>
-              <ol className="space-y-3 text-sm text-gray-600 list-decimal list-inside">
+              <h3 className="text-sm font-medium text-foreground mb-3">Setup Instructions</h3>
+              <ol className="space-y-3 text-sm text-muted-foreground list-decimal list-inside">
                 <li>
                   Open{" "}
                   <a
                     href="https://claude.ai"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-500 hover:underline"
+                    className="text-primary hover:underline"
                   >
                     claude.ai
                   </a>{" "}
@@ -186,85 +179,68 @@ export function McpSetup({ teamId }: { teamId: string }) {
 
         {tab === "desktop" && (
           <div>
-            <p className="text-sm text-gray-500 mb-6">
+            <p className="text-sm text-muted-foreground mb-6">
               Use the Screeem MCP server with Claude Desktop via your API key.
             </p>
 
             {/* API Key */}
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-foreground mb-2">
                 Your API Key
               </label>
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm font-mono text-gray-800 overflow-hidden text-ellipsis whitespace-nowrap">
+                <code className="flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-sm text-foreground">
                   {isLoading ? "Loading…" : displayKey}
                 </code>
-                <button
-                  onClick={() => setRevealed((r) => !r)}
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
-                >
+                <Button variant="outline" size="sm" onClick={() => setRevealed((r) => !r)}>
                   {revealed ? "Hide" : "Reveal"}
-                </button>
-                <button
-                  onClick={copyKey}
-                  disabled={isLoading}
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
-                >
+                </Button>
+                <Button variant="outline" size="sm" onClick={copyKey} disabled={isLoading}>
                   {copied ? "Copied!" : "Copy"}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="destructive-ghost"
+                  size="sm"
                   onClick={() => mutation.mutate()}
                   disabled={mutation.isPending || isLoading}
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 text-red-600"
                 >
                   {mutation.isPending ? "Regenerating…" : "Regenerate"}
-                </button>
+                </Button>
               </div>
               {mutation.isSuccess && (
-                <p className="text-xs text-amber-600 mt-1">
+                <Notice tone="warning" className="mt-2 py-2 text-xs">
                   Key regenerated. Update your Claude Desktop config.
-                </p>
+                </Notice>
               )}
             </div>
 
             {/* Config snippet */}
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-gray-700">
-                  Claude Desktop Config
-                </label>
-                <button
-                  onClick={copyConfig}
-                  disabled={isLoading}
-                  className="px-3 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
-                >
-                  {configCopied ? "Copied!" : "Copy"}
-                </button>
-              </div>
-              <pre className="bg-gray-50 border border-gray-200 rounded-md p-4 text-xs font-mono text-gray-800 overflow-x-auto whitespace-pre">
-                {isLoading ? "Loading…" : configJson}
-              </pre>
-            </div>
+            <CodeBlock
+              className="mb-6"
+              label="Claude Desktop Config"
+              disabled={isLoading}
+              code={isLoading ? "Loading…" : configJson}
+            />
 
             {/* Setup steps */}
             <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-3">
+              <h3 className="text-sm font-medium text-foreground mb-3">
                 Setup Instructions
               </h3>
-              <ol className="space-y-2 text-sm text-gray-600 list-decimal list-inside">
+              <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
                 <li>Copy the config above.</li>
                 <li>
                   Open your Claude Desktop config file:
-                  <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-gray-500">
+                  <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-muted-foreground">
                     <li>
                       <strong>Mac:</strong>{" "}
-                      <code className="text-xs bg-gray-100 px-1 rounded">
+                      <code className="text-xs bg-muted px-1 rounded">
                         ~/Library/Application Support/Claude/claude_desktop_config.json
                       </code>
                     </li>
                     <li>
                       <strong>Windows:</strong>{" "}
-                      <code className="text-xs bg-gray-100 px-1 rounded">
+                      <code className="text-xs bg-muted px-1 rounded">
                         %APPDATA%\Claude\claude_desktop_config.json
                       </code>
                     </li>
@@ -272,14 +248,14 @@ export function McpSetup({ teamId }: { teamId: string }) {
                 </li>
                 <li>
                   Merge the{" "}
-                  <code className="text-xs bg-gray-100 px-1 rounded">mcpServers</code>{" "}
+                  <code className="text-xs bg-muted px-1 rounded">mcpServers</code>{" "}
                   block into the file (create the file if it doesn&apos;t exist).
                 </li>
                 <li>Restart Claude Desktop.</li>
                 <li>
                   In a new conversation, ask Claude to draft a post — e.g.,{" "}
                   <em>&ldquo;Draft me a tweet about shipping a new feature&rdquo;</em> — and Claude will use the{" "}
-                  <code className="text-xs bg-gray-100 px-1 rounded">create_or_update_post</code> tool.
+                  <code className="text-xs bg-muted px-1 rounded">create_or_update_post</code> tool.
                 </li>
               </ol>
             </div>

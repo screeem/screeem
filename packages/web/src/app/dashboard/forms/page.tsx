@@ -7,8 +7,8 @@ export default async function FormsPage() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold text-gray-900">Forms</h1>
-      <p className="mt-1 text-gray-500">
+      <h1 className="text-2xl font-semibold text-foreground">Forms</h1>
+      <p className="mt-1 text-muted-foreground">
         Create endpoints and review submissions for {activeTeam.name}.
       </p>
       <Forms teamId={activeTeam.id} canManage={canManage(activeTeam.role)} />

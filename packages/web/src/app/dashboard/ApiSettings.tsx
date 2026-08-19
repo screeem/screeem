@@ -2,6 +2,10 @@
 
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Notice } from "@/components/ui/notice";
+import { SectionCard } from "@/components/ui/section-card";
 
 type PublicApiKey = {
   id: string;
@@ -74,105 +78,104 @@ export function ApiSettings({ teamId, canManage }: { teamId: string; canManage: 
 
   return (
     <div className="mt-8 space-y-6">
-      <section className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-gray-900">API definition</h2>
-        <p className="mt-1 text-sm text-gray-500">
-          The OpenAPI 3.1 definition can be imported into SDK generators and API clients.
-        </p>
-        <div className="mt-4 flex items-center gap-3">
-          <code className="min-w-0 flex-1 truncate rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+      <SectionCard
+        title="API definition"
+        description="The OpenAPI 3.1 definition can be imported into SDK generators and API clients."
+      >
+        <div className="flex items-center gap-3">
+          <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-muted px-3 py-2 text-sm">
             /api/openapi
           </code>
-          <a
-            href="/api/openapi"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-md border border-gray-200 px-3 py-2 text-sm hover:bg-gray-50"
-          >
-            View definition
-          </a>
-          <a
-            href="/api/openapi"
-            download="openapi.json"
-            className="rounded-md bg-gray-900 px-3 py-2 text-sm text-white hover:bg-gray-700"
-          >
-            Download
-          </a>
+          <Button asChild variant="outline">
+            <a href="/api/openapi" target="_blank" rel="noopener noreferrer">
+              View definition
+            </a>
+          </Button>
+          <Button asChild>
+            <a href="/api/openapi" download="openapi.json">
+              Download
+            </a>
+          </Button>
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-gray-900">Public API keys</h2>
-        <p className="mt-1 text-sm text-gray-500">
-          Send a key as <code>Authorization: Bearer &lt;key&gt;</code>. Secrets are shown only once.
-        </p>
+      <SectionCard
+        title="Public API keys"
+        description={
+          <>
+            Send a key as <code className="font-mono">Authorization: Bearer &lt;key&gt;</code>.
+            Secrets are shown only once.
+          </>
+        }
+      >
 
         {!canManage ? (
-          <p className="mt-4 text-sm text-amber-700">Only team owners and admins can manage API keys.</p>
+          <p className="text-sm text-muted-foreground">Only team owners and admins can manage API keys.</p>
         ) : (
           <>
-            <form onSubmit={submit} className="mt-5 flex max-w-xl gap-2">
-              <input
+            <form onSubmit={submit} className="flex max-w-xl gap-2">
+              <Input
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 maxLength={80}
                 placeholder="Key name, e.g. Production"
-                className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-transparent focus:ring-2 focus:ring-gray-900"
+                className="min-w-0 flex-1"
               />
-              <button
-                type="submit"
-                disabled={!name.trim() || createKey.isPending}
-                className="rounded-md bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
-              >
+              <Button type="submit" disabled={!name.trim() || createKey.isPending}>
                 {createKey.isPending ? "Creating…" : "Create key"}
-              </button>
+              </Button>
             </form>
 
-            {createKey.error && <p className="mt-2 text-sm text-red-600">{createKey.error.message}</p>}
-
-            {newSecret && (
-              <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-medium text-amber-900">Copy this key now. It won&apos;t be shown again.</p>
-                <div className="mt-2 flex gap-2">
-                  <code className="min-w-0 flex-1 overflow-x-auto rounded border border-amber-200 bg-white px-3 py-2 text-sm">
-                    {newSecret}
-                  </code>
-                  <button onClick={copySecret} className="rounded border border-amber-300 px-3 py-2 text-sm hover:bg-amber-100">
-                    {copied ? "Copied!" : "Copy"}
-                  </button>
-                  <button onClick={() => setNewSecret(null)} className="rounded border border-amber-300 px-3 py-2 text-sm hover:bg-amber-100">
-                    Done
-                  </button>
-                </div>
-              </div>
+            {createKey.error && (
+              <Notice tone="error" className="mt-3">
+                {createKey.error.message}
+              </Notice>
             )}
 
-            <div className="mt-6 divide-y divide-gray-100">
-              {query.isLoading && <p className="py-4 text-sm text-gray-500">Loading keys…</p>}
-              {query.error && <p className="py-4 text-sm text-red-600">{query.error.message}</p>}
-              {query.data?.length === 0 && <p className="py-4 text-sm text-gray-500">No public API keys yet.</p>}
+            {newSecret && (
+              <Notice tone="warning" role={undefined} className="mt-4">
+                <p className="font-medium">Copy this key now. It won&apos;t be shown again.</p>
+                <div className="mt-2 flex gap-2">
+                  <code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-card px-3 py-2 font-mono text-sm text-foreground">
+                    {newSecret}
+                  </code>
+                  <Button variant="outline" size="sm" onClick={copySecret}>
+                    {copied ? "Copied!" : "Copy"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setNewSecret(null)}>
+                    Done
+                  </Button>
+                </div>
+              </Notice>
+            )}
+
+            <div className="mt-6 divide-y divide-border">
+              {query.isLoading && <p className="py-4 text-sm text-muted-foreground">Loading keys…</p>}
+              {query.error && <p className="py-4 text-sm text-error-text">{query.error.message}</p>}
+              {query.data?.length === 0 && <p className="py-4 text-sm text-muted-foreground">No public API keys yet.</p>}
               {query.data?.map((key) => (
                 <div key={key.id} className="flex items-center justify-between gap-4 py-4">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-gray-900">{key.name}</p>
-                    <p className="mt-1 text-xs text-gray-500">
+                    <p className="truncate text-sm font-medium text-foreground">{key.name}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
                       <code>{key.key_prefix}</code> · Created {new Date(key.created_at).toLocaleDateString()}
                       {key.last_used_at ? ` · Last used ${new Date(key.last_used_at).toLocaleDateString()}` : " · Never used"}
                     </p>
                   </div>
-                  <button
+                  <Button
+                    variant="destructive-ghost"
+                    size="sm"
                     onClick={() => revokeKey.mutate(key.id)}
                     disabled={revokeKey.isPending}
-                    className="rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
                   >
                     Revoke
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
           </>
         )}
-      </section>
+      </SectionCard>
     </div>
   );
 }

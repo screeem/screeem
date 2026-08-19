@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { Integrations } from "../../dashboard/Integrations"
 
 type Scenario = "disconnected" | "connected" | "expired" | "rate_limited"
@@ -27,7 +27,7 @@ export function IntegrationManagementPlayground() {
     setOauthMessage("")
   }
 
-  const fetcher = useMemo(() => {
+  const [fetcher] = useState<typeof fetch>(() => {
     const localFetch: typeof fetch = async (input, init) => {
       const url = typeof input === "string"
         ? input
@@ -58,7 +58,7 @@ export function IntegrationManagementPlayground() {
       return json({ integrations: integrationResponse(scenarioRef.current) })
     }
     return localFetch
-  }, [])
+  })
 
   function simulateAuthorization() {
     scenarioRef.current = "connected"
@@ -67,23 +67,23 @@ export function IntegrationManagementPlayground() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-8 text-gray-950 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-muted px-4 py-8 text-foreground sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
-        <Link href="/_dev" className="text-sm font-medium text-teal-700 hover:text-teal-800">
+        <Link href="/_dev" className="text-sm font-medium text-primary hover:text-primary-hover">
           ← Development playgrounds
         </Link>
         <header className="mt-6 max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-600">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Development playground
           </p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">Integration management</h1>
-          <p className="mt-3 text-sm leading-6 text-gray-600">
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
             Review the real dashboard component against in-memory Salesforce states. Actions are
             simulated locally and never contact an API, database, or provider.
           </p>
         </header>
 
-        <section className="mt-7 flex flex-wrap items-center gap-2 border-y border-gray-200 py-4">
+        <section className="mt-7 flex flex-wrap items-center gap-2 border-y border-border py-4">
           {scenarios.map((item) => (
             <button
               key={item.id}
@@ -91,26 +91,26 @@ export function IntegrationManagementPlayground() {
               onClick={() => choose(item.id)}
               className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
                 scenario === item.id
-                  ? "bg-gray-950 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-100"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-accent"
               }`}
             >
               {item.label}
             </button>
           ))}
-          <label className="ml-auto flex items-center gap-2 text-sm text-gray-600">
+          <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
             <input
               type="checkbox"
               checked={canManage}
               onChange={(event) => setCanManage(event.target.checked)}
-              className="size-4 rounded border-gray-300"
+              className="size-4 rounded border-border"
             />
             Manager controls
           </label>
         </section>
 
         {oauthMessage ? (
-          <p role="status" className="mt-5 border-l-2 border-blue-500 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <p role="status" className="mt-5 border-l-2 border-info bg-info-subtle px-4 py-3 text-sm text-info-text">
             {oauthMessage}
           </p>
         ) : null}

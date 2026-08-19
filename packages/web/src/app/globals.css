@@ -1,1 +1,356 @@
 @import "tailwindcss";
+/* Supplies the enter/exit utilities (animate-in, fade-in-0, zoom-in-95,
+   slide-in-from-*) that the shadcn overlay primitives rely on. */
+@import "tw-animate-css";
+
+/* Dark mode is opt-in by class, never by system preference, so light and dark
+   surfaces are never mixed on a page that was only verified in one of them. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ============================================
+   LIGHT MODE
+   ============================================ */
+:root {
+  color-scheme: light;
+
+  /* Core surfaces */
+  --background: oklch(97.6% 0.003 215);
+  --foreground: oklch(24% 0.012 240);
+  --card: oklch(99.2% 0.0015 220);
+  --card-foreground: oklch(24% 0.012 240);
+  --popover: oklch(99.2% 0.0015 220);
+  --popover-foreground: oklch(24% 0.012 240);
+
+  /* Primary — Signal Teal, deepened so light foreground clears AA */
+  --primary: oklch(52% 0.088 189);
+  --primary-foreground: oklch(99.2% 0.0015 220);
+  --primary-hover: oklch(45% 0.078 190);
+  --primary-subtle: oklch(95.5% 0.026 186);
+  --primary-text: oklch(45% 0.078 190);
+
+  /* Secondary — one step deeper than --muted so the two never collapse */
+  --secondary: oklch(92.3% 0.0065 215);
+  --secondary-foreground: oklch(35% 0.014 230);
+
+  /* Wells and recessed surfaces */
+  --muted: oklch(95.2% 0.005 215);
+  --muted-foreground: oklch(47.5% 0.015 224);
+
+  /* Accent — hover fills and selected rows, not a brand color */
+  --accent: oklch(93.5% 0.006 214);
+  --accent-foreground: oklch(24% 0.012 240);
+
+  /* Destructive */
+  --destructive: oklch(52.5% 0.148 27);
+  --destructive-foreground: oklch(99.2% 0.0015 220);
+
+  /* Structure */
+  --border: oklch(91.5% 0.007 214);
+  --border-strong: oklch(83% 0.009 214);
+  --input: oklch(91.5% 0.007 214);
+  --ring: oklch(58% 0.094 188);
+
+  /* Terminal — does not invert with the theme */
+  --code: oklch(17% 0.010 245);
+  --code-foreground: oklch(92% 0.006 220);
+  --code-muted: oklch(62% 0.012 225);
+  --code-border: oklch(28% 0.012 240);
+  --code-success: oklch(82% 0.13 158);
+
+  /* Semantic: Success */
+  --success: oklch(52% 0.105 158);
+  --success-foreground: oklch(99.2% 0.0015 220);
+  --success-subtle: oklch(94.5% 0.028 158);
+  --success-text: oklch(45% 0.09 158);
+
+  /* Semantic: Warning */
+  --warning: oklch(62% 0.118 75);
+  --warning-foreground: oklch(24% 0.012 240);
+  --warning-subtle: oklch(95% 0.035 80);
+  --warning-text: oklch(48% 0.09 72);
+
+  /* Semantic: Error */
+  --error: oklch(52.5% 0.148 27);
+  --error-foreground: oklch(99.2% 0.0015 220);
+  --error-subtle: oklch(94.5% 0.025 25);
+  --error-text: oklch(46.5% 0.13 27);
+
+  /* Semantic: Info */
+  --info: oklch(53% 0.115 250);
+  --info-foreground: oklch(99.2% 0.0015 220);
+  --info-subtle: oklch(95% 0.025 250);
+  --info-text: oklch(47% 0.11 250);
+
+
+  /* Radius */
+  --radius: 0.5rem;
+
+  /* Shadows — flat by default, lift only what floats */
+  --elevation-xs: 0 1px 2px 0 rgb(15 30 45 / 0.04);
+  --elevation-sm: 0 1px 2px 0 rgb(15 30 45 / 0.05), 0 1px 3px 0 rgb(15 30 45 / 0.04);
+  --elevation-md:
+    0 4px 12px -2px rgb(15 30 45 / 0.07), 0 2px 6px -2px rgb(15 30 45 / 0.05);
+  --elevation-lg:
+    0 12px 28px -6px rgb(15 30 45 / 0.1), 0 4px 10px -4px rgb(15 30 45 / 0.06);
+
+  /* Scrim behind dialogs and slide-overs — fixed dark in both themes */
+  --overlay: oklch(17% 0.010 245 / 0.4);
+
+  /* Misc */
+  --tracking-normal: -0.005em;
+}
+
+/* ============================================
+   DARK MODE
+   ============================================ */
+.dark {
+  color-scheme: dark;
+
+  --background: oklch(19% 0.010 245);
+  --foreground: oklch(93.5% 0.005 220);
+  --card: oklch(23.5% 0.011 243);
+  --card-foreground: oklch(93.5% 0.005 220);
+  --popover: oklch(23.5% 0.011 243);
+  --popover-foreground: oklch(93.5% 0.005 220);
+
+  --primary: oklch(74% 0.098 187);
+  --primary-foreground: oklch(19% 0.010 245);
+  --primary-hover: oklch(80% 0.088 187);
+  --primary-subtle: oklch(28% 0.036 190);
+  --primary-text: oklch(82% 0.085 187);
+
+  --secondary: oklch(32.5% 0.014 240);
+  --secondary-foreground: oklch(93.5% 0.005 220);
+
+  --muted: oklch(27.5% 0.012 240);
+  --muted-foreground: oklch(72% 0.011 224);
+
+  --accent: oklch(31% 0.014 238);
+  --accent-foreground: oklch(93.5% 0.005 220);
+
+  --destructive: oklch(66% 0.155 27);
+  --destructive-foreground: oklch(19% 0.010 245);
+
+  --border: oklch(32% 0.013 238);
+  --border-strong: oklch(42% 0.016 235);
+  --input: oklch(32% 0.013 238);
+  --ring: oklch(74% 0.098 187);
+
+  /* Terminal holds its ground in both themes; only the border softens. */
+  --code: oklch(15% 0.009 245);
+  --code-foreground: oklch(92% 0.006 220);
+  --code-muted: oklch(62% 0.012 225);
+  --code-border: oklch(26% 0.011 240);
+  --code-success: oklch(82% 0.13 158);
+
+  --success: oklch(70% 0.115 158);
+  --success-foreground: oklch(19% 0.010 245);
+  --success-subtle: oklch(28% 0.038 158);
+  --success-text: oklch(80% 0.095 158);
+
+  --warning: oklch(78% 0.11 78);
+  --warning-foreground: oklch(19% 0.010 245);
+  --warning-subtle: oklch(29% 0.036 78);
+  --warning-text: oklch(84% 0.09 80);
+
+  --error: oklch(66% 0.155 27);
+  --error-foreground: oklch(19% 0.010 245);
+  --error-subtle: oklch(28% 0.045 27);
+  --error-text: oklch(78% 0.12 27);
+
+  --info: oklch(70% 0.115 250);
+  --info-foreground: oklch(19% 0.010 245);
+  --info-subtle: oklch(28% 0.042 250);
+  --info-text: oklch(81% 0.09 250);
+
+
+  --overlay: oklch(10% 0.006 245 / 0.55);
+
+  --elevation-xs: 0 1px 2px 0 rgb(0 0 0 / 0.2);
+  --elevation-sm: 0 1px 2px 0 rgb(0 0 0 / 0.24), 0 1px 3px 0 rgb(0 0 0 / 0.2);
+  --elevation-md: 0 4px 12px -2px rgb(0 0 0 / 0.32), 0 2px 6px -2px rgb(0 0 0 / 0.24);
+  --elevation-lg: 0 12px 28px -6px rgb(0 0 0 / 0.4), 0 4px 10px -4px rgb(0 0 0 / 0.28);
+}
+
+/* ============================================
+   TAILWIND v4 @theme INLINE
+   ============================================ */
+@theme inline {
+  /* --- Signal Teal scale --- */
+  --color-primary-50: oklch(97.8% 0.014 185);
+  --color-primary-100: oklch(95% 0.03 185);
+  --color-primary-200: oklch(90% 0.055 185);
+  --color-primary-300: oklch(82.5% 0.082 186);
+  --color-primary-400: oklch(74% 0.098 187);
+  --color-primary-500: oklch(63% 0.098 188);
+  --color-primary-600: oklch(52% 0.088 189);
+  --color-primary-700: oklch(45% 0.078 190);
+  --color-primary-800: oklch(37% 0.062 191);
+  --color-primary-900: oklch(29% 0.045 194);
+  --color-primary-950: oklch(21% 0.03 198);
+
+  /* --- Console Gray scale — the only neutral ramp --- */
+  --color-neutral-50: oklch(99.2% 0.0015 220);
+  --color-neutral-100: oklch(97.6% 0.003 215);
+  --color-neutral-200: oklch(95.2% 0.005 215);
+  --color-neutral-300: oklch(91.5% 0.007 214);
+  --color-neutral-400: oklch(83% 0.009 214);
+  --color-neutral-500: oklch(70% 0.012 216);
+  --color-neutral-600: oklch(58% 0.014 220);
+  --color-neutral-700: oklch(47.5% 0.015 224);
+  --color-neutral-800: oklch(35% 0.014 230);
+  --color-neutral-900: oklch(24% 0.012 240);
+  --color-neutral-950: oklch(17% 0.010 245);
+
+  /* --- Semantic surface mappings --- */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-subtle: var(--primary-subtle);
+  --color-primary-text: var(--primary-text);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* --- Terminal --- */
+  --color-code: var(--code);
+  --color-code-foreground: var(--code-foreground);
+  --color-code-muted: var(--code-muted);
+  --color-code-border: var(--code-border);
+  --color-code-success: var(--code-success);
+
+  /* --- Semantic state --- */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-text: var(--success-text);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-text: var(--warning-text);
+  --color-error: var(--error);
+  --color-error-foreground: var(--error-foreground);
+  --color-error-subtle: var(--error-subtle);
+  --color-error-text: var(--error-text);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-text: var(--info-text);
+
+  /* --- Platform colors — previews and platform selectors only --- */
+  --color-platform-x: oklch(14.5% 0 0);
+  --color-platform-x-foreground: oklch(98% 0 0);
+  --color-platform-linkedin: oklch(48.4% 0.145 254);
+  --color-platform-linkedin-foreground: oklch(99% 0 0);
+  --color-platform-instagram-from: oklch(52% 0.21 305);
+  --color-platform-instagram-via: oklch(60% 0.24 5);
+  --color-platform-instagram-to: oklch(75% 0.16 55);
+  --color-platform-instagram-foreground: oklch(99% 0 0);
+
+  --color-overlay: var(--overlay);
+
+
+  /* Typography — families are supplied by next/font in the root layout */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Radius */
+  --radius-sm: calc(var(--radius) - 0.25rem);
+  --radius-md: calc(var(--radius) - 0.125rem);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 0.25rem);
+
+  /* Shadows */
+  --shadow-xs: var(--elevation-xs);
+  --shadow-sm: var(--elevation-sm);
+  --shadow-md: var(--elevation-md);
+  --shadow-lg: var(--elevation-lg);
+
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+@layer base {
+  html {
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    letter-spacing: var(--tracking-normal);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Background only — the selected element keeps its own colour, which stays
+     legible on the always-dark code surface as well as normal surfaces. */
+  ::selection {
+    background-color: color-mix(in oklab, var(--primary) 28%, transparent);
+  }
+
+  ::placeholder {
+    color: var(--muted-foreground);
+  }
+}
+
+/* ============================================
+   KEYFRAMES
+   ============================================ */
+
+
+
+
+/* ============================================
+   REDUCED MOTION
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
