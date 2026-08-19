@@ -33,8 +33,8 @@ export function DashboardNav() {
                 aria-current={active ? "page" : undefined}
                 className={`whitespace-nowrap border-b-2 py-3 text-sm font-medium transition-colors ${
                   active
-                    ? "border-gray-900 text-gray-900"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800"
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
                 }`}
               >
                 {item.label}

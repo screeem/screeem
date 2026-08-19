@@ -44,7 +44,7 @@ export async function readIntegrationJson(
     }
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
     return { value: text.length === 0 ? {} : JSON.parse(text) as unknown }
-  } catch (error) {
+  } catch {
     signal?.throwIfAborted()
     return {
       response: NextResponse.json(

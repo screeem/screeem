@@ -14,10 +14,10 @@ interface SearchParams {
 
 function ErrorPage({ title, message }: { title: string; message: string }) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-        <h1 className="text-xl font-semibold text-red-600 mb-2">{title}</h1>
-        <p className="text-sm text-gray-500">{message}</p>
+    <div className="min-h-screen flex items-center justify-center bg-muted">
+      <div className="w-full max-w-md bg-card rounded-2xl border border-border p-8">
+        <h1 className="text-xl font-semibold text-error-text mb-2">{title}</h1>
+        <p className="text-sm text-muted-foreground">{message}</p>
       </div>
     </div>
   );

@@ -146,21 +146,21 @@ export function RoutingEditor(props: RoutingEditorProps) {
     <section
       aria-label="Routing rules"
       aria-busy={props.disabled}
-      className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+      className="overflow-hidden rounded-xl border border-border bg-card"
     >
       <fieldset disabled={props.disabled} className="min-w-0 border-0 p-0 disabled:opacity-70">
         <div className="grid min-h-[680px] xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="bg-[#f3f4f2] px-4 py-5 sm:px-7 sm:py-7">
+        <div className="bg-background px-4 py-5 sm:px-7 sm:py-7">
           <div className="mx-auto max-w-4xl">
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-300/80 pb-5">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 pb-5">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-700">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                   Routing rules
                 </p>
-                <h2 className="mt-2 text-xl font-semibold tracking-tight text-gray-950">
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
                   Send each response to the right destination
                 </h2>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-gray-600">
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
                   Rules run from top to bottom. The first matching rule wins.
                 </p>
               </div>
@@ -169,7 +169,7 @@ export function RoutingEditor(props: RoutingEditorProps) {
                   <button
                     type="button"
                     onClick={props.onRemoveRouting}
-                    className="rounded-md px-3 py-2 text-sm font-medium text-gray-600 hover:bg-white hover:text-red-600"
+                    className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-card hover:text-error-text"
                   >
                     Remove routing
                   </button>
@@ -179,7 +179,7 @@ export function RoutingEditor(props: RoutingEditorProps) {
                   onClick={props.onAddRule}
                   disabled={ruleLimitReached}
                   title={ruleLimitReached ? "Routing supports up to 100 rules" : undefined}
-                  className="rounded-md bg-teal-700 px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800"
+                  className="rounded-md bg-primary px-3.5 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
                 >
                   {ruleLimitReached ? "100 rule limit" : "Add rule"}
                 </button>
@@ -187,11 +187,11 @@ export function RoutingEditor(props: RoutingEditorProps) {
             </div>
 
             {props.issues.length > 0 ? (
-              <div role="alert" className="mt-5 border-l-2 border-amber-500 bg-amber-50 px-4 py-3">
-                <p className="text-sm font-semibold text-amber-900">
+              <div role="alert" className="mt-5 border-l-2 border-warning bg-warning-subtle px-4 py-3">
+                <p className="text-sm font-semibold text-warning-text">
                   {props.issues.length} routing {props.issues.length === 1 ? "issue" : "issues"}
                 </p>
-                <p className="mt-1 text-xs leading-5 text-amber-800">
+                <p className="mt-1 text-xs leading-5 text-warning-text">
                   {props.issues[0]?.message} Fix highlighted conditions before publishing.
                 </p>
               </div>
@@ -236,16 +236,16 @@ export function RoutingEditor(props: RoutingEditorProps) {
             </div>
 
             {props.draft.rules.length === 0 ? (
-              <div className="mt-5 border-y border-dashed border-gray-300 py-12 text-center">
-                <p className="text-sm font-medium text-gray-800">No routing rules yet</p>
-                <p className="mt-1 text-xs text-gray-500">Every response will use the fallback destination.</p>
+              <div className="mt-5 border-y border-dashed border-border py-12 text-center">
+                <p className="text-sm font-medium text-foreground">No routing rules yet</p>
+                <p className="mt-1 text-xs text-muted-foreground">Every response will use the fallback destination.</p>
               </div>
             ) : null}
 
-            <div className="mt-5 flex flex-col gap-3 border-t border-gray-300 pt-5 sm:flex-row sm:items-center">
-              <div className="w-8 text-center text-xs font-semibold text-gray-400">ELSE</div>
+            <div className="mt-5 flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center">
+              <div className="w-8 text-center text-xs font-semibold text-muted-foreground">ELSE</div>
               <div className="min-w-0 flex-1">
-                <label className="block text-xs font-medium text-gray-600" htmlFor="routing-fallback">
+                <label className="block text-xs font-medium text-muted-foreground" htmlFor="routing-fallback">
                   If no rule matches, send to
                 </label>
                 <input
@@ -254,7 +254,7 @@ export function RoutingEditor(props: RoutingEditorProps) {
                   maxLength={256}
                   value={props.draft.fallback}
                   onChange={(event) => props.onFallbackChange(event.target.value)}
-                  className="mt-1.5 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-900 outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+                  className="mt-1.5 w-full rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
                 />
               </div>
             </div>
@@ -316,21 +316,21 @@ function RoutingRuleEditor({
 }) {
   return (
     <article
-      className={`overflow-hidden rounded-xl border bg-white transition-[border-color,box-shadow] ${
+      className={`overflow-hidden rounded-xl border bg-card transition-[border-color,box-shadow] ${
         matched
-          ? "border-teal-600 shadow-[0_0_0_3px_rgba(13,148,136,0.14)]"
+          ? "border-primary shadow-[0_0_0_3px_rgba(13,148,136,0.14)]"
           : issues.length > 0
-            ? "border-amber-400"
-            : "border-gray-200 shadow-[0_8px_24px_rgba(15,23,42,0.05)]"
+            ? "border-warning"
+            : "border-border shadow-[0_8px_24px_rgba(15,23,42,0.05)]"
       }`}
     >
-      <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 px-3 py-3 sm:px-4">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-3 sm:px-4">
         <button
           ref={dragHandleRef}
           type="button"
           aria-label={`Drag rule ${index + 1} to reorder`}
           title="Drag to reorder"
-          className="cursor-grab rounded px-1.5 py-1 text-lg leading-none text-gray-300 hover:bg-gray-100 hover:text-teal-700 active:cursor-grabbing"
+          className="cursor-grab rounded px-1.5 py-1 text-lg leading-none text-muted-foreground hover:bg-accent hover:text-primary active:cursor-grabbing"
         >
           ⠿
         </button>
@@ -340,7 +340,7 @@ function RoutingRuleEditor({
             disabled={index === 0}
             onClick={() => onMove(-1)}
             aria-label={`Move rule ${index + 1} up`}
-            className="rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-teal-700 disabled:opacity-25"
+            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary disabled:opacity-25"
           >
             ↑
           </button>
@@ -349,27 +349,27 @@ function RoutingRuleEditor({
             disabled={!canMoveDown}
             onClick={() => onMove(1)}
             aria-label={`Move rule ${index + 1} down`}
-            className="rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-teal-700 disabled:opacity-25"
+            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary disabled:opacity-25"
           >
             ↓
           </button>
         </div>
-        <span className="rounded bg-gray-100 px-2 py-1 text-[11px] font-bold tabular-nums text-gray-500">
+        <span className="rounded bg-muted px-2 py-1 text-[11px] font-bold tabular-nums text-muted-foreground">
           {String(index + 1).padStart(2, "0")}
         </span>
-        <label className="flex items-center gap-2 text-xs text-gray-500">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
           Match
           <select
             value={rule.combinator}
             onChange={(event) => onUpdate({ combinator: event.target.value as "all" | "any" })}
-            className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs font-semibold text-gray-800 outline-none focus:border-teal-600"
+            className="rounded-md border border-border bg-card px-2 py-1.5 text-xs font-semibold text-foreground outline-none focus:border-primary"
           >
             <option value="all">all conditions</option>
             <option value="any">any condition</option>
           </select>
         </label>
         <div className="ml-auto flex min-w-[220px] flex-1 items-center justify-end gap-2 sm:flex-none">
-          <label className="text-xs font-medium text-gray-500" htmlFor={`route-${rule.id}`}>
+          <label className="text-xs font-medium text-muted-foreground" htmlFor={`route-${rule.id}`}>
             Send to
           </label>
           <input
@@ -378,13 +378,13 @@ function RoutingRuleEditor({
             maxLength={256}
             value={rule.route}
             onChange={(event) => onUpdate({ route: event.target.value })}
-            className="min-w-0 flex-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-sm font-semibold text-gray-900 outline-none focus:border-teal-600 sm:w-40"
+            className="min-w-0 flex-1 rounded-md border border-border px-2.5 py-1.5 text-sm font-semibold text-foreground outline-none focus:border-primary sm:w-40"
           />
           <button
             type="button"
             onClick={onRemove}
             aria-label={`Remove rule ${index + 1}`}
-            className="rounded px-2 py-1 text-sm text-gray-400 hover:bg-red-50 hover:text-red-600"
+            className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-error-subtle hover:text-error-text"
           >
             ×
           </button>
@@ -416,7 +416,7 @@ function RoutingRuleEditor({
               ? "A rule supports up to 20 conditions"
               : undefined
           }
-          className="ml-10 rounded px-2 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-50 disabled:text-gray-400"
+          className="ml-10 rounded px-2 py-1.5 text-xs font-semibold text-primary hover:bg-primary-subtle disabled:text-muted-foreground"
         >
           {rule.conditions.length >= maximumRoutingConditionsPerRule
             ? "20 condition limit"
@@ -489,11 +489,11 @@ function RoutingActionEditor({
       .every((input) => suggestedField(definition, input))
 
   return (
-    <div className="border-t border-gray-100 px-3 py-4 sm:px-4">
+    <div className="border-t border-border px-3 py-4 sm:px-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Actions</p>
-          <p className="mt-1 text-xs leading-5 text-gray-500">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Actions</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
             Run durable integration actions after this rule matches.
           </p>
         </div>
@@ -503,7 +503,7 @@ function RoutingActionEditor({
               aria-label="Integration action"
               value={selected?.use ?? ""}
               onChange={(event) => setSelectedUse(event.target.value)}
-              className="rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-800"
+              className="rounded-md border border-border bg-card px-2.5 py-2 text-sm text-foreground"
             >
               {catalog.map((action) => (
                 <option key={action.use} value={action.use}>{action.label}</option>
@@ -514,7 +514,7 @@ function RoutingActionEditor({
               disabled={!canAdd}
               onClick={addAction}
               title={!canAdd ? "Add compatible required form fields first" : undefined}
-              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50 disabled:text-gray-400"
+              className="rounded-md border border-border bg-card px-3 py-2 text-xs font-semibold text-primary hover:bg-primary-subtle disabled:text-muted-foreground"
             >
               + Add action
             </button>
@@ -528,14 +528,14 @@ function RoutingActionEditor({
           const actionIssues = issues.filter((issue) => issue.actionId === action.id)
           return (
             <div key={action.id} className={`rounded-lg border p-3 ${
-              actionIssues.length > 0 ? "border-amber-400 bg-amber-50" : "border-gray-200 bg-gray-50"
+              actionIssues.length > 0 ? "border-warning bg-warning-subtle" : "border-border bg-muted"
             }`}>
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-gray-900">
+                  <p className="text-sm font-semibold text-foreground">
                     {actionDefinition?.label ?? action.use}
                   </p>
-                  <p className="mt-0.5 text-xs text-gray-500">
+                  <p className="mt-0.5 text-xs text-muted-foreground">
                     {actionDefinition?.description ?? "This action is not available in the current catalog."}
                   </p>
                 </div>
@@ -544,20 +544,20 @@ function RoutingActionEditor({
                   disabled={index === 0}
                   onClick={() => moveAction(index, -1)}
                   aria-label={`Move ${actionDefinition?.label ?? action.use} up`}
-                  className="rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-white disabled:opacity-25"
+                  className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-card disabled:opacity-25"
                 >↑</button>
                 <button
                   type="button"
                   disabled={index === actions.length - 1}
                   onClick={() => moveAction(index, 1)}
                   aria-label={`Move ${actionDefinition?.label ?? action.use} down`}
-                  className="rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-white disabled:opacity-25"
+                  className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-card disabled:opacity-25"
                 >↓</button>
                 <button
                   type="button"
                   onClick={() => onChange(Object.freeze(actions.filter((candidate) => candidate.id !== action.id)))}
                   aria-label={`Remove ${actionDefinition?.label ?? action.use}`}
-                  className="rounded px-2 py-1 text-sm text-gray-400 hover:bg-red-50 hover:text-red-600"
+                  className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-error-subtle hover:text-error-text"
                 >×</button>
               </div>
               {actionDefinition ? (
@@ -567,7 +567,7 @@ function RoutingActionEditor({
                     const currentFieldId = mapping?.fieldId ?? ""
                     const compatible = compatibleFields(definition, input)
                     return (
-                      <label key={input.name} className="text-xs font-medium text-gray-600">
+                      <label key={input.name} className="text-xs font-medium text-muted-foreground">
                         {input.label}
                         <select
                           value={currentFieldId}
@@ -585,7 +585,7 @@ function RoutingActionEditor({
                                 : [...action.inputs, nextMapping]),
                             }))
                           }}
-                          className="mt-1 w-full rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-900"
+                          className="mt-1 w-full rounded-md border border-border bg-card px-2.5 py-2 text-sm text-foreground"
                         >
                           {!compatible.some((field) => field.id === currentFieldId) ? (
                             <option value="">Choose a field</option>
@@ -600,7 +600,7 @@ function RoutingActionEditor({
                 </div>
               ) : null}
               {actionIssues[0] ? (
-                <p className="mt-2 text-xs font-medium text-amber-800">{actionIssues[0].message}</p>
+                <p className="mt-2 text-xs font-medium text-warning-text">{actionIssues[0].message}</p>
               ) : null}
             </div>
           )
@@ -678,18 +678,18 @@ function RoutingConditionEditor({
     <div>
       <div
         className={`grid items-center gap-2 rounded-lg p-2 sm:grid-cols-[32px_minmax(150px,1fr)_minmax(140px,0.9fr)_minmax(130px,0.9fr)_32px] ${
-          issue ? "bg-amber-50" : "bg-gray-50/80"
+          issue ? "bg-warning-subtle" : "bg-muted/80"
         }`}
       >
-        <span className="text-center text-[10px] font-bold tracking-wider text-gray-400">
+        <span className="text-center text-[10px] font-bold tracking-wider text-muted-foreground">
           {connector}
         </span>
         <select
           aria-label={`${connector} field`}
           value={condition.fieldId}
           onChange={(event) => selectField(event.target.value)}
-          className={`min-w-0 rounded-md border bg-white px-2.5 py-2 text-sm outline-none focus:border-teal-600 ${
-            field ? "border-gray-200 text-gray-900" : "border-amber-400 text-amber-900"
+          className={`min-w-0 rounded-md border bg-card px-2.5 py-2 text-sm outline-none focus:border-primary ${
+            field ? "border-border text-foreground" : "border-warning text-warning-text"
           }`}
         >
           {!field ? <option value={condition.fieldId}>Removed field</option> : null}
@@ -704,7 +704,7 @@ function RoutingConditionEditor({
           value={condition.operator}
           disabled={!field}
           onChange={(event) => selectOperator(event.target.value as FormRoutingOperator)}
-          className="min-w-0 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-800 outline-none focus:border-teal-600 disabled:bg-gray-100"
+          className="min-w-0 rounded-md border border-border bg-card px-2.5 py-2 text-sm text-foreground outline-none focus:border-primary disabled:bg-muted"
         >
           {!selectedOperator ? (
             <option value={condition.operator}>Unsupported operator</option>
@@ -722,20 +722,20 @@ function RoutingConditionEditor({
             onChange={(value) => onUpdate({ value })}
           />
         ) : (
-          <span className="hidden text-xs text-gray-400 sm:block">No value needed</span>
+          <span className="hidden text-xs text-muted-foreground sm:block">No value needed</span>
         )}
         <button
           type="button"
           disabled={!canRemove}
           onClick={onRemove}
           aria-label="Remove condition"
-          className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:invisible"
+          className="rounded p-1 text-muted-foreground hover:bg-error-subtle hover:text-error-text disabled:invisible"
         >
           ×
         </button>
       </div>
       {issue ? (
-        <p className="ml-10 mt-1 text-xs font-medium text-amber-800">{issue.message}</p>
+        <p className="ml-10 mt-1 text-xs font-medium text-warning-text">{issue.message}</p>
       ) : null}
     </div>
   )
@@ -750,7 +750,7 @@ function RoutingConditionValue({
   readonly value: FormRoutingCondition["value"]
   readonly onChange: (value: string | number | boolean | undefined) => void
 }) {
-  const className = "min-w-0 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-900 outline-none focus:border-teal-600"
+  const className = "min-w-0 rounded-md border border-border bg-card px-2.5 py-2 text-sm text-foreground outline-none focus:border-primary"
   switch (field.type) {
     case "boolean":
       return (
@@ -840,11 +840,11 @@ function RoutingTestPanel({
   )
 
   return (
-    <aside className="border-t border-gray-200 bg-white px-5 py-6 xl:border-l xl:border-t-0">
+    <aside className="border-t border-border bg-card px-5 py-6 xl:border-l xl:border-t-0">
       <div className="sticky top-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Test routing</p>
-        <h2 className="mt-2 text-lg font-semibold text-gray-950">Try a sample response</h2>
-        <p className="mt-1 text-xs leading-5 text-gray-500">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Test routing</p>
+        <h2 className="mt-2 text-lg font-semibold text-foreground">Try a sample response</h2>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
           Routing is evaluated in this browser against the current draft.
         </p>
 
@@ -864,16 +864,16 @@ function RoutingTestPanel({
           type="button"
           disabled={testState.status === "running"}
           onClick={onRun}
-          className="mt-5 w-full rounded-md bg-gray-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
+          className="mt-5 w-full rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover disabled:opacity-50"
         >
           {testState.status === "running" ? "Testing…" : "Test this response"}
         </button>
 
         {testState.status === "complete" ? (
-          <div role="status" className="mt-4 border-l-2 border-teal-600 bg-teal-50 px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-teal-700">Destination</p>
-            <p className="mt-1 text-lg font-semibold text-gray-950">{testState.route}</p>
-            <p className="mt-1 text-xs text-gray-600">
+          <div role="status" className="mt-4 border-l-2 border-primary bg-primary-subtle px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-primary-text">Destination</p>
+            <p className="mt-1 text-lg font-semibold text-foreground">{testState.route}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
               {matchedRuleIndex >= 0
                 ? `Matched rule ${String(matchedRuleIndex + 1).padStart(2, "0")}`
                 : "No rule matched · fallback used"}
@@ -893,7 +893,7 @@ function RoutingTestPanel({
         {testState.status === "error" ? (
           <p
             role="alert"
-            className="mt-4 border-l-2 border-red-500 bg-red-50 px-3 py-2 text-xs leading-5 text-red-800"
+            className="mt-4 border-l-2 border-error bg-error-subtle px-3 py-2 text-xs leading-5 text-error-text"
           >
             {testState.message}
           </p>
@@ -991,11 +991,11 @@ function ActionTestPanel({
   }
 
   return (
-    <div className="mt-4 border-t border-gray-200 pt-4">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+    <div className="mt-4 border-t border-border pt-4">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         Action previews
       </p>
-      <p className="mt-1 text-xs leading-5 text-gray-500">
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
         Preview actions configured on the matched rule. Nothing is created or queued. A remote
         preview may receive the mapped sample values.
       </p>
@@ -1010,13 +1010,13 @@ function ActionTestPanel({
               type="button"
               disabled={currentState.status === "running"}
               onClick={() => void testAction(preview)}
-              className="w-full rounded-md border border-gray-200 bg-white px-3 py-2.5 text-left transition-colors hover:border-teal-500 hover:bg-teal-50 disabled:opacity-50"
+              className="w-full rounded-md border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-primary hover:bg-primary-subtle disabled:opacity-50"
             >
-              <span className="block text-sm font-semibold text-gray-900">
+              <span className="block text-sm font-semibold text-foreground">
                 {running ? `Previewing ${tester.label}…` : `Preview ${tester.label}`}
               </span>
               {tester.description ? (
-                <span className="mt-0.5 block text-xs leading-5 text-gray-500">
+                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
                   {tester.description}
                 </span>
               ) : null}
@@ -1029,11 +1029,11 @@ function ActionTestPanel({
           role="status"
           className={`mt-3 border-l-2 px-3 py-2.5 ${
             currentState.resultStatus === "warning"
-              ? "border-amber-500 bg-amber-50"
-              : "border-teal-600 bg-teal-50"
+              ? "border-warning bg-warning-subtle"
+              : "border-primary bg-primary-subtle"
           }`}
         >
-          <p className="text-sm font-semibold text-gray-950">{currentState.summary}</p>
+          <p className="text-sm font-semibold text-foreground">{currentState.summary}</p>
           {currentState.details?.length ? (
             <dl className="mt-2 space-y-1 text-xs">
               {currentState.details.map((detail, index) => (
@@ -1041,8 +1041,8 @@ function ActionTestPanel({
                   key={`${detail.label}:${index}`}
                   className="grid grid-cols-[88px_minmax(0,1fr)] gap-2"
                 >
-                  <dt className="text-gray-500">{detail.label}</dt>
-                  <dd className="break-words font-medium text-gray-800">{detail.value}</dd>
+                  <dt className="text-muted-foreground">{detail.label}</dt>
+                  <dd className="break-words font-medium text-foreground">{detail.value}</dd>
                 </div>
               ))}
             </dl>
@@ -1052,7 +1052,7 @@ function ActionTestPanel({
       {currentState.status === "error" ? (
         <p
           role="alert"
-          className="mt-3 border-l-2 border-red-500 bg-red-50 px-3 py-2 text-xs leading-5 text-red-800"
+          className="mt-3 border-l-2 border-error bg-error-subtle px-3 py-2 text-xs leading-5 text-error-text"
         >
           {currentState.summary}
         </p>
@@ -1106,7 +1106,7 @@ function SampleRoutingInput({
   readonly value?: string | number | boolean
   readonly onChange: (value: string | number | boolean | undefined) => void
 }) {
-  const inputClass = "mt-1.5 w-full rounded-md border border-gray-200 bg-white px-2.5 py-2 text-sm text-gray-900 outline-none focus:border-teal-600"
+  const inputClass = "mt-1.5 w-full rounded-md border border-border bg-card px-2.5 py-2 text-sm text-foreground outline-none focus:border-primary"
   const defaultValue = createRoutingSample({
     formatVersion: 1,
     title: "Sample",
@@ -1116,20 +1116,20 @@ function SampleRoutingInput({
   })[field.name]
 
   return (
-    <div className="rounded-lg bg-gray-50 px-3 py-2.5">
+    <div className="rounded-lg bg-muted px-3 py-2.5">
       <div className="flex items-center justify-between gap-2">
-        <label className="text-xs font-medium text-gray-700" htmlFor={`sample-${field.id}`}>
+        <label className="text-xs font-medium text-foreground" htmlFor={`sample-${field.id}`}>
           {field.label}
         </label>
         {!field.required ? (
-          <label className="flex items-center gap-1.5 text-[11px] text-gray-500">
+          <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <input
               type="checkbox"
               checked={included}
               onChange={(event) =>
                 onChange(event.target.checked ? defaultValue : undefined)
               }
-              className="accent-teal-600"
+              className="accent-primary"
             />
             Include
           </label>
@@ -1177,7 +1177,7 @@ function SampleRoutingInput({
           />
         )
       ) : (
-        <p className="mt-1.5 text-xs italic text-gray-400">Not included in sample</p>
+        <p className="mt-1.5 text-xs italic text-muted-foreground">Not included in sample</p>
       )}
     </div>
   )

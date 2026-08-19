@@ -18,8 +18,8 @@ export default async function IntegrationsPage({
 
   return (
     <>
-      <h1 className="text-2xl font-semibold text-gray-900">Integrations</h1>
-      <p className="mt-1 text-gray-500">
+      <h1 className="text-2xl font-semibold text-foreground">Integrations</h1>
+      <p className="mt-1 text-muted-foreground">
         Connect external tools for {activeTeam.name} and verify them before using form actions.
       </p>
       <Integrations

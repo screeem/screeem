@@ -6,6 +6,17 @@ const eslintConfig = [
   ...nextTypeScript,
   {
     rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          // `const { omitted: _omitted, ...rest } = value` is how this codebase
+          // drops a key; the discarded binding is the point, not an oversight.
+          ignoreRestSiblings: true,
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
       "max-len": [
         "warn",
         {

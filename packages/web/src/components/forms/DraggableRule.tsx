@@ -93,7 +93,7 @@ export function DraggableRule({
       {closestEdge ? (
         <span
           aria-hidden="true"
-          className={`pointer-events-none absolute inset-x-4 z-20 h-0.5 rounded-full bg-teal-500 ${
+          className={`pointer-events-none absolute inset-x-4 z-20 h-0.5 rounded-full bg-primary ${
             closestEdge === "top" ? "-top-2" : "-bottom-2"
           }`}
         />

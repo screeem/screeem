@@ -639,23 +639,23 @@ export function FormBuilderPlayground() {
         <div className="space-y-2">
           <Link
             href="/_dev"
-            className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-900"
+            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
           >
             <span aria-hidden="true">←</span> Playgrounds
           </Link>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight text-gray-950">Form builder</h1>
-            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Form builder</h1>
+            <span className="rounded-full bg-warning-subtle px-2.5 py-1 text-xs font-semibold text-warning-text">
               Development only
             </span>
           </div>
-          <p className="max-w-2xl text-sm leading-6 text-gray-600">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Build fields and routing rules against one headless definition. Changes stay in this
             page.
           </p>
         </div>
 
-        <div className="grid gap-4 border-y border-gray-200 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <div className="grid gap-4 border-y border-border py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
           <div className="grid gap-3 sm:grid-cols-2">
             <TextSetting
               label="Form title"
@@ -672,7 +672,7 @@ export function FormBuilderPlayground() {
               }
             />
           </div>
-          <p className="pb-2 text-xs text-gray-500">
+          <p className="pb-2 text-xs text-muted-foreground">
             {builder.definition.fields.length} fields ·{" "}
             {builder.dirty || routingDirty ? "Unsaved changes" : "Saved draft"}
           </p>
@@ -684,12 +684,12 @@ export function FormBuilderPlayground() {
         className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"
       >
         <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-xs font-medium text-gray-500">
+          <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             Fixture
             <select
               value={fixture}
               onChange={(event) => changeFixture(event.target.value as Fixture)}
-              className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-gray-800 outline-none focus:border-teal-500"
+              className="rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-primary"
             >
               {fixtures.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -698,7 +698,7 @@ export function FormBuilderPlayground() {
               ))}
             </select>
           </label>
-          <div className="flex rounded-lg bg-gray-200/70 p-1">
+          <div className="flex rounded-lg bg-muted/70 p-1">
             {(["builder", "routing", "preview", "definition"] as const).map((item) => (
               <button
                 key={item}
@@ -706,8 +706,8 @@ export function FormBuilderPlayground() {
                 onClick={() => setView(item)}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
                   view === item
-                    ? "bg-white text-gray-950 shadow-sm"
-                    : "text-gray-600 hover:text-gray-950"
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {item === "definition" ? "JSON definition" : item}
@@ -716,7 +716,7 @@ export function FormBuilderPlayground() {
           </div>
         </div>
         <div className="flex flex-col items-start gap-1.5 sm:items-end">
-          <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
             {view === "builder" ? (
               <>
                 <ActionButton
@@ -729,26 +729,26 @@ export function FormBuilderPlayground() {
                   disabled={builder.future.length === 0}
                   onClick={() => setBuilder((current) => redoBuilder(current))}
                 />
-                <span className="mx-1 h-5 w-px bg-gray-200" aria-hidden="true" />
+                <span className="mx-1 h-5 w-px bg-muted" aria-hidden="true" />
               </>
             ) : null}
             <ActionButton label="Save draft" onClick={() => void saveDraftSimulation()} />
             <button
               type="button"
               onClick={() => void publishSimulation()}
-              className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-teal-700"
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
             >
               Publish
             </button>
           </div>
-          <p className="px-1 text-xs text-gray-500">{persistenceStatus}</p>
+          <p className="px-1 text-xs text-muted-foreground">{persistenceStatus}</p>
         </div>
       </nav>
 
       {message ? (
         <div
           role="alert"
-          className="border-l-2 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-800"
+          className="border-l-2 border-error bg-error-subtle px-4 py-3 text-sm text-error-text"
         >
           {message}
         </div>
@@ -798,32 +798,32 @@ function BuilderCanvas(props: BuilderLayoutProps) {
   return (
     <section
       aria-label="Form builder"
-      className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+      className="overflow-hidden rounded-xl border border-border bg-card"
     >
       <div className="grid min-h-[620px] lg:grid-cols-[180px_minmax(300px,1fr)_260px]">
-        <aside className="border-b border-gray-200 bg-gray-50/80 p-4 lg:border-b-0 lg:border-r">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
+        <aside className="border-b border-border bg-muted/80 p-4 lg:border-b-0 lg:border-r">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Add field
           </p>
           <ControlPalette onAdd={props.onAdd} />
         </aside>
 
-        <main className="bg-[#f4f5f7] p-4 sm:p-7">
-          <div className="mx-auto max-w-xl rounded-xl bg-white px-5 py-7 shadow-[0_12px_36px_rgba(15,23,42,0.08)] sm:px-8">
-            <p className="text-xs font-semibold uppercase tracking-wider text-teal-600">
+        <main className="bg-background p-4 sm:p-7">
+          <div className="mx-auto max-w-xl rounded-xl bg-card px-5 py-7 shadow-[0_12px_36px_rgba(15,23,42,0.08)] sm:px-8">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Form canvas
             </p>
-            <h2 className="mt-3 text-xl font-semibold text-gray-950">
+            <h2 className="mt-3 text-xl font-semibold text-foreground">
               {props.builder.definition.title}
             </h2>
-            <p className="mt-1 text-sm leading-5 text-gray-500">
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
               {props.builder.definition.description}
             </p>
             <FieldList {...props} roomy />
           </div>
         </main>
 
-        <aside className="border-t border-gray-200 p-5 lg:border-l lg:border-t-0">
+        <aside className="border-t border-border p-5 lg:border-l lg:border-t-0">
           <FieldInspector {...props} />
         </aside>
       </div>
@@ -839,7 +839,7 @@ function ControlPalette({ onAdd }: { readonly onAdd: (control: FieldControl) => 
           key={item.control}
           type="button"
           onClick={() => onAdd(item.control)}
-          className="group w-full rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white hover:shadow-sm"
+          className="group w-full rounded-md px-2.5 py-2 text-left transition-colors hover:bg-card hover:shadow-sm"
         >
           <span className="block text-sm font-medium">+ {item.label}</span>
         </button>
@@ -864,8 +864,8 @@ function FieldList(props: BuilderLayoutProps & { readonly roomy?: boolean }) {
               <div
                 className={`group overflow-hidden rounded-lg border transition-[border-color,box-shadow,background-color] ${
                   selected
-                    ? "border-teal-500 bg-teal-50/50 shadow-[0_0_0_3px_rgba(13,148,136,0.14)]"
-                    : "border-gray-200 bg-white hover:border-gray-300"
+                    ? "border-primary bg-primary-subtle/50 shadow-[0_0_0_3px_rgba(13,148,136,0.14)]"
+                    : "border-border bg-card hover:border-border-strong"
                 }`}
               >
                 <div className="flex items-stretch">
@@ -875,7 +875,7 @@ function FieldList(props: BuilderLayoutProps & { readonly roomy?: boolean }) {
                     aria-label={`Drag ${field.label} to reorder`}
                     title="Drag to reorder"
                     onClick={() => props.onSelect(field.id)}
-                    className="w-10 shrink-0 cursor-grab border-r border-gray-100 text-lg leading-none text-gray-300 transition-colors hover:bg-gray-50 hover:text-teal-600 active:cursor-grabbing"
+                    className="w-10 shrink-0 cursor-grab border-r border-border text-lg leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-primary active:cursor-grabbing"
                   >
                     ⠿
                   </button>
@@ -885,23 +885,23 @@ function FieldList(props: BuilderLayoutProps & { readonly roomy?: boolean }) {
                     className="min-w-0 flex-1 px-4 py-3.5 text-left"
                   >
                     <span className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium text-gray-900">
+                      <span className="text-sm font-medium text-foreground">
                         {field.label}
-                        {field.required ? <span className="ml-1 text-teal-600">*</span> : null}
+                        {field.required ? <span className="ml-1 text-primary">*</span> : null}
                       </span>
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                         {controlLabel(field.control)}
                       </span>
                     </span>
                     {field.description ? (
-                      <span className="mt-1 block text-xs leading-5 text-gray-500">
+                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                         {field.description}
                       </span>
                     ) : null}
                   </button>
                 </div>
                 {selected ? (
-                  <div className="flex items-center gap-1 border-t border-teal-100 px-3 py-2">
+                  <div className="flex items-center gap-1 border-t border-primary/20 px-3 py-2">
                     <ActionButton
                       label="↑"
                       title="Move up"
@@ -936,12 +936,12 @@ function FieldInspector(props: BuilderLayoutProps & { readonly expanded?: boolea
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Field settings
           </p>
-          <p className="mt-1 text-sm font-semibold text-gray-950">{controlLabel(field.control)}</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">{controlLabel(field.control)}</p>
         </div>
-        <span className="rounded bg-gray-100 px-2 py-1 font-mono text-[10px] text-gray-500">
+        <span className="rounded bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground">
           {field.name}
         </span>
       </div>
@@ -972,13 +972,13 @@ function FieldInspector(props: BuilderLayoutProps & { readonly expanded?: boolea
         ) : null}
       </div>
 
-      <label className="flex cursor-pointer items-center justify-between gap-3 rounded-md bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
+      <label className="flex cursor-pointer items-center justify-between gap-3 rounded-md bg-muted px-3 py-2.5 text-sm text-foreground">
         Required response
         <input
           type="checkbox"
           checked={field.required}
           onChange={(event) => props.onEdit({ required: event.target.checked })}
-          className="h-4 w-4 rounded border-gray-300 accent-teal-600"
+          className="h-4 w-4 rounded border-border accent-primary"
         />
       </label>
 
@@ -1049,7 +1049,7 @@ function FieldInspector(props: BuilderLayoutProps & { readonly expanded?: boolea
         />
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-1 border-t border-gray-200 pt-4">
+      <div className="flex flex-wrap items-center gap-1 border-t border-border pt-4">
         <ActionButton label="↑ Up" disabled={index === 0} onClick={() => props.onMove(-1)} />
         <ActionButton
           label="↓ Down"
@@ -1073,8 +1073,8 @@ function RespondentPreview({ definition }: { readonly definition: FormDefinition
   }
 
   return (
-    <section className="relative overflow-hidden rounded-xl border border-gray-200 bg-[#ebe9e4] px-4 py-10 sm:px-10">
-      <div className="absolute right-4 top-4 rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-gray-600 backdrop-blur">
+    <section className="relative overflow-hidden rounded-xl border border-border bg-background px-4 py-10 sm:px-10">
+      <div className="absolute right-4 top-4 rounded-full bg-card/80 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur">
         Inert preview · no data is saved
       </div>
       <form
@@ -1082,16 +1082,16 @@ function RespondentPreview({ definition }: { readonly definition: FormDefinition
           event.preventDefault()
           setSubmitted(true)
         }}
-        className="mx-auto max-w-xl rounded-2xl bg-white px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10 sm:py-10"
+        className="mx-auto max-w-xl rounded-2xl bg-card px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10 sm:py-10"
       >
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-600">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
           Enterprise sales
         </p>
-        <h2 className="mt-3 text-2xl font-semibold tracking-tight text-gray-950">
+        <h2 className="mt-3 text-2xl font-semibold tracking-tight text-foreground">
           {definition.title}
         </h2>
         {definition.description ? (
-          <p className="mt-2 text-sm leading-6 text-gray-600">{definition.description}</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{definition.description}</p>
         ) : null}
 
         <div className="mt-8 space-y-6">
@@ -1100,10 +1100,10 @@ function RespondentPreview({ definition }: { readonly definition: FormDefinition
               {field.control === "checkbox" ? null : (
                 <label
                   htmlFor={`preview-${field.id}`}
-                  className="mb-2 block text-sm font-medium text-gray-900"
+                  className="mb-2 block text-sm font-medium text-foreground"
                 >
                   {field.label}
-                  {field.required ? <span className="ml-1 text-teal-600">*</span> : null}
+                  {field.required ? <span className="ml-1 text-primary">*</span> : null}
                 </label>
               )}
               <PreviewInput
@@ -1113,7 +1113,7 @@ function RespondentPreview({ definition }: { readonly definition: FormDefinition
                 onChange={(value) => setValue(field.name, value)}
               />
               {field.description ? (
-                <p className="mt-1.5 text-xs text-gray-500">{field.description}</p>
+                <p className="mt-1.5 text-xs text-muted-foreground">{field.description}</p>
               ) : null}
             </div>
           ))}
@@ -1121,14 +1121,14 @@ function RespondentPreview({ definition }: { readonly definition: FormDefinition
 
         <button
           type="submit"
-          className="mt-8 w-full rounded-lg bg-teal-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2"
+          className="mt-8 w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
         >
           {definition.submitLabel}
         </button>
         {submitted ? (
           <div
             role="status"
-            className="mt-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+            className="mt-4 rounded-lg bg-success-subtle px-4 py-3 text-sm text-success-text"
           >
             Preview complete. No API was called and no response was stored.
           </div>
@@ -1151,8 +1151,8 @@ function PreviewInput({
   readonly id?: string
   readonly large?: boolean
 }) {
-  const inputClass = `w-full border-0 border-b bg-transparent px-0 text-gray-950 outline-none transition-colors placeholder:text-gray-400 focus:border-teal-600 focus:ring-0 ${
-    large ? "border-gray-400 py-3 text-lg" : "border-gray-300 py-2.5 text-sm"
+  const inputClass = `w-full border-0 border-b bg-transparent px-0 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-0 ${
+    large ? "border-border-strong py-3 text-lg" : "border-border py-2.5 text-sm"
   }`
 
   switch (field.control) {
@@ -1189,7 +1189,7 @@ function PreviewInput({
       return (
         <label
           htmlFor={id}
-          className="flex cursor-pointer items-start gap-3 text-sm leading-6 text-gray-800"
+          className="flex cursor-pointer items-start gap-3 text-sm leading-6 text-foreground"
         >
           <input
             id={id}
@@ -1197,11 +1197,11 @@ function PreviewInput({
             required={field.required}
             checked={Boolean(value)}
             onChange={(event) => onChange(event.target.checked)}
-            className="mt-1 h-4 w-4 rounded border-gray-300 accent-teal-600"
+            className="mt-1 h-4 w-4 rounded border-border accent-primary"
           />
           <span>
             {field.label}
-            {field.required ? <span className="ml-1 text-teal-600">*</span> : null}
+            {field.required ? <span className="ml-1 text-primary">*</span> : null}
           </span>
         </label>
       )
@@ -1262,38 +1262,38 @@ function DefinitionView({
   )
 
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950 text-slate-100 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-5 py-4">
+    <section className="overflow-hidden rounded-xl border border-code-border bg-code text-code-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-code-border px-5 py-4">
         <div>
           <h2 className="text-sm font-semibold">Versioned form draft</h2>
-          <p className="mt-0.5 text-xs text-slate-400">
+          <p className="mt-0.5 text-xs text-code-muted">
             The same plain data drives rendering, validation and routing.
           </p>
         </div>
-        <span className="font-mono text-xs text-slate-500">
+        <span className="font-mono text-xs text-code-muted">
           formatVersion {definition.formatVersion}
         </span>
       </div>
       <div className="grid lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
-        <div className="overflow-x-auto p-5 lg:border-r lg:border-slate-800">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+        <div className="overflow-x-auto p-5 lg:border-r lg:border-code-border">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-code-muted">
             Form and routing
           </p>
-          <pre className="text-xs leading-6 text-slate-300">
+          <pre className="text-xs leading-6 text-code-foreground">
             {JSON.stringify({ definition, routing }, null, 2)}
           </pre>
         </div>
-        <div className="overflow-x-auto border-t border-slate-800 p-5 lg:border-t-0">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+        <div className="overflow-x-auto border-t border-code-border p-5 lg:border-t-0">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-code-muted">
             Example normalized submission
           </p>
-          <pre className="text-xs leading-6 text-emerald-300">
+          <pre className="text-xs leading-6 text-code-success">
             {JSON.stringify(exampleSubmission, null, 2)}
           </pre>
-          <div className="mt-6 border-t border-slate-800 pt-5 text-xs leading-5 text-slate-400">
+          <div className="mt-6 border-t border-code-border pt-5 text-xs leading-5 text-code-muted">
             Visual conditions compile to the same expression language used by the routing runtime.
             {routing?.rules[0] ? (
-              <code className="mt-2 block rounded bg-slate-900 px-3 py-2 text-teal-300">
+              <code className="mt-2 block rounded border border-code-border bg-background/10 px-3 py-2 font-mono text-primary-300">
                 {routing.rules[0].when}
               </code>
             ) : null}
@@ -1317,12 +1317,12 @@ function TextSetting({
   readonly mono?: boolean
   readonly multiline?: boolean
 }) {
-  const className = `w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-teal-500 focus:ring-2 focus:ring-teal-100 ${
+  const className = `w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring/30 ${
     mono ? "font-mono text-xs" : ""
   }`
 
   return (
-    <label className="block text-xs font-medium text-gray-600">
+    <label className="block text-xs font-medium text-muted-foreground">
       <span className="mb-1.5 block">{label}</span>
       {multiline ? (
         <textarea
@@ -1356,7 +1356,7 @@ function NumberSetting({
   const inputValue = value === undefined ? "" : String(value)
 
   return (
-    <label className="block text-xs font-medium text-gray-600">
+    <label className="block text-xs font-medium text-muted-foreground">
       <span className="mb-1.5 block">{label}</span>
       <input
         key={inputValue}
@@ -1365,7 +1365,7 @@ function NumberSetting({
         onBlur={(event) =>
           onCommit(event.target.value === "" ? undefined : event.target.valueAsNumber)
         }
-        className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+        className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
       />
     </label>
   )
@@ -1392,8 +1392,8 @@ function ActionButton({
       onClick={onClick}
       className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
         danger
-          ? "text-red-600 hover:bg-red-50"
-          : "text-gray-600 hover:bg-gray-100 hover:text-gray-950"
+          ? "text-error-text hover:bg-error-subtle"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground"
       }`}
     >
       {label}
@@ -1404,8 +1404,8 @@ function ActionButton({
 function EmptySelection() {
   return (
     <div className="flex min-h-40 flex-col items-center justify-center text-center">
-      <p className="text-sm font-medium text-gray-700">No field selected</p>
-      <p className="mt-1 max-w-48 text-xs leading-5 text-gray-500">
+      <p className="text-sm font-medium text-foreground">No field selected</p>
+      <p className="mt-1 max-w-48 text-xs leading-5 text-muted-foreground">
         Select a field to edit its label, key and validation.
       </p>
     </div>

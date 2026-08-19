@@ -83,40 +83,40 @@ export function HostedForm({ endpointKey }: { readonly endpointKey: string }) {
   }
   if (submitted) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#ebe9e4] px-4 py-12">
-        <div className="w-full max-w-lg rounded-2xl bg-white px-7 py-10 text-center shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10">
+      <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
+        <div className="w-full max-w-lg rounded-2xl bg-card px-7 py-10 text-center shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10">
           <span
             aria-hidden="true"
-            className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+            className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-success-subtle text-success-text"
           >
             ✓
           </span>
-          <h1 className="mt-5 text-2xl font-semibold tracking-tight text-gray-950">
+          <h1 className="mt-5 text-2xl font-semibold tracking-tight text-foreground">
             Response received
           </h1>
-          <p className="mt-2 text-sm leading-6 text-gray-600">{definition.successMessage}</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{definition.successMessage}</p>
         </div>
       </main>
     )
   }
 
   return (
-    <main className="min-h-screen bg-[#ebe9e4] px-4 py-8 sm:py-14">
-      <div className="mx-auto max-w-xl rounded-2xl bg-white px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10 sm:py-10">
-        <div className="mb-8 border-b border-gray-100 pb-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-600">
+    <main className="min-h-screen bg-background px-4 py-8 sm:py-14">
+      <div className="mx-auto max-w-xl rounded-2xl bg-card px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10 sm:py-10">
+        <div className="mb-8 border-b border-border pb-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Screeem form
           </p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-gray-950">
+          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-foreground">
             {definition.title}
           </h1>
           {definition.description ? (
-            <p className="mt-2 text-sm leading-6 text-gray-600">{definition.description}</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{definition.description}</p>
           ) : null}
         </div>
         <RespondentForm definition={definition} onSubmit={submit} />
         {version ? (
-          <p className="mt-7 text-center text-[11px] text-gray-400">Form version {version}</p>
+          <p className="mt-7 text-center text-[11px] text-muted-foreground">Form version {version}</p>
         ) : null}
       </div>
     </main>
@@ -125,10 +125,10 @@ export function HostedForm({ endpointKey }: { readonly endpointKey: string }) {
 
 function PublicState({ title, detail }: { readonly title: string; readonly detail: string }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#ebe9e4] px-4 py-12">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
       <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold text-gray-950">{title}</h1>
-        <p className="mt-2 text-sm leading-6 text-gray-600">{detail}</p>
+        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
       </div>
     </main>
   )

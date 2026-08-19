@@ -5,6 +5,9 @@ import {
   type IntegrationConnectionSummary,
 } from "../../lib/integrations/contract"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Notice } from "@/components/ui/notice"
+import { StatusBadge, type StatusTone } from "@/components/ui/status-badge"
 
 type OAuthResult = "connected" | "error" | null
 type Operation = "connect" | "reconnect" | "test" | "disconnect"
@@ -185,86 +188,84 @@ function IntegrationsForTeam({
   return (
     <section className="mt-7" aria-busy={loading || operation !== null}>
       {message ? (
-        <p role="status" className="mb-4 border-l-2 border-teal-600 bg-teal-50 px-4 py-3 text-sm text-teal-900">
+        <Notice tone="success" className="mb-4">
           {message}
-        </p>
+        </Notice>
       ) : null}
       {error ? (
-        <p role="alert" className="mb-4 border-l-2 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <Notice tone="error" className="mb-4">
           {error}
-        </p>
+        </Notice>
       ) : null}
 
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-border bg-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">CRM</p>
-            <h2 className="mt-2 text-lg font-semibold text-gray-950">Salesforce</h2>
-            <p className="mt-1 max-w-xl text-sm leading-6 text-gray-600">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">CRM</p>
+            <h2 className="mt-2 text-lg font-semibold text-foreground">Salesforce</h2>
+            <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">
               Validate the connection, then preview mapped CRM actions while building forms.
             </p>
           </div>
-          <StatusBadge integration={salesforce} loading={loading} />
+          <IntegrationStatus integration={salesforce} loading={loading} />
         </div>
 
         {salesforce ? (
           <>
-            <dl className="mt-6 grid gap-4 border-t border-gray-100 pt-5 text-sm sm:grid-cols-2">
+            <dl className="mt-6 grid gap-4 border-t border-border pt-5 text-sm sm:grid-cols-2">
               <Detail label="Organization" value={salesforce.displayName ?? "Connected organization"} />
               <Detail label="Organization ID" value={salesforce.externalAccountId ?? "Unavailable"} />
               <Detail label="Connection" value={connectionLabel(salesforce)} />
               <Detail label="Last checked" value={formatTimestamp(salesforce.lastCheckedAt)} />
             </dl>
             {connectionNotice(salesforce) ? (
-              <p className="mt-5 border-l-2 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <Notice tone="warning" className="mt-5">
                 {connectionNotice(salesforce)}
-              </p>
+              </Notice>
             ) : null}
           </>
         ) : null}
 
-        <div className="mt-6 flex flex-wrap gap-3 border-t border-gray-100 pt-5">
+        <div className="mt-6 flex flex-wrap gap-3 border-t border-border pt-5">
           {!canManage ? (
-            <p className="text-sm text-gray-500">Only team owners and admins can manage integrations.</p>
+            <p className="text-sm text-muted-foreground">Only team owners and admins can manage integrations.</p>
           ) : !salesforce ? (
-            <button
+            <Button
               type="button"
               disabled={operation !== null || loading}
               onClick={() => void startOAuth("connect")}
-              className={primaryButton}
             >
               {operation === "connect" ? "Connecting…" : "Connect Salesforce"}
-            </button>
+            </Button>
           ) : (
             <>
               {salesforce.availability === "available" ? (
-                <button
+                <Button
                   type="button"
                   disabled={operation !== null || loading}
                   onClick={() => void testConnection()}
-                  className={primaryButton}
                 >
                   {operation === "test" ? "Testing…" : "Test connection"}
-                </button>
+                </Button>
               ) : null}
               {canReconnect(salesforce) ? (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   disabled={operation !== null || loading}
                   onClick={() => void startOAuth("reconnect")}
-                  className={secondaryButton}
                 >
                   {operation === "reconnect" ? "Reconnecting…" : "Reconnect"}
-                </button>
+                </Button>
               ) : null}
-              <button
+              <Button
                 type="button"
+                variant="destructive-ghost"
                 disabled={operation !== null || loading}
                 onClick={() => void disconnect()}
-                className="rounded-md px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
               >
                 {operation === "disconnect" ? "Disconnecting…" : "Disconnect"}
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -273,34 +274,32 @@ function IntegrationsForTeam({
   )
 }
 
-function StatusBadge({ integration, loading }: {
+function IntegrationStatus({ integration, loading }: {
   readonly integration?: IntegrationConnectionSummary
   readonly loading: boolean
 }) {
   const available = integration?.availability === "available"
-  const label = loading
-    ? "Loading"
+  const [label, tone]: readonly [string, StatusTone] = loading
+    ? ["Loading", "neutral"]
     : !integration || integration.status === "disconnected"
-      ? "Not connected"
+      ? ["Not connected", "neutral"]
       : integration.status === "reauthorization_required"
-        ? "Reconnect required"
+        ? ["Reconnect required", "warning"]
         : available
-          ? "Connected"
-          : "Unavailable"
+          ? ["Connected", "success"]
+          : ["Unavailable", "warning"]
   return (
-    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-      available ? "bg-teal-50 text-teal-700" : "bg-gray-100 text-gray-600"
-    }`}>
+    <StatusBadge tone={tone} className="px-3 py-1 font-semibold">
       {label}
-    </span>
+    </StatusBadge>
   )
 }
 
 function Detail({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</dt>
-      <dd className="mt-1 break-words font-medium text-gray-800">{value}</dd>
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="mt-1 break-words font-medium text-foreground">{value}</dd>
     </div>
   )
 }
@@ -402,7 +401,3 @@ function authorizationUrl(input: unknown) {
   return url.toString()
 }
 
-const primaryButton =
-  "rounded-md bg-gray-950 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-50"
-const secondaryButton =
-  "rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"

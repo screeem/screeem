@@ -10,6 +10,12 @@ import {
   type FormSubmissionListItem,
 } from "../../lib/forms/submission-contract"
 import type { FormEventDeliverySummary } from "../../lib/forms/form-delivery-contract"
+import { Button } from "@/components/ui/button"
+import { CodeBlock } from "@/components/ui/code-block"
+import { CopyRow } from "@/components/ui/copy-row"
+import { Input } from "@/components/ui/input"
+import { Notice } from "@/components/ui/notice"
+import { StatusBadge } from "@/components/ui/status-badge"
 
 type FormView = {
   id: string
@@ -242,56 +248,49 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
 
   return (
     <section className="mt-7">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 pb-5">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
         <div>
-          <h2 className="text-base font-semibold text-gray-950">Your forms</h2>
-          <p className="mt-1 text-sm text-gray-500">Build, publish and review structured forms.</p>
+          <h2 className="text-base font-semibold text-foreground">Your forms</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Build, publish and review structured forms.</p>
         </div>
         {canManage ? (
-          <button
-            type="button"
-            onClick={() => setShowCreate((current) => !current)}
-            className="rounded-md bg-gray-950 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800"
-          >
+          <Button type="button" onClick={() => setShowCreate((current) => !current)}>
             {showCreate ? "Cancel" : "New form"}
-          </button>
+          </Button>
         ) : null}
       </div>
 
       {showCreate ? (
         <form
           onSubmit={createForm}
-          className="grid gap-4 border-b border-gray-200 bg-white py-6 md:grid-cols-3"
+          className="grid gap-4 border-b border-border bg-card py-6 md:grid-cols-3"
         >
           <Field label="Form name">
-            <input
+            <Input
               required
               maxLength={80}
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="Enterprise demo request"
-              className={inputClass}
             />
           </Field>
           <Field label="Allowed origin" hint="Optional">
-            <input
+            <Input
               type="url"
               value={allowedOrigin}
               onChange={(event) => setAllowedOrigin(event.target.value)}
               placeholder="https://example.com"
-              className={inputClass}
             />
           </Field>
           <Field label="Success redirect" hint="Optional">
-            <input
+            <Input
               type="url"
               value={successUrl}
               onChange={(event) => setSuccessUrl(event.target.value)}
               placeholder="https://example.com/thanks"
-              className={inputClass}
             />
           </Field>
-          <label className="flex items-center gap-2 text-sm text-gray-700 md:col-span-3">
+          <label className="flex items-center gap-2 text-sm text-foreground md:col-span-3">
             <input
               type="checkbox"
               checked={requiresTurnstile}
@@ -299,29 +298,23 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
             />
             Require Cloudflare Turnstile bot verification
           </label>
-          <button
-            disabled={busy}
-            className="w-fit rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          >
+          <Button disabled={busy} className="w-fit">
             {busy ? "Creating…" : "Create and edit"}
-          </button>
+          </Button>
         </form>
       ) : null}
 
       {error ? (
-        <p
-          role="alert"
-          className="mt-4 border-l-2 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-800"
-        >
+        <Notice tone="error" className="mt-4">
           {error}
-        </p>
+        </Notice>
       ) : null}
 
-      <div className="divide-y divide-gray-200">
+      <div className="divide-y divide-border">
         {forms.length === 0 ? (
           <div className="py-14 text-center">
-            <p className="text-sm font-medium text-gray-800">No forms yet</p>
-            <p className="mt-1 text-sm text-gray-500">
+            <p className="text-sm font-medium text-foreground">No forms yet</p>
+            <p className="mt-1 text-sm text-muted-foreground">
               Create a form to define fields and start collecting responses.
             </p>
           </div>
@@ -345,50 +338,44 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-semibold text-gray-950">{form.name}</h3>
-                    <Status label={status} active={isActive} />
+                    <h3 className="font-semibold text-foreground">{form.name}</h3>
+                    <StatusBadge tone={isActive ? "success" : "neutral"}>{status}</StatusBadge>
                     {form.published_version ? (
-                      <span className="text-xs text-gray-400">v{form.published_version}</span>
+                      <span className="text-xs text-muted-foreground">v{form.published_version}</span>
                     ) : null}
                     {form.requires_turnstile ? (
-                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
-                        Bot check
-                      </span>
+                      <StatusBadge tone="info">Bot check</StatusBadge>
                     ) : null}
                   </div>
-                  <p className="mt-1 text-xs text-gray-500">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     Created {new Date(form.created_at).toLocaleDateString()}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2 text-sm">
                   {canManage ? (
-                    <Link
-                      href={`/dashboard/forms/${form.id}?name=${encodeURIComponent(form.name)}`}
-                      className="rounded-md bg-gray-950 px-3 py-1.5 font-medium text-white hover:bg-gray-800"
-                    >
-                      Edit form
-                    </Link>
+                    <Button asChild size="sm">
+                      <Link href={`/dashboard/forms/${form.id}?name=${encodeURIComponent(form.name)}`}>
+                        Edit form
+                      </Link>
+                    </Button>
                   ) : null}
-                  <button onClick={() => void loadSubmissions(form.id)} className={secondaryButton}>
+                  <Button variant="outline" size="sm" onClick={() => void loadSubmissions(form.id)}>
                     {selected === form.id ? "Hide submissions" : "Submissions"}
-                  </button>
+                  </Button>
                   {canManage && (isPublished || isLegacy) ? (
-                    <button onClick={() => void toggle(form)} className={secondaryButton}>
+                    <Button variant="outline" size="sm" onClick={() => void toggle(form)}>
                       {isActive ? "Pause" : "Resume"}
-                    </button>
+                    </Button>
                   ) : null}
                   {canManage ? (
-                    <button onClick={() => void toggleTurnstile(form)} className={secondaryButton}>
+                    <Button variant="outline" size="sm" onClick={() => void toggleTurnstile(form)}>
                       {form.requires_turnstile ? "Disable bot check" : "Require bot check"}
-                    </button>
+                    </Button>
                   ) : null}
                   {canManage ? (
-                    <button
-                      onClick={() => void remove(form)}
-                      className="rounded-md px-3 py-1.5 text-red-600 hover:bg-red-50"
-                    >
+                    <Button variant="destructive-ghost" size="sm" onClick={() => void remove(form)}>
                       Delete
-                    </button>
+                    </Button>
                   ) : null}
                 </div>
               </div>
@@ -396,8 +383,8 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
               <div className="mt-4 grid gap-2 lg:grid-cols-2">
                 <CopyRow
                   label="Hosted form"
-                  value={hostedForm(form.endpoint_key)}
-                  disabled={!isPublished}
+                  value={isPublished ? hostedForm(form.endpoint_key) : undefined}
+                  placeholder="Publish to create a hosted form"
                 />
                 <CopyRow
                   label="Submission endpoint"
@@ -405,17 +392,17 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
                 />
               </div>
               {form.allowed_origin ? (
-                <p className="mt-2 text-xs text-gray-500">
+                <p className="mt-2 text-xs text-muted-foreground">
                   Accepting requests from {form.allowed_origin}
                 </p>
               ) : null}
 
               {canManage && isLegacy ? (
-                <details className="mt-3 rounded-md border border-gray-200 px-4 py-3">
-                  <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                <details className="mt-3 rounded-md border border-border px-4 py-3">
+                  <summary className="cursor-pointer text-sm font-medium text-foreground">
                     Legacy JSON Schema
                   </summary>
-                  <p className="mt-2 text-xs text-gray-500">
+                  <p className="mt-2 text-xs text-muted-foreground">
                     Structured forms use the fields in the form builder. This setting remains for
                     legacy endpoints.
                   </p>
@@ -432,23 +419,24 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
                     rows={8}
                     spellCheck={false}
                     placeholder="No schema — all payloads are accepted"
-                    className="mt-3 w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs"
+                    className="mt-3 w-full rounded-md border border-border px-3 py-2 font-mono text-xs"
                   />
-                  <button
+                  <Button
                     type="button"
+                    size="xs"
+                    className="mt-2"
                     onClick={() => void saveSchema(form)}
-                    className="mt-2 rounded-md bg-gray-950 px-3 py-1.5 text-xs font-medium text-white"
                   >
                     Save schema
-                  </button>
+                  </Button>
                 </details>
               ) : null}
 
               {selected === form.id ? (
-                <div className="mt-5 border-t border-gray-100 pt-5">
+                <div className="mt-5 border-t border-border pt-5">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h4 className="text-sm font-semibold text-gray-900">Recent submissions</h4>
-                    <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+                    <h4 className="text-sm font-semibold text-foreground">Recent submissions</h4>
+                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                       Destination
                       <select
                         aria-label="Filter submissions by destination"
@@ -458,7 +446,7 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
                           setRouteFilter(route)
                           void fetchSubmissions(form.id, route)
                         }}
-                        className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800"
+                        className="rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground"
                       >
                         <option value="">All destinations</option>
                         {submissionRoutes.map((route) => (
@@ -471,14 +459,14 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
                   </div>
                   <div className="mt-3 space-y-2">
                     {submissions.length === 0 ? (
-                      <p className="text-sm text-gray-500">No submissions yet.</p>
+                      <p className="text-sm text-muted-foreground">No submissions yet.</p>
                     ) : (
                       submissions.map((submission) => (
                         <details
                           key={submission.id}
-                          className="rounded-md border border-gray-200 px-4 py-3"
+                          className="rounded-md border border-border px-4 py-3"
                         >
-                          <summary className="cursor-pointer text-sm text-gray-700">
+                          <summary className="cursor-pointer text-sm text-foreground">
                             {new Date(submission.created_at).toLocaleString()}
                             {submission.publication_version
                               ? ` · v${submission.publication_version}`
@@ -489,9 +477,10 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
                           </summary>
                           <SubmissionRouting routing={submission} />
                           <SubmissionDeliveries deliveries={submission.event_deliveries} />
-                          <pre className="mt-3 overflow-x-auto rounded bg-gray-950 p-3 text-xs leading-5 text-gray-100">
-                            {JSON.stringify(submission.payload, null, 2)}
-                          </pre>
+                          <CodeBlock
+                            className="mt-3"
+                            code={JSON.stringify(submission.payload, null, 2)}
+                          />
                         </details>
                       ))
                     )}
@@ -513,10 +502,10 @@ function SubmissionDeliveries({
 }) {
   if (deliveries.length === 0) return null
   return (
-    <div className="mt-3 space-y-1 text-xs text-gray-600">
+    <div className="mt-3 space-y-1 text-xs text-muted-foreground">
       {deliveries.map((delivery) => (
         <p key={delivery.delivery_key}>
-          <strong className="text-gray-900">
+          <strong className="text-foreground">
             {integrationActionNameForRegistration(delivery.registration_name)}
           </strong>{" "}
           · {delivery.status}
@@ -531,29 +520,25 @@ function SubmissionDeliveries({
 function SubmissionRouting({ routing }: { readonly routing: FormSubmissionListItem }) {
   if (routing.routing_status === "matched") {
     return (
-      <p className="mt-3 text-xs text-gray-600">
-        Routed to <strong className="text-gray-900">{routing.routing_route}</strong> · matched{" "}
+      <p className="mt-3 text-xs text-muted-foreground">
+        Routed to <strong className="text-foreground">{routing.routing_route}</strong> · matched{" "}
         {routing.matched_rule_id}
       </p>
     )
   }
   if (routing.routing_status === "fallback") {
     return (
-      <p className="mt-3 text-xs text-gray-600">
-        Routed to <strong className="text-gray-900">{routing.routing_route}</strong> · fallback
+      <p className="mt-3 text-xs text-muted-foreground">
+        Routed to <strong className="text-foreground">{routing.routing_route}</strong> · fallback
       </p>
     )
   }
   if (routing.routing_status === "failed") {
-    return <p className="mt-3 text-xs font-medium text-red-700">Routing failed</p>
+    return <p className="mt-3 text-xs font-medium text-error-text">Routing failed</p>
   }
-  return <p className="mt-3 text-xs text-gray-400">No routing configured</p>
+  return <p className="mt-3 text-xs text-muted-foreground">No routing configured</p>
 }
 
-const inputClass =
-  "w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-const secondaryButton =
-  "rounded-md border border-gray-200 px-3 py-1.5 text-gray-700 hover:bg-gray-50"
 
 function Field({
   children,
@@ -565,53 +550,17 @@ function Field({
   readonly hint?: string
 }) {
   return (
-    <label className="text-sm font-medium text-gray-700">
+    <label className="text-sm font-medium text-foreground">
       <span className="mb-1.5 flex justify-between">
         <span>{label}</span>
-        <span className="font-normal text-gray-400">{hint}</span>
+        <span className="font-normal text-muted-foreground">{hint}</span>
       </span>
       {children}
     </label>
   )
 }
 
-function Status({ label, active }: { readonly label: string; readonly active: boolean }) {
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs font-medium ${active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-600"}`}
-    >
-      {label}
-    </span>
-  )
-}
 
-function CopyRow({
-  label,
-  value,
-  disabled = false,
-}: {
-  readonly label: string
-  readonly value: string
-  readonly disabled?: boolean
-}) {
-  return (
-    <div className="flex min-w-0 items-center gap-2 rounded-md bg-gray-50 px-3 py-2">
-      <span className="shrink-0 text-xs font-medium text-gray-500">{label}</span>
-      <code className="min-w-0 flex-1 truncate text-xs text-gray-700">
-        {disabled ? "Publish to create a hosted form" : value}
-      </code>
-      {!disabled ? (
-        <button
-          type="button"
-          onClick={() => void navigator.clipboard.writeText(value)}
-          className="text-xs font-medium text-teal-600 hover:text-teal-800"
-        >
-          Copy
-        </button>
-      ) : null}
-    </div>
-  )
-}
 
 async function readBody(response: Response): Promise<FormsApiBody> {
   const value: unknown = await response.json().catch(() => ({}))
