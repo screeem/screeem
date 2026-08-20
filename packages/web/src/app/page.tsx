@@ -87,9 +87,9 @@ export default async function HomePage() {
             {/* Twitter card mockup */}
             <div className="bg-card rounded-xl border border-border p-4">
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-full bg-muted" />
+                <div className="w-10 h-10 rounded-full bg-secondary" />
                 <div>
-                  <div className="h-3 w-24 bg-muted rounded mb-1" />
+                  <div className="h-3 w-24 bg-secondary rounded mb-1" />
                   <div className="h-2.5 w-16 bg-muted rounded" />
                 </div>
               </div>
@@ -110,7 +110,7 @@ export default async function HomePage() {
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-10 h-10 rounded-full bg-info-subtle" />
                 <div>
-                  <div className="h-3 w-28 bg-muted rounded mb-1" />
+                  <div className="h-3 w-28 bg-secondary rounded mb-1" />
                   <div className="h-2.5 w-20 bg-muted rounded" />
                 </div>
               </div>
