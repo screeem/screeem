@@ -729,7 +729,7 @@ export function FormBuilderPlayground() {
                   disabled={builder.future.length === 0}
                   onClick={() => setBuilder((current) => redoBuilder(current))}
                 />
-                <span className="mx-1 h-5 w-px bg-muted" aria-hidden="true" />
+                <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
               </>
             ) : null}
             <ActionButton label="Save draft" onClick={() => void saveDraftSimulation()} />
@@ -808,7 +808,7 @@ function BuilderCanvas(props: BuilderLayoutProps) {
           <ControlPalette onAdd={props.onAdd} />
         </aside>
 
-        <main className="bg-background p-4 sm:p-7">
+        <main className="bg-muted p-4 sm:p-7">
           <div className="mx-auto max-w-xl rounded-xl bg-card px-5 py-7 shadow-[0_12px_36px_rgba(15,23,42,0.08)] sm:px-8">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Form canvas
@@ -1073,8 +1073,8 @@ function RespondentPreview({ definition }: { readonly definition: FormDefinition
   }
 
   return (
-    <section className="relative overflow-hidden rounded-xl border border-border bg-background px-4 py-10 sm:px-10">
-      <div className="absolute right-4 top-4 rounded-full bg-card/80 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur">
+    <section className="relative overflow-hidden rounded-xl border border-border bg-surface-stage px-4 py-10 sm:px-10">
+      <div className="absolute right-4 top-4 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur">
         Inert preview · no data is saved
       </div>
       <form

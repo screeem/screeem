@@ -695,7 +695,7 @@ export function FormEditor({
               </div>
             </aside>
 
-            <main className="bg-background p-4 sm:p-7">
+            <main className="bg-muted p-4 sm:p-7">
               <div className="mx-auto max-w-xl rounded-xl bg-card px-5 py-7 shadow-[0_12px_36px_rgba(15,23,42,0.08)] sm:px-8">
                 <TextDraft
                   label="Form title"
@@ -1021,7 +1021,7 @@ function EditorPreview({ definition }: { readonly definition: FormDefinition }) 
   const [tested, setTested] = useState(false)
 
   return (
-    <section className="rounded-xl border border-border bg-background px-4 py-10 sm:px-10">
+    <section className="rounded-xl border border-border bg-surface-stage px-4 py-10 sm:px-10">
       <div className="mx-auto max-w-xl rounded-2xl bg-card px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Respondent preview

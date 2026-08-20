@@ -50,6 +50,9 @@
   --input: oklch(91.5% 0.007 214);
   --ring: oklch(58% 0.094 188);
 
+  /* Respondent stage — the warm mat a form preview is presented on */
+  --surface-stage: oklch(93.4% 0.007 88);
+
   /* Terminal — does not invert with the theme */
   --code: oklch(17% 0.010 245);
   --code-foreground: oklch(92% 0.006 220);
@@ -135,6 +138,8 @@
   --border-strong: oklch(42% 0.016 235);
   --input: oklch(32% 0.013 238);
   --ring: oklch(74% 0.098 187);
+
+  --surface-stage: oklch(24% 0.008 88);
 
   /* Terminal holds its ground in both themes; only the border softens. */
   --code: oklch(15% 0.009 245);
@@ -228,6 +233,8 @@
   --color-ring: var(--ring);
 
   /* --- Terminal --- */
+  --color-surface-stage: var(--surface-stage);
+
   --color-code: var(--code);
   --color-code-foreground: var(--code-foreground);
   --color-code-muted: var(--code-muted);

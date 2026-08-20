@@ -51,7 +51,7 @@ function AccountCard({
       <img
         src={`${config.avatarBase}${account.handle}`}
         alt={account.handle}
-        className="w-10 h-10 rounded-full bg-border"
+        className="w-10 h-10 rounded-full bg-border-strong"
       />
       <div className="flex-1 min-w-0">
         <p className="font-medium text-foreground text-sm truncate">
@@ -117,7 +117,7 @@ function AddAccountForm({
     <div className="flex items-end gap-2">
       <div className="flex-1">
         <div className="flex items-center border border-border rounded-md overflow-hidden focus-within:ring-2 focus-within:ring-ring focus-within:border-transparent">
-          <span className="px-3 py-2 bg-muted text-muted-foreground text-sm border-r border-border whitespace-nowrap">
+          <span className="px-3 py-2 bg-muted text-muted-foreground text-sm border-r border-border-strong whitespace-nowrap">
             {config.prefix}
           </span>
           <input
