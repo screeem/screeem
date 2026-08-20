@@ -254,7 +254,11 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
           <p className="mt-1 text-sm text-muted-foreground">Build, publish and review structured forms.</p>
         </div>
         {canManage ? (
-          <Button type="button" onClick={() => setShowCreate((current) => !current)}>
+          <Button
+            type="button"
+            variant={showCreate ? "outline" : "default"}
+            onClick={() => setShowCreate((current) => !current)}
+          >
             {showCreate ? "Cancel" : "New form"}
           </Button>
         ) : null}
@@ -263,7 +267,7 @@ function FormsForTeam({ teamId, canManage }: { teamId: string; canManage: boolea
       {showCreate ? (
         <form
           onSubmit={createForm}
-          className="grid gap-4 border-b border-border bg-card py-6 md:grid-cols-3"
+          className="my-6 grid gap-4 rounded-xl border border-border bg-card p-6 md:grid-cols-3"
         >
           <Field label="Form name">
             <Input
