@@ -596,7 +596,7 @@ export function FormEditor({
                 {builder.definition.title}
               </h1>
               <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${form?.published_version ? "bg-success-subtle text-success-text" : "bg-muted text-muted-foreground"}`}
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${form?.published_version ? "bg-success-subtle text-success-text" : "bg-secondary text-secondary-foreground"}`}
               >
                 {form?.published_version ? `Published v${form.published_version}` : "Draft"}
               </span>
@@ -744,7 +744,7 @@ export function FormEditor({
                                     current ? selectBuilderField(current, field.id) : current,
                                   )
                                 }
-                                className="w-10 shrink-0 cursor-grab border-r border-border text-lg leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-primary active:cursor-grabbing"
+                                className="w-10 shrink-0 cursor-grab border-r border-border text-lg leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-primary-text active:cursor-grabbing"
                               >
                                 ⠿
                               </button>

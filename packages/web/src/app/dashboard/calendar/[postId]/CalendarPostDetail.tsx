@@ -23,7 +23,7 @@ const approvalLabels: Record<CalendarApprovalStatus, string> = {
 }
 
 const approvalClasses: Record<CalendarApprovalStatus, string> = {
-  draft: "bg-muted text-muted-foreground",
+  draft: "bg-secondary text-secondary-foreground",
   in_review: "bg-warning-subtle text-warning-text",
   changes_requested: "bg-error-subtle text-error-text",
   approved: "bg-success-subtle text-success-text",

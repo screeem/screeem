@@ -330,7 +330,7 @@ function RoutingRuleEditor({
           type="button"
           aria-label={`Drag rule ${index + 1} to reorder`}
           title="Drag to reorder"
-          className="cursor-grab rounded px-1.5 py-1 text-lg leading-none text-muted-foreground hover:bg-accent hover:text-primary active:cursor-grabbing"
+          className="cursor-grab rounded px-1.5 py-1 text-lg leading-none text-muted-foreground hover:bg-accent hover:text-primary-text active:cursor-grabbing"
         >
           ⠿
         </button>
@@ -340,7 +340,7 @@ function RoutingRuleEditor({
             disabled={index === 0}
             onClick={() => onMove(-1)}
             aria-label={`Move rule ${index + 1} up`}
-            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary disabled:opacity-25"
+            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary-text disabled:opacity-25"
           >
             ↑
           </button>
@@ -349,7 +349,7 @@ function RoutingRuleEditor({
             disabled={!canMoveDown}
             onClick={() => onMove(1)}
             aria-label={`Move rule ${index + 1} down`}
-            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary disabled:opacity-25"
+            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary-text disabled:opacity-25"
           >
             ↓
           </button>

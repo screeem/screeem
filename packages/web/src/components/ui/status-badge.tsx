@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 export type StatusTone = "neutral" | "success" | "warning" | "error" | "info"
 
 const toneClass: Record<StatusTone, string> = {
-  neutral: "bg-muted text-muted-foreground",
+  neutral: "bg-secondary text-secondary-foreground",
   success: "bg-success-subtle text-success-text",
   warning: "bg-warning-subtle text-warning-text",
   error: "bg-error-subtle text-error-text",

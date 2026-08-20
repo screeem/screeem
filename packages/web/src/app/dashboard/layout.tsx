@@ -9,7 +9,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { user, activeTeam, teams } = await getDashboardSession();
 
   return (
-    <div className="min-h-screen bg-muted">
+    <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex min-h-14 max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0">
           <div className="flex items-center gap-4">
