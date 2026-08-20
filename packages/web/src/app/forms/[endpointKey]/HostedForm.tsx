@@ -83,7 +83,7 @@ export function HostedForm({ endpointKey }: { readonly endpointKey: string }) {
   }
   if (submitted) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
+      <main className="flex min-h-screen items-center justify-center bg-surface-stage px-4 py-12">
         <div className="w-full max-w-lg rounded-2xl bg-card px-7 py-10 text-center shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10">
           <span
             aria-hidden="true"
@@ -101,7 +101,7 @@ export function HostedForm({ endpointKey }: { readonly endpointKey: string }) {
   }
 
   return (
-    <main className="min-h-screen bg-background px-4 py-8 sm:py-14">
+    <main className="min-h-screen bg-surface-stage px-4 py-8 sm:py-14">
       <div className="mx-auto max-w-xl rounded-2xl bg-card px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10 sm:py-10">
         <div className="mb-8 border-b border-border pb-6">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -125,7 +125,7 @@ export function HostedForm({ endpointKey }: { readonly endpointKey: string }) {
 
 function PublicState({ title, detail }: { readonly title: string; readonly detail: string }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
+    <main className="flex min-h-screen items-center justify-center bg-surface-stage px-4 py-12">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold text-foreground">{title}</h1>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>

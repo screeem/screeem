@@ -43,7 +43,7 @@ export default async function HomePage() {
 
       {/* Hero */}
       <section className="max-w-6xl mx-auto px-6 pt-24 pb-20 text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-muted rounded-full text-xs font-medium text-muted-foreground mb-8">
+        <div className="inline-flex items-center gap-2 px-3 py-1 bg-secondary rounded-full text-xs font-medium text-muted-foreground mb-8">
           <span className="w-1.5 h-1.5 bg-success rounded-full" />
           Open source · Self-hostable
         </div>
@@ -87,9 +87,9 @@ export default async function HomePage() {
             {/* Twitter card mockup */}
             <div className="bg-card rounded-xl border border-border p-4">
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-full bg-muted" />
+                <div className="w-10 h-10 rounded-full bg-secondary" />
                 <div>
-                  <div className="h-3 w-24 bg-muted rounded mb-1" />
+                  <div className="h-3 w-24 bg-secondary rounded mb-1" />
                   <div className="h-2.5 w-16 bg-muted rounded" />
                 </div>
               </div>
@@ -110,7 +110,7 @@ export default async function HomePage() {
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-10 h-10 rounded-full bg-info-subtle" />
                 <div>
-                  <div className="h-3 w-28 bg-muted rounded mb-1" />
+                  <div className="h-3 w-28 bg-secondary rounded mb-1" />
                   <div className="h-2.5 w-20 bg-muted rounded" />
                 </div>
               </div>
@@ -213,7 +213,7 @@ export default async function HomePage() {
               },
             ].map((s) => (
               <div key={s.step} className="flex flex-col">
-                <span className="text-4xl font-bold text-muted-foreground mb-3">
+                <span className="text-4xl font-bold text-border-strong mb-3">
                   {s.step}
                 </span>
                 <h3 className="font-semibold text-foreground mb-2">{s.title}</h3>

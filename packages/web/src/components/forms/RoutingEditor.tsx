@@ -150,7 +150,7 @@ export function RoutingEditor(props: RoutingEditorProps) {
     >
       <fieldset disabled={props.disabled} className="min-w-0 border-0 p-0 disabled:opacity-70">
         <div className="grid min-h-[680px] xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="bg-background px-4 py-5 sm:px-7 sm:py-7">
+        <div className="bg-muted px-4 py-5 sm:px-7 sm:py-7">
           <div className="mx-auto max-w-4xl">
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 pb-5">
               <div>
@@ -330,7 +330,7 @@ function RoutingRuleEditor({
           type="button"
           aria-label={`Drag rule ${index + 1} to reorder`}
           title="Drag to reorder"
-          className="cursor-grab rounded px-1.5 py-1 text-lg leading-none text-muted-foreground hover:bg-accent hover:text-primary active:cursor-grabbing"
+          className="cursor-grab rounded px-1.5 py-1 text-lg leading-none text-muted-foreground hover:bg-accent hover:text-primary-text active:cursor-grabbing"
         >
           ⠿
         </button>
@@ -340,7 +340,7 @@ function RoutingRuleEditor({
             disabled={index === 0}
             onClick={() => onMove(-1)}
             aria-label={`Move rule ${index + 1} up`}
-            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary disabled:opacity-25"
+            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary-text disabled:opacity-25"
           >
             ↑
           </button>
@@ -349,7 +349,7 @@ function RoutingRuleEditor({
             disabled={!canMoveDown}
             onClick={() => onMove(1)}
             aria-label={`Move rule ${index + 1} down`}
-            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary disabled:opacity-25"
+            className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-primary-text disabled:opacity-25"
           >
             ↓
           </button>
@@ -384,7 +384,7 @@ function RoutingRuleEditor({
             type="button"
             onClick={onRemove}
             aria-label={`Remove rule ${index + 1}`}
-            className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-error-subtle hover:text-error-text"
+            className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-error-subtle hover:ring-1 hover:ring-error hover:text-error-text"
           >
             ×
           </button>
@@ -557,7 +557,7 @@ function RoutingActionEditor({
                   type="button"
                   onClick={() => onChange(Object.freeze(actions.filter((candidate) => candidate.id !== action.id)))}
                   aria-label={`Remove ${actionDefinition?.label ?? action.use}`}
-                  className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-error-subtle hover:text-error-text"
+                  className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-error-subtle hover:ring-1 hover:ring-error hover:text-error-text"
                 >×</button>
               </div>
               {actionDefinition ? (
@@ -729,7 +729,7 @@ function RoutingConditionEditor({
           disabled={!canRemove}
           onClick={onRemove}
           aria-label="Remove condition"
-          className="rounded p-1 text-muted-foreground hover:bg-error-subtle hover:text-error-text disabled:invisible"
+          className="rounded p-1 text-muted-foreground hover:bg-error-subtle hover:ring-1 hover:ring-error hover:text-error-text disabled:invisible"
         >
           ×
         </button>

@@ -596,7 +596,7 @@ export function FormEditor({
                 {builder.definition.title}
               </h1>
               <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${form?.published_version ? "bg-success-subtle text-success-text" : "bg-muted text-muted-foreground"}`}
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${form?.published_version ? "bg-success-subtle text-success-text" : "bg-secondary text-secondary-foreground"}`}
               >
                 {form?.published_version ? `Published v${form.published_version}` : "Draft"}
               </span>
@@ -695,7 +695,7 @@ export function FormEditor({
               </div>
             </aside>
 
-            <main className="bg-background p-4 sm:p-7">
+            <main className="bg-muted p-4 sm:p-7">
               <div className="mx-auto max-w-xl rounded-xl bg-card px-5 py-7 shadow-[0_12px_36px_rgba(15,23,42,0.08)] sm:px-8">
                 <TextDraft
                   label="Form title"
@@ -744,7 +744,7 @@ export function FormEditor({
                                     current ? selectBuilderField(current, field.id) : current,
                                   )
                                 }
-                                className="w-10 shrink-0 cursor-grab border-r border-border text-lg leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-primary active:cursor-grabbing"
+                                className="w-10 shrink-0 cursor-grab border-r border-border text-lg leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-primary-text active:cursor-grabbing"
                               >
                                 ⠿
                               </button>
@@ -1021,7 +1021,7 @@ function EditorPreview({ definition }: { readonly definition: FormDefinition }) 
   const [tested, setTested] = useState(false)
 
   return (
-    <section className="rounded-xl border border-border bg-background px-4 py-10 sm:px-10">
+    <section className="rounded-xl border border-border bg-surface-stage px-4 py-10 sm:px-10">
       <div className="mx-auto max-w-xl rounded-2xl bg-card px-6 py-8 shadow-[0_18px_60px_rgba(15,23,42,0.12)] sm:px-10">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Respondent preview

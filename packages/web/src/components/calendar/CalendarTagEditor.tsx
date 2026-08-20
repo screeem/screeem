@@ -32,13 +32,13 @@ export function CalendarTagEditor({
       {tags.length ? (
         <div className="mt-2 flex flex-wrap gap-2">
           {tags.map((tag) => (
-            <span key={tag.toLowerCase()} className="inline-flex items-center gap-1 rounded-full bg-muted py-1 pl-2.5 pr-1 text-xs font-medium text-foreground">
+            <span key={tag.toLowerCase()} className="inline-flex items-center gap-1 rounded-full bg-secondary py-1 pl-2.5 pr-1 text-xs font-medium text-secondary-foreground">
               #{tag}
               <button
                 type="button"
                 aria-label={`Remove ${tag} tag`}
                 onClick={() => onChange(tags.filter((candidate) => candidate !== tag))}
-                className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-border hover:text-foreground"
               >
                 ×
               </button>

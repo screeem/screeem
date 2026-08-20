@@ -23,7 +23,7 @@ const approvalLabels: Record<CalendarApprovalStatus, string> = {
 }
 
 const approvalClasses: Record<CalendarApprovalStatus, string> = {
-  draft: "bg-muted text-muted-foreground",
+  draft: "bg-secondary text-secondary-foreground",
   in_review: "bg-warning-subtle text-warning-text",
   changes_requested: "bg-error-subtle text-error-text",
   approved: "bg-success-subtle text-success-text",
@@ -180,7 +180,7 @@ export function CalendarPostDetail({
 
   return <div className="pb-10 text-foreground">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div><Link href="/dashboard/calendar" className="text-sm font-medium text-muted-foreground hover:text-primary">← Content calendar</Link><div className="mt-3 flex flex-wrap items-center gap-3"><h1 className="text-3xl font-semibold tracking-tight">{draft.title}</h1><ApprovalBadge status={draft.approval.status} /></div><p className="mt-2 text-sm text-muted-foreground">Edit the post, review its previews, and inspect its complete immutable history.</p>{draft.tags.length ? <div className="mt-3 flex flex-wrap gap-2">{draft.tags.map((tag) => <span key={tag.toLowerCase()} className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">#{tag}</span>)}</div> : null}</div>
+      <div><Link href="/dashboard/calendar" className="text-sm font-medium text-muted-foreground hover:text-primary">← Content calendar</Link><div className="mt-3 flex flex-wrap items-center gap-3"><h1 className="text-3xl font-semibold tracking-tight">{draft.title}</h1><ApprovalBadge status={draft.approval.status} /></div><p className="mt-2 text-sm text-muted-foreground">Edit the post, review its previews, and inspect its complete immutable history.</p>{draft.tags.length ? <div className="mt-3 flex flex-wrap gap-2">{draft.tags.map((tag) => <span key={tag.toLowerCase()} className="rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground">#{tag}</span>)}</div> : null}</div>
       <button disabled={busy || !dirty || !draft.title.trim() || draft.targets.length === 0} onClick={() => void save()} className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-40">{busy ? "Saving…" : "Append changes"}</button>
     </div>
     {error ? <p role="alert" className="mt-4 rounded-lg bg-error-subtle px-4 py-3 text-sm text-error-text">{error}</p> : null}
