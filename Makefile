@@ -21,6 +21,7 @@ offline-check: ## Prove pnpm and app images are available without downloading an
 
 packages:
 	@test -x packages/web/node_modules/.bin/next || { printf 'Dependencies are missing; run make setup once while online.\n' >&2; exit 1; }
+	$(PNPM) --filter @screeem/billing build
 	$(PNPM) --filter @screeem/routing build
 	$(PNPM) --filter @screeem/forms build
 	$(PNPM) --filter @screeem/forms-react build
@@ -52,6 +53,7 @@ db-reset: ## Reset the local database and seed it from current migrations.
 	sh scripts/docker-local.sh reset
 
 test: infra-up ## Run routing, forms, React, object storage, web, and local database tests.
+	$(PNPM) --filter @screeem/billing test
 	$(PNPM) --filter @screeem/routing test
 	$(PNPM) --filter @screeem/forms test
 	$(PNPM) --filter @screeem/forms-react test
