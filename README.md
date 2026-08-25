@@ -51,6 +51,7 @@ Screeem is an MCP server that gives Claude a `create_or_update_post` tool. When 
 
 ```
 packages/
+  billing/          Shared billing service and Stripe adapter
   web/              Next.js app — dashboard, MCP HTTP server, OAuth endpoints
   mcp_post_preview/ Standalone MCP stdio server + Vite-built preview UI
   object-storage/   Tenant-scoped object storage port, policy layer, and adapters
@@ -155,6 +156,15 @@ service role, which applies the scope policy first.
 Adapters share one behavioural suite from `@screeem/object-storage/testing`. Run
 it against local Supabase Storage with `make infra-up` followed by
 `pnpm --filter @screeem/web test:object-storage-db`; it is skipped by default.
+
+## Billing
+
+`@screeem/billing` defines the shared Effect billing service and includes a
+Stripe adapter. Application code owns plans, configuration, routes, customer
+records, and entitlements.
+
+See the [billing package README](packages/billing/README.md) for its API and
+adapter contract.
 
 ## Salesforce integration development
 
