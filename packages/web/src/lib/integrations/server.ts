@@ -36,6 +36,10 @@ import { SalesforceHttpClient } from "./salesforce/client"
 import { snapshotIntegrationIdentifier, type IntegrationIdentifier } from "./contract"
 import { SalesforceActionPreviewService } from "./salesforce/action-preview-service"
 import { crmIntegrationType } from "./crm/contract"
+import { createSocialIntegrationProviderDefinition } from "./social/server"
+
+const instagramIntegrationProviderDefinition = createSocialIntegrationProviderDefinition("instagram")
+const tiktokIntegrationProviderDefinition = createSocialIntegrationProviderDefinition("tiktok")
 
 const salesforceIntegrationProviderDefinition = defineIntegrationProvider({
   name: salesforceProviderName,
@@ -47,9 +51,19 @@ const salesforceIntegrationProviderDefinition = defineIntegrationProvider({
 
 export const productionIntegrationProviderRegistry = createIntegrationProviderRegistry()
   .register(salesforceIntegrationProviderDefinition)
+  .register(instagramIntegrationProviderDefinition)
+  .register(tiktokIntegrationProviderDefinition)
 
 export const salesforceIntegrationProvider = productionIntegrationProviderRegistry.reference(
   salesforceIntegrationProviderDefinition,
+)
+
+export const instagramIntegrationProvider = productionIntegrationProviderRegistry.reference(
+  instagramIntegrationProviderDefinition,
+)
+
+export const tiktokIntegrationProvider = productionIntegrationProviderRegistry.reference(
+  tiktokIntegrationProviderDefinition,
 )
 
 export function createIntegrationResolver() {
@@ -117,6 +131,7 @@ export async function createSalesforceConnectionService() {
     resolveClient: async (teamId) => (
       await resolver.resolve(teamId, salesforceIntegrationProvider)
     ).client,
+    redirectUri: runtime.callbackUrl,
   })
 }
 
@@ -211,6 +226,7 @@ function rawSalesforceConfiguration() {
   return {
     cipher,
     oauth: new SalesforceOAuthAdapter(oauthConfiguration),
+    callbackUrl: oauthConfiguration.callbackUrl,
   }
 }
 

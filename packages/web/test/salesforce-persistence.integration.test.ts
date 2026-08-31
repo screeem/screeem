@@ -14,6 +14,7 @@ import {
   PostgresIntegrationCredentialStore,
   PostgresIntegrationExecutionStore,
 } from "../src/lib/integrations/postgres-store"
+import { IntegrationCredentialRevisionConflictError } from "../src/lib/integrations/stores"
 import {
   salesforceProviderName,
   snapshotSalesforceAccessCredential,
@@ -205,6 +206,74 @@ suite("Postgres Salesforce integration stores", () => {
     await expect(credentials.load(fixture.teamOne, connectionId)).resolves.toBeNull()
   })
 
+  it("fences and idempotently completes the two-phase disconnect", async () => {
+    const cipher = await cipherForTest()
+    const connectionId = snapshotIntegrationIdentifier(crypto.randomUUID())
+    const attemptId = snapshotIntegrationIdentifier(crypto.randomUUID())
+    await authorize(fixture, attemptId)
+    await provisioning.connect(fixture.teamOne, {
+      connectionId,
+      authorizationAttemptId: attemptId,
+      provider: salesforceProviderName,
+      displayName: "Salesforce User",
+      externalAccountId: "00D000000000001",
+      credential: await cipher.seal(
+        { teamId: fixture.teamOne, connectionId, provider: salesforceProviderName },
+        { token: "first" },
+      ),
+      actorId: fixture.userOne,
+      connectedAt: "2026-08-14T10:00:00.000Z",
+    })
+    const started = await provisioning.beginDisconnect(
+      fixture.teamOne,
+      salesforceProviderName,
+      fixture.userOne,
+      "2026-08-14T10:01:00.000Z",
+    )
+
+    await expect(provisioning.completeDisconnect(
+      fixture.teamOne,
+      connectionId,
+      started!.connection.revision,
+      started!.credential!.revision + 1,
+      fixture.userOne,
+      "2026-08-14T10:02:00.000Z",
+    )).rejects.toBeInstanceOf(IntegrationCredentialRevisionConflictError)
+    await expect(credentials.load(fixture.teamOne, connectionId)).resolves.not.toBeNull()
+
+    const refreshed = await provisioning.updateDisconnectCredential(
+      fixture.teamOne,
+      connectionId,
+      started!.connection.revision,
+      started!.credential!.revision,
+      await cipher.seal(
+        { teamId: fixture.teamOne, connectionId, provider: salesforceProviderName },
+        { token: "refreshed-before-revoke" },
+      ),
+      fixture.userOne,
+      "2026-08-14T10:01:30.000Z",
+    )
+    expect(refreshed.revision).toBe(started!.credential!.revision + 1)
+
+    const completed = await provisioning.completeDisconnect(
+      fixture.teamOne,
+      connectionId,
+      started!.connection.revision,
+      refreshed.revision,
+      fixture.userOne,
+      "2026-08-14T10:02:00.000Z",
+    )
+    await expect(provisioning.completeDisconnect(
+      fixture.teamOne,
+      connectionId,
+      started!.connection.revision,
+      refreshed.revision,
+      fixture.userOne,
+      "2026-08-14T10:03:00.000Z",
+    )).resolves.toEqual(completed)
+    await expect(credentials.load(fixture.teamOne, connectionId)).resolves.toBeNull()
+  })
+
   it("invalidates a pending OAuth callback when disconnecting", async () => {
     const cipher = await cipherForTest()
     const connectionId = snapshotIntegrationIdentifier(crypto.randomUUID())
@@ -390,6 +459,7 @@ function oauthState(fixture: ReturnType<typeof identifiers>) {
     attemptId: snapshotIntegrationIdentifier(crypto.randomUUID()),
     userId: fixture.userOne,
     codeVerifier: "v".repeat(64),
+    redirectUri: "http://localhost:3000/api/integrations/salesforce/callback",
     returnPath: "/dashboard/forms",
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "@screeem/integrations",
   "version": "0.1.0",
-  "description": "Effect-native integration providers for Screeem",
+  "description": "Instagram and TikTok integration providers for Screeem",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",

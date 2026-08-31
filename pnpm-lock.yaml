@@ -221,6 +221,9 @@ importers:
       '@screeem/forms-react':
         specifier: workspace:*
         version: link:../forms-react
+      '@screeem/integrations':
+        specifier: workspace:*
+        version: link:../integrations
       '@screeem/object-storage':
         specifier: workspace:*
         version: link:../object-storage

@@ -1,8 +1,7 @@
 # `@screeem/integrations`
 
-`@screeem/integrations` is Screeem's Effect-native boundary for third-party
-services. Social adapters live at provider-specific exports rather than inside
-the web application's `lib` directory:
+`@screeem/integrations` provides Instagram and TikTok OAuth and publishing
+adapters through provider-specific exports:
 
 ```text
 packages/integrations/src/social/
@@ -58,8 +57,9 @@ trusted boundary and must redact all request telemetry.
 `revokeCredential()` returns `revoked`, or `already_inactive` only when the
 provider explicitly proves the whole app grant was removed. An expired TikTok
 access token is not proof because its refresh grant may still be valid: refresh
-first, then revoke. Other authorization/transport failures remain retryable and
-must be recorded before local secret deletion.
+first, then revoke. Other authorization and transport failures do not prove the
+remote grant was removed. If the host falls back to deleting an unusable local
+credential, it must tell the user to remove the app from the provider account.
 
 That division is deliberate: this package understands provider protocols;
 Screeem decides who may connect an account and when a post should run.

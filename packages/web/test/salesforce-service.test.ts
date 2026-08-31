@@ -295,5 +295,6 @@ async function fixture() {
       username: "salesforce@example.invalid",
     }),
     resolveClient: vi.fn().mockResolvedValue(new FakeSalesforceClient()),
+    redirectUri: "http://localhost:3000/api/integrations/salesforce/callback",
   }
 }

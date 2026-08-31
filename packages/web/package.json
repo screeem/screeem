@@ -20,6 +20,7 @@
     "@atlaskit/pragmatic-drag-and-drop-hitbox": "^2.0.0",
     "@screeem/forms": "workspace:*",
     "@screeem/forms-react": "workspace:*",
+    "@screeem/integrations": "workspace:*",
     "@screeem/object-storage": "workspace:*",
     "@screeem/routing": "workspace:*",
     "@supabase/ssr": "^0.6.1",

@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(46);
+SELECT plan(53);
 
 INSERT INTO auth.users (
   id, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at
@@ -35,6 +35,7 @@ SELECT has_column('integration_credentials', 'revision');
 SELECT has_column('integration_team_controls', 'revision');
 SELECT has_index('integration_connections', 'integration_connections_team_provider_key');
 SELECT has_index('integration_connections', 'integration_connections_team_created_idx');
+SELECT has_index('integration_connections', 'integration_connections_provider_external_account_active_key');
 SELECT col_is_pk('integration_credentials', ARRAY['team_id', 'connection_id']);
 
 SELECT lives_ok(
@@ -69,6 +70,69 @@ SELECT lives_ok(
   'the same provider can be connected independently by another team'
 );
 
+SELECT lives_ok(
+  $$
+    INSERT INTO integration_connections (
+      id, team_id, provider, status, health, external_account_id, created_by, updated_by
+    )
+    SELECT
+      '61000000-0000-0000-0000-000000000011', id, 'instagram', 'connected',
+      'healthy', 'instagram-account-one', created_by, created_by
+    FROM teams
+    WHERE created_by = '60000000-0000-0000-0000-000000000001'
+    ORDER BY created_at
+    LIMIT 1
+  $$,
+  'a social account can be connected to one team'
+);
+
+SELECT throws_ok(
+  $$
+    INSERT INTO integration_connections (
+      id, team_id, provider, status, health, external_account_id, created_by, updated_by
+    )
+    SELECT
+      '61000000-0000-0000-0000-000000000012', id, 'instagram', 'connected',
+      'healthy', 'instagram-account-one', created_by, created_by
+    FROM teams
+    WHERE created_by = '60000000-0000-0000-0000-000000000002'
+    ORDER BY created_at
+    LIMIT 1
+  $$,
+  '23505', NULL, 'an active social account cannot be shared across teams'
+);
+
+SELECT lives_ok(
+  $$
+    UPDATE integration_connections
+    SET status = 'disconnected', enabled = false, disabled_at = now(), disconnected_at = now()
+    WHERE id = '61000000-0000-0000-0000-000000000011'
+  $$,
+  'a social account can be released by disconnecting it'
+);
+
+SELECT lives_ok(
+  $$
+    INSERT INTO integration_connections (
+      id, team_id, provider, status, health, external_account_id, created_by, updated_by
+    )
+    SELECT
+      '61000000-0000-0000-0000-000000000012', id, 'instagram', 'connected',
+      'healthy', 'instagram-account-one', created_by, created_by
+    FROM teams
+    WHERE created_by = '60000000-0000-0000-0000-000000000002'
+    ORDER BY created_at
+    LIMIT 1
+  $$,
+  'a disconnected social account can be connected to another team'
+);
+
+DELETE FROM integration_connections
+WHERE id IN (
+  '61000000-0000-0000-0000-000000000011',
+  '61000000-0000-0000-0000-000000000012'
+);
+
 SELECT throws_ok(
   $$
     INSERT INTO integration_connections (team_id, provider, status)
@@ -97,6 +161,16 @@ SELECT throws_ok(
 SELECT throws_ok(
   $$ UPDATE integration_connections SET status = 'disconnected' WHERE id = '61000000-0000-0000-0000-000000000001' $$,
   '23514', NULL, 'disconnecting a connection requires an audit timestamp'
+);
+SELECT throws_ok(
+  $$ UPDATE integration_connections SET status = 'disconnecting' WHERE id = '61000000-0000-0000-0000-000000000001' $$,
+  '23514', NULL, 'a disconnecting connection must be disabled'
+);
+SELECT lives_ok(
+  $$ UPDATE integration_connections
+     SET status = 'disconnecting', enabled = false, disabled_at = now()
+     WHERE id = '61000000-0000-0000-0000-000000000001' $$,
+  'a disconnecting connection is disabled while its credential is retained'
 );
 
 SELECT lives_ok(

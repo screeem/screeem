@@ -17,6 +17,7 @@ import {
   IntegrationTeamControlRevisionConflictError,
   snapshotSealedIntegrationCredential,
 } from "../src/lib/integrations/stores"
+import { PostgresSocialDisconnectLeaseStore } from "../src/lib/integrations/social/stores"
 
 vi.mock("server-only", () => ({}))
 
@@ -30,6 +31,7 @@ suite("Postgres integration stores", () => {
   const connections = new PostgresIntegrationConnectionStore(database)
   const credentials = new PostgresIntegrationCredentialStore(database, connections)
   const controls = new PostgresIntegrationTeamControlStore(database)
+  const socialDisconnectLeases = new PostgresSocialDisconnectLeaseStore(database)
   let fixture: ReturnType<typeof identifiers>
 
   beforeEach(async () => {
@@ -94,6 +96,62 @@ suite("Postgres integration stores", () => {
         now(),
       ),
     ).rejects.toBeInstanceOf(IntegrationCredentialRevisionConflictError)
+  })
+
+  it("cannot rotate credentials after a connection is disabled", async () => {
+    const connection = await createConnection(fixture.teamOne, fixture.userOne)
+    const stored = await credentials.compareAndSet(
+      fixture.teamOne,
+      connection.id,
+      null,
+      sealed("cipher-one"),
+      now(),
+    )
+    await connections.setEnabled(
+      fixture.teamOne,
+      connection.id,
+      connection.revision,
+      false,
+      fixture.userOne,
+      now(),
+    )
+
+    await expect(credentials.compareAndSet(
+      fixture.teamOne,
+      connection.id,
+      stored.revision,
+      sealed("cipher-two"),
+      now(),
+    )).rejects.toBeInstanceOf(IntegrationCredentialRevisionConflictError)
+    await expect(credentials.load(fixture.teamOne, connection.id)).resolves.toEqual(stored)
+  })
+
+  it("renews a social disconnect lease only for its current unexpired owner", async () => {
+    const connection = await createConnection(fixture.teamOne, fixture.userOne)
+    const owner = "a".repeat(43)
+    const contender = "b".repeat(43)
+
+    await expect(
+      socialDisconnectLeases.acquire(fixture.teamOne, connection.id, owner),
+    ).resolves.toBe(true)
+    await expect(
+      socialDisconnectLeases.renew(fixture.teamOne, connection.id, contender),
+    ).resolves.toBe(false)
+    await expect(
+      socialDisconnectLeases.renew(fixture.teamOne, connection.id, owner),
+    ).resolves.toBe(true)
+    await database`
+      UPDATE integration_refresh_leases
+      SET updated_at = statement_timestamp() - interval '2 seconds',
+          expires_at = statement_timestamp() - interval '1 second'
+      WHERE team_id = ${fixture.teamOne} AND connection_id = ${connection.id}
+    `
+    await expect(
+      socialDisconnectLeases.renew(fixture.teamOne, connection.id, owner),
+    ).resolves.toBe(false)
+    await expect(
+      socialDisconnectLeases.acquire(fixture.teamOne, connection.id, contender),
+    ).resolves.toBe(true)
   })
 
   it("persists the team kill switch independently of connection state", async () => {

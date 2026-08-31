@@ -22,6 +22,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
 
@@ -178,13 +179,16 @@ export const integrationConnections = pgTable(
   (table) => [
     unique("integration_connections_team_id_id_key").on(table.teamId, table.id),
     unique("integration_connections_team_provider_key").on(table.teamId, table.provider),
+    uniqueIndex("integration_connections_provider_external_account_active_key")
+      .on(table.provider, table.externalAccountId)
+      .where(sql`${table.provider} IN ('instagram', 'tiktok') AND ${table.externalAccountId} IS NOT NULL AND ${table.status} <> 'disconnected'`),
     index("integration_connections_team_created_idx").on(
       table.teamId,
       table.createdAt.desc(),
     ),
     check("integration_connections_provider_check", sql`${table.provider} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
     check("integration_connections_revision_check", sql`${table.revision} > 0`),
-    check("integration_connections_status_check", sql`${table.status} IN ('connected', 'reauthorization_required', 'disconnected')`),
+    check("integration_connections_status_check", sql`${table.status} IN ('connected', 'reauthorization_required', 'disconnecting', 'disconnected')`),
     check("integration_connections_health_check", sql`${table.health} IN ('unknown', 'healthy', 'degraded')`),
     check("integration_connections_display_name_check", sql`${table.displayName} IS NULL OR char_length(${table.displayName}) BETWEEN 1 AND 160`),
     check("integration_connections_external_account_id_check", sql`${table.externalAccountId} IS NULL OR char_length(${table.externalAccountId}) BETWEEN 1 AND 256`),
@@ -196,6 +200,10 @@ export const integrationConnections = pgTable(
     check(
       "integration_connections_disconnected_state_check",
       sql`(${table.status} = 'disconnected' AND ${table.disconnectedAt} IS NOT NULL) OR (${table.status} <> 'disconnected' AND ${table.disconnectedAt} IS NULL)`,
+    ),
+    check(
+      "integration_connections_disconnecting_state_check",
+      sql`${table.status} <> 'disconnecting' OR (NOT ${table.enabled} AND ${table.disabledAt} IS NOT NULL AND ${table.disconnectedAt} IS NULL)`,
     ),
   ],
 )
@@ -279,7 +287,8 @@ export const integrationOauthStates = pgTable(
       .references(() => teams.id, { onDelete: "cascade" }),
     attemptId: uuid("attempt_id").notNull(),
     userId: uuid("user_id").notNull(),
-    codeVerifier: text("code_verifier").notNull(),
+    codeVerifier: text("code_verifier"),
+    redirectUri: text("redirect_uri"),
     returnPath: text("return_path").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -297,8 +306,9 @@ export const integrationOauthStates = pgTable(
     index("integration_oauth_states_expires_idx").on(table.expiresAt),
     check("integration_oauth_states_state_hash_check", sql`${table.stateHash} ~ '^[A-Za-z0-9_-]{43}$'`),
     check("integration_oauth_states_provider_check", sql`${table.provider} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
-    check("integration_oauth_states_verifier_check", sql`char_length(${table.codeVerifier}) BETWEEN 43 AND 128 AND ${table.codeVerifier} ~ '^[A-Za-z0-9._~-]+$'`),
-    check("integration_oauth_states_return_path_check", sql`char_length(${table.returnPath}) BETWEEN 1 AND 512 AND ${table.returnPath} LIKE '/%' AND ${table.returnPath} NOT LIKE '//%'`),
+    check("integration_oauth_states_verifier_check", sql`${table.codeVerifier} IS NULL OR (char_length(${table.codeVerifier}) BETWEEN 43 AND 128 AND ${table.codeVerifier} ~ '^[A-Za-z0-9._~-]+$')`),
+    check("integration_oauth_states_redirect_uri_check", sql`${table.redirectUri} IS NULL OR (char_length(${table.redirectUri}) BETWEEN 1 AND 2048 AND ${table.redirectUri} ~ '^https?://')`),
+    check("integration_oauth_states_return_path_check", sql`char_length(${table.returnPath}) BETWEEN 1 AND 512 AND ${table.returnPath} LIKE '/%' AND ${table.returnPath} NOT LIKE '//%' AND strpos(${table.returnPath}, chr(92)) = 0 AND strpos(lower(${table.returnPath}), '%5c') = 0`),
     check("integration_oauth_states_expiry_check", sql`${table.expiresAt} > ${table.createdAt}`),
   ],
 )
