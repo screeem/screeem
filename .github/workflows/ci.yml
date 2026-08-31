@@ -36,6 +36,7 @@ jobs:
 
       - name: Build shared packages
         run: |
+          pnpm --filter @screeem/integrations build
           pnpm --filter @screeem/routing build
           pnpm --filter @screeem/forms build
           pnpm --filter @screeem/forms-react build
@@ -49,8 +50,14 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm --filter @screeem/web exec tsc --noEmit --pretty false
 
+      - name: Typecheck integrations
+        run: pnpm --filter @screeem/integrations typecheck
+
       - name: Test forms
         run: pnpm --filter @screeem/forms test
+
+      - name: Test integrations
+        run: pnpm --filter @screeem/integrations test
 
       - name: Test object storage
         run: pnpm --filter @screeem/object-storage test

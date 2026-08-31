@@ -52,6 +52,7 @@ Screeem is an MCP server that gives Claude a `create_or_update_post` tool. When 
 ```
 packages/
   billing/          Shared billing service and Stripe adapter
+  integrations/     Effect-native Instagram and TikTok provider adapters
   web/              Next.js app — dashboard, MCP HTTP server, OAuth endpoints
   mcp_post_preview/ Standalone MCP stdio server + Vite-built preview UI
   object-storage/   Tenant-scoped object storage port, policy layer, and adapters
@@ -165,6 +166,16 @@ records, and entitlements.
 
 See the [billing package README](packages/billing/README.md) for its API and
 adapter contract.
+
+## Social integrations
+
+`@screeem/integrations` contains the Effect-native Instagram and TikTok OAuth,
+token, publishing, and status boundaries. The web app remains responsible for
+encrypted credentials, OAuth callback routes, team access, scheduling, and
+durable publish jobs.
+
+See the [integrations package README](packages/integrations/README.md) for the
+provider contracts and platform approval requirements.
 
 ## Salesforce integration development
 

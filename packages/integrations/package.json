@@ -1,0 +1,47 @@
+{
+  "name": "@screeem/integrations",
+  "version": "0.1.0",
+  "description": "Effect-native integration providers for Screeem",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./social": {
+      "types": "./dist/social/index.d.ts",
+      "import": "./dist/social/index.js"
+    },
+    "./social/instagram": {
+      "types": "./dist/social/instagram/index.d.ts",
+      "import": "./dist/social/instagram/index.js"
+    },
+    "./social/tiktok": {
+      "types": "./dist/social/tiktok/index.d.ts",
+      "import": "./dist/social/tiktok/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run --maxWorkers=1 --fileParallelism=false"
+  },
+  "dependencies": {
+    "effect": "^3.17.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "license": "ISC"
+}
