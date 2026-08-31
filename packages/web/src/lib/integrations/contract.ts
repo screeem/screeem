@@ -1,6 +1,7 @@
 export const integrationConnectionStatuses = [
   "connected",
   "reauthorization_required",
+  "disconnecting",
   "disconnected",
 ] as const
 
@@ -193,6 +194,12 @@ export function snapshotIntegrationConnection(input: unknown): IntegrationConnec
   }
   if ((connection.status === "disconnected") !== (connection.disconnectedAt !== null)) {
     throw new TypeError("Invalid integration disconnected state")
+  }
+  if (
+    connection.status === "disconnecting" &&
+    (connection.enabled || connection.disabledAt === null)
+  ) {
+    throw new TypeError("Invalid integration disconnecting state")
   }
   return Object.freeze(connection)
 }

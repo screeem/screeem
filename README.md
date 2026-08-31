@@ -52,7 +52,7 @@ Screeem is an MCP server that gives Claude a `create_or_update_post` tool. When 
 ```
 packages/
   billing/          Shared billing service and Stripe adapter
-  integrations/     Effect-native Instagram and TikTok provider adapters
+  integrations/     Instagram and TikTok provider adapters
   web/              Next.js app — dashboard, MCP HTTP server, OAuth endpoints
   mcp_post_preview/ Standalone MCP stdio server + Vite-built preview UI
   object-storage/   Tenant-scoped object storage port, policy layer, and adapters
@@ -169,13 +169,29 @@ adapter contract.
 
 ## Social integrations
 
-`@screeem/integrations` contains the Effect-native Instagram and TikTok OAuth,
-token, publishing, and status boundaries. The web app remains responsible for
-encrypted credentials, OAuth callback routes, team access, scheduling, and
-durable publish jobs.
+`@screeem/integrations` contains the Instagram and TikTok OAuth, token,
+publishing, and status boundaries. Account connections use encrypted
+credentials, team-scoped access, and exact OAuth callback routes.
 
 See the [integrations package README](packages/integrations/README.md) for the
 provider contracts and platform approval requirements.
+
+To enable account connections, apply the Supabase migrations and copy
+`packages/web/social.env.example` to `packages/web/.env.development.local`.
+Register these exact callbacks in the provider apps:
+
+- `${NEXT_PUBLIC_SITE_URL}/api/integrations/instagram/callback`
+- `${NEXT_PUBLIC_SITE_URL}/api/integrations/tiktok/callback`
+
+Keep each integration switch disabled until its client credentials, callback,
+permissions, credential-encryption key, and TikTok media URL prefix are set.
+Owners and admins can then connect one account per provider for the active team
+from the Integrations page. A provider account can only be active for one team
+at a time. Disconnecting disables Screeem's access immediately and removes its
+provider grant when the provider credential is still usable. If provider
+cleanup cannot be confirmed, the dashboard tells the owner or admin to remove
+Screeem from the account's app permissions. It never deletes or signs out of
+the Instagram or TikTok account itself.
 
 ## Salesforce integration development
 

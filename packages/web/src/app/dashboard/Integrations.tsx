@@ -1,16 +1,57 @@
 "use client"
 
+import { useCallback, useEffect, useRef, useState } from "react"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
+import { Notice } from "@/components/ui/notice"
+import { SectionCard } from "@/components/ui/section-card"
+import { Separator } from "@/components/ui/separator"
+import { StatusBadge, type StatusTone } from "@/components/ui/status-badge"
 import {
   snapshotIntegrationListResponse,
   type IntegrationConnectionSummary,
 } from "../../lib/integrations/contract"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Notice } from "@/components/ui/notice"
-import { StatusBadge, type StatusTone } from "@/components/ui/status-badge"
 
-type OAuthResult = "connected" | "error" | null
+type Provider = "salesforce" | "instagram" | "tiktok"
+type OAuthStatus = "connected" | "error"
+export type IntegrationOAuthFailureReason =
+  | "account_in_use"
+  | "account_switch"
+  | "configuration"
+  | "disconnecting"
+  | "forbidden"
 type Operation = "connect" | "reconnect" | "test" | "disconnect"
+
+export interface IntegrationOAuthResult {
+  readonly provider: Provider
+  readonly status: OAuthStatus
+  readonly reason?: IntegrationOAuthFailureReason | null
+}
+
+const providerDetails: Record<Provider, { readonly name: string; readonly description: string }> = {
+  salesforce: {
+    name: "Salesforce",
+    description: "Validate the connection, then preview mapped CRM actions while building forms.",
+  },
+  instagram: {
+    name: "Instagram",
+    description: "Connect the professional account that Screeem should publish scheduled posts to.",
+  },
+  tiktok: {
+    name: "TikTok",
+    description: "Connect the creator account that Screeem should publish scheduled posts to.",
+  },
+}
 
 export function Integrations({
   teamId,
@@ -18,14 +59,12 @@ export function Integrations({
   oauthResult,
   fetcher = fetch,
   navigate = (url) => window.location.assign(url),
-  confirmDisconnect = (message) => window.confirm(message),
 }: {
   readonly teamId: string
   readonly canManage: boolean
-  readonly oauthResult: OAuthResult
+  readonly oauthResult: IntegrationOAuthResult | null
   readonly fetcher?: typeof fetch
   readonly navigate?: (url: string) => void
-  readonly confirmDisconnect?: (message: string) => boolean
 }) {
   return (
     <IntegrationsForTeam
@@ -35,7 +74,6 @@ export function Integrations({
       oauthResult={oauthResult}
       fetcher={fetcher}
       navigate={navigate}
-      confirmDisconnect={confirmDisconnect}
     />
   )
 }
@@ -46,253 +84,388 @@ function IntegrationsForTeam({
   oauthResult,
   fetcher,
   navigate,
-  confirmDisconnect,
 }: {
   readonly teamId: string
   readonly canManage: boolean
-  readonly oauthResult: OAuthResult
+  readonly oauthResult: IntegrationOAuthResult | null
   readonly fetcher: typeof fetch
   readonly navigate: (url: string) => void
-  readonly confirmDisconnect: (message: string) => boolean
 }) {
-  const request = useRef(0)
-  const controller = useRef<AbortController | null>(null)
+  const generation = useRef(0)
+  const loadController = useRef<AbortController | null>(null)
+  const operationControllers = useRef(new Map<Provider, AbortController>())
   const [integrations, setIntegrations] = useState<readonly IntegrationConnectionSummary[]>([])
   const [loading, setLoading] = useState(true)
-  const [operation, setOperation] = useState<Operation | null>(null)
-  const [message, setMessage] = useState(
-    oauthResult === "connected"
-      ? "Salesforce authorization completed. This team’s connection status is shown below."
-      : oauthResult === "error"
-        ? "Salesforce authorization was not completed."
-        : "",
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [operations, setOperations] = useState<Partial<Record<Provider, Operation>>>({})
+  const [disconnectTarget, setDisconnectTarget] = useState<Provider | null>(null)
+  const [message, setMessage] = useState(() => oauthMessage(oauthResult))
+  const [messageTone, setMessageTone] = useState<"success" | "warning">(
+    oauthResult?.status === "error" ? "warning" : "success",
   )
-  const [error, setError] = useState("")
+  const [providerErrors, setProviderErrors] = useState<Partial<Record<Provider, string>>>({})
+
+  useEffect(() => {
+    if (!oauthResult) return
+    const url = new URL(window.location.href)
+    url.searchParams.delete("integration")
+    url.searchParams.delete("status")
+    url.searchParams.delete("reason")
+    window.history.replaceState(window.history.state, "", url)
+  }, [oauthResult])
 
   const loadIntegrations = useCallback(async () => {
-    const currentRequest = ++request.current
-    controller.current?.abort()
-    const currentController = new AbortController()
-    controller.current = currentController
+    const currentGeneration = ++generation.current
+    loadController.current?.abort()
+    const controller = new AbortController()
+    const signal = boundedSignal(controller.signal)
+    loadController.current = controller
     setLoading(true)
-    setIntegrations([])
-    setError("")
+    setLoadFailed(false)
     try {
       const response = await fetcher(`/api/teams/${encodeURIComponent(teamId)}/integrations`, {
-        signal: currentController.signal,
+        signal,
         cache: "no-store",
       })
       const body = await readBoundedJson(response)
-      if (currentRequest !== request.current) return
+      signal.throwIfAborted()
+      if (currentGeneration !== generation.current) return
       if (!response.ok) throw new Error("Could not load integrations.")
       setIntegrations(snapshotIntegrationListResponse(body).integrations)
     } catch {
-      if (currentRequest !== request.current || currentController.signal.aborted) return
-      setError("Could not load integrations.")
+      if (currentGeneration !== generation.current || controller.signal.aborted) return
+      setIntegrations([])
+      setLoadFailed(true)
     } finally {
-      if (currentRequest === request.current) setLoading(false)
-      if (controller.current === currentController) controller.current = null
+      if (currentGeneration === generation.current) setLoading(false)
+      if (loadController.current === controller) loadController.current = null
     }
   }, [fetcher, teamId])
 
   useEffect(() => {
     void loadIntegrations()
+    const controllers = operationControllers.current
     return () => {
-      request.current += 1
-      controller.current?.abort()
+      generation.current += 1
+      loadController.current?.abort()
+      for (const controller of controllers.values()) controller.abort()
+      controllers.clear()
     }
   }, [loadIntegrations])
 
-  async function startOAuth(kind: "connect" | "reconnect") {
-    const { requestId, abort } = beginOperation(kind)
+  async function startOAuth(provider: Provider, kind: "connect" | "reconnect") {
+    const controller = beginOperation(provider, kind)
+    const signal = boundedSignal(controller.signal)
     try {
       const response = await fetcher(
-        `/api/teams/${encodeURIComponent(teamId)}/integrations/salesforce/${kind}`,
+        `/api/teams/${encodeURIComponent(teamId)}/integrations/${provider}/${kind}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ returnPath: "/dashboard/integrations" }),
-          signal: abort.signal,
+          signal,
         },
       )
       const body = await readBoundedJson(response)
-      if (requestId !== request.current) return
-      if (!response.ok) throw new Error("Could not start Salesforce authorization.")
-      navigate(authorizationUrl(body))
+      signal.throwIfAborted()
+      if (!response.ok) throw new Error("Authorization could not be started.")
+      navigate(authorizationUrl(provider, body))
+      finishOperation(provider, controller)
     } catch {
-      finishWithError(requestId, abort, "Could not start Salesforce authorization.")
+      finishWithError(provider, controller, `Could not start ${providerDetails[provider].name} authorization.`)
     }
   }
 
-  async function testConnection() {
-    const { requestId, abort } = beginOperation("test")
+  async function testSalesforce() {
+    const controller = beginOperation("salesforce", "test")
+    const signal = boundedSignal(controller.signal)
     try {
       const response = await fetcher(
         `/api/teams/${encodeURIComponent(teamId)}/integrations/salesforce/test`,
-        { method: "POST", signal: abort.signal },
+        { method: "POST", signal },
       )
       await readBoundedJson(response)
-      if (requestId !== request.current) return
-      if (!response.ok) throw new Error("Salesforce could not be reached. Reconnect and try again.")
+      signal.throwIfAborted()
+      if (!response.ok) throw new Error("Salesforce could not be reached.")
+      setMessageTone("success")
       setMessage("Salesforce connection is healthy.")
-      setOperation(null)
+      finishOperation("salesforce", controller)
       await loadIntegrations()
     } catch {
-      finishWithError(requestId, abort, "Salesforce connection test failed.")
+      finishWithError("salesforce", controller, "Salesforce connection test failed.")
     }
   }
 
-  async function disconnect() {
-    if (!confirmDisconnect("Disconnect Salesforce from this team?")) return
-    const { requestId, abort } = beginOperation("disconnect")
+  async function disconnect(provider: Provider) {
+    setDisconnectTarget(null)
+    const controller = beginOperation(provider, "disconnect")
+    const signal = boundedSignal(controller.signal)
     try {
       const response = await fetcher(
-        `/api/teams/${encodeURIComponent(teamId)}/integrations/salesforce`,
-        { method: "DELETE", signal: abort.signal },
+        `/api/teams/${encodeURIComponent(teamId)}/integrations/${provider}`,
+        { method: "DELETE", signal },
       )
-      await readBoundedJson(response)
-      if (requestId !== request.current) return
-      if (!response.ok) throw new Error("Could not disconnect Salesforce.")
-      setMessage("Salesforce was disconnected.")
-      setOperation(null)
+      const body = await readBoundedJson(response)
+      signal.throwIfAborted()
+      if (!response.ok) throw new Error("Disconnect failed.")
+      const localOnly = provider !== "salesforce" && providerAccessRemovalIncomplete(body)
+      setMessageTone(localOnly ? "warning" : "success")
+      setMessage(localOnly
+        ? `${providerDetails[provider].name} was disconnected from Screeem. Remove Screeem from the account’s app permissions to finish provider cleanup.`
+        : `${providerDetails[provider].name} was disconnected.`)
+      finishOperation(provider, controller)
       await loadIntegrations()
     } catch {
-      finishWithError(requestId, abort, "Could not disconnect Salesforce.")
+      if (controller.signal.aborted) return
+      finishWithError(provider, controller, `Could not disconnect ${providerDetails[provider].name}. Try again.`)
+      await loadIntegrations()
     }
   }
 
-  function beginOperation(next: Operation) {
-    const requestId = ++request.current
-    controller.current?.abort()
-    const abort = new AbortController()
-    controller.current = abort
-    setOperation(next)
-    setError("")
+  function beginOperation(provider: Provider, operation: Operation) {
+    operationControllers.current.get(provider)?.abort()
+    const controller = new AbortController()
+    operationControllers.current.set(provider, controller)
+    setOperations((current) => ({ ...current, [provider]: operation }))
+    setProviderErrors((current) => ({ ...current, [provider]: undefined }))
     setMessage("")
-    return { requestId, abort }
+    return controller
   }
 
-  function finishWithError(
-    requestId: number,
-    abort: AbortController,
-    fallback: string,
-  ) {
-    if (requestId !== request.current || abort.signal.aborted) return
-    setError(fallback)
-    setOperation(null)
-    if (controller.current === abort) controller.current = null
+  function finishOperation(provider: Provider, controller: AbortController) {
+    if (controller.signal.aborted || operationControllers.current.get(provider) !== controller) return
+    operationControllers.current.delete(provider)
+    setOperations((current) => {
+      const next = { ...current }
+      delete next[provider]
+      return next
+    })
   }
 
-  const salesforce = integrations.find((integration) => integration.provider === "salesforce")
+  function finishWithError(provider: Provider, controller: AbortController, fallback: string) {
+    if (controller.signal.aborted || operationControllers.current.get(provider) !== controller) return
+    setProviderErrors((current) => ({ ...current, [provider]: fallback }))
+    finishOperation(provider, controller)
+  }
+
+  const byProvider = (provider: Provider) => {
+    const connection = integrations.find((integration) => integration.provider === provider)
+    return connection?.status === "disconnected" ? undefined : connection
+  }
 
   return (
-    <section className="mt-7" aria-busy={loading || operation !== null}>
-      {message ? (
-        <Notice tone="success" className="mb-4">
-          {message}
-        </Notice>
-      ) : null}
-      {error ? (
+    <section className="mt-7" aria-busy={loading || Object.keys(operations).length > 0}>
+      {message ? <Notice tone={messageTone} className="mb-4">{message}</Notice> : null}
+      {loadFailed ? (
         <Notice tone="error" className="mb-4">
-          {error}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>Could not load integrations. Connection controls are unavailable.</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => void loadIntegrations()}>
+              Retry
+            </Button>
+          </div>
         </Notice>
       ) : null}
 
-      <div className="rounded-xl border border-border bg-card p-6">
-        <div className="flex flex-wrap items-start justify-between gap-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">CRM</p>
-            <h2 className="mt-2 text-lg font-semibold text-foreground">Salesforce</h2>
-            <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">
-              Validate the connection, then preview mapped CRM actions while building forms.
-            </p>
-          </div>
-          <IntegrationStatus integration={salesforce} loading={loading} />
-        </div>
+      <SectionCard
+        title="Social publishing"
+        description="Connect the accounts this team will use for scheduled social posts."
+      >
+        <ProviderRow
+          provider="instagram"
+          integration={byProvider("instagram")}
+          canManage={canManage}
+          controlsAvailable={!loadFailed}
+          statusUnavailable={loadFailed}
+          loading={loading}
+          operation={operations.instagram}
+          error={providerErrors.instagram}
+          onOAuth={startOAuth}
+          onDisconnect={setDisconnectTarget}
+        />
+        <Separator className="my-5" />
+        <ProviderRow
+          provider="tiktok"
+          integration={byProvider("tiktok")}
+          canManage={canManage}
+          controlsAvailable={!loadFailed}
+          statusUnavailable={loadFailed}
+          loading={loading}
+          operation={operations.tiktok}
+          error={providerErrors.tiktok}
+          onOAuth={startOAuth}
+          onDisconnect={setDisconnectTarget}
+        />
+      </SectionCard>
 
-        {salesforce ? (
-          <>
-            <dl className="mt-6 grid gap-4 border-t border-border pt-5 text-sm sm:grid-cols-2">
-              <Detail label="Organization" value={salesforce.displayName ?? "Connected organization"} />
-              <Detail label="Organization ID" value={salesforce.externalAccountId ?? "Unavailable"} />
-              <Detail label="Connection" value={connectionLabel(salesforce)} />
-              <Detail label="Last checked" value={formatTimestamp(salesforce.lastCheckedAt)} />
-            </dl>
-            {connectionNotice(salesforce) ? (
-              <Notice tone="warning" className="mt-5">
-                {connectionNotice(salesforce)}
-              </Notice>
-            ) : null}
-          </>
-        ) : null}
+      <SectionCard title="CRM" className="mt-5">
+        <ProviderRow
+          provider="salesforce"
+          integration={byProvider("salesforce")}
+          canManage={canManage}
+          controlsAvailable={!loadFailed}
+          statusUnavailable={loadFailed}
+          loading={loading}
+          operation={operations.salesforce}
+          error={providerErrors.salesforce}
+          onOAuth={startOAuth}
+          onDisconnect={setDisconnectTarget}
+          onTest={testSalesforce}
+        />
+      </SectionCard>
 
-        <div className="mt-6 flex flex-wrap gap-3 border-t border-border pt-5">
-          {!canManage ? (
-            <p className="text-sm text-muted-foreground">Only team owners and admins can manage integrations.</p>
-          ) : !salesforce ? (
-            <Button
-              type="button"
-              disabled={operation !== null || loading}
-              onClick={() => void startOAuth("connect")}
-            >
-              {operation === "connect" ? "Connecting…" : "Connect Salesforce"}
-            </Button>
-          ) : (
-            <>
-              {salesforce.availability === "available" ? (
-                <Button
-                  type="button"
-                  disabled={operation !== null || loading}
-                  onClick={() => void testConnection()}
-                >
-                  {operation === "test" ? "Testing…" : "Test connection"}
-                </Button>
-              ) : null}
-              {canReconnect(salesforce) ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={operation !== null || loading}
-                  onClick={() => void startOAuth("reconnect")}
-                >
-                  {operation === "reconnect" ? "Reconnecting…" : "Reconnect"}
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="destructive-ghost"
-                disabled={operation !== null || loading}
-                onClick={() => void disconnect()}
-              >
-                {operation === "disconnect" ? "Disconnecting…" : "Disconnect"}
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+      <AlertDialog open={disconnectTarget !== null} onOpenChange={(open) => !open && setDisconnectTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Disconnect {disconnectTarget ? providerDetails[disconnectTarget].name : "integration"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {disconnectTarget === "salesforce"
+                ? "Screeem will stop sending CRM form actions through this connection. This does not delete your Salesforce account or sign you out of Salesforce."
+                : "Screeem will stop publishing scheduled posts through this connection. This does not delete the account or sign you out of the provider itself."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => disconnectTarget && void disconnect(disconnectTarget)}>
+              Disconnect
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }
 
-function IntegrationStatus({ integration, loading }: {
+function ProviderRow({
+  provider,
+  integration,
+  canManage,
+  controlsAvailable,
+  statusUnavailable,
+  loading,
+  operation,
+  error,
+  onOAuth,
+  onDisconnect,
+  onTest,
+}: {
+  readonly provider: Provider
+  readonly integration?: IntegrationConnectionSummary
+  readonly canManage: boolean
+  readonly controlsAvailable: boolean
+  readonly statusUnavailable: boolean
+  readonly loading: boolean
+  readonly operation?: Operation
+  readonly error?: string
+  readonly onOAuth: (provider: Provider, kind: "connect" | "reconnect") => Promise<void>
+  readonly onDisconnect: (provider: Provider) => void
+  readonly onTest?: () => Promise<void>
+}) {
+  const details = providerDetails[provider]
+  const busy = operation !== undefined
+  const disconnecting = integration?.status === "disconnecting"
+  const warning = connectionNotice(provider, integration)
+  return (
+    <div>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="font-semibold text-foreground">{details.name}</h3>
+          <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">{details.description}</p>
+          {integration ? (
+            <p className="mt-2 text-sm font-medium text-foreground">
+              {integration.displayName ?? "Connected account"}
+              {integration.externalAccountId ? (
+                <span className="ml-2 font-normal text-muted-foreground">{integration.externalAccountId}</span>
+              ) : null}
+            </p>
+          ) : null}
+        </div>
+        <IntegrationStatus
+          integration={integration}
+          loading={loading}
+          unavailable={statusUnavailable}
+        />
+      </div>
+
+      {integration && provider === "salesforce" ? (
+        <dl className="mt-5 grid gap-4 border-t border-border pt-5 text-sm sm:grid-cols-2">
+          <Detail label="Organization" value={integration.displayName ?? "Connected organization"} />
+          <Detail label="Organization ID" value={integration.externalAccountId ?? "Unavailable"} />
+          <Detail label="Connection" value={connectionLabel(integration)} />
+          <Detail label="Last checked" value={formatTimestamp(integration.lastCheckedAt)} />
+        </dl>
+      ) : null}
+
+      {disconnecting ? (
+        <Notice tone="warning" className="mt-4">
+          Provider revocation did not finish. Publishing is disabled; retry disconnect to finish.
+        </Notice>
+      ) : warning ? (
+        <Notice tone="warning" className="mt-4">{warning}</Notice>
+      ) : null}
+      {error ? <Notice tone="error" className="mt-4">{error}</Notice> : null}
+
+      <div className="mt-5 flex flex-wrap gap-3 border-t border-border pt-5">
+        {!canManage ? (
+          <p className="text-sm text-muted-foreground">Only team owners and admins can manage integrations.</p>
+        ) : !controlsAvailable ? null : !integration ? (
+          <Button type="button" disabled={busy || loading} onClick={() => void onOAuth(provider, "connect")}>
+            {operation === "connect" ? "Connecting…" : `Connect ${details.name}`}
+          </Button>
+        ) : (
+          <>
+            {provider === "salesforce" && integration.availability === "available" && onTest ? (
+              <Button type="button" disabled={busy || loading} onClick={() => void onTest()}>
+                {operation === "test" ? "Testing…" : "Test connection"}
+              </Button>
+            ) : null}
+            {!disconnecting && canReconnect(integration) ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy || loading}
+                onClick={() => void onOAuth(provider, "reconnect")}
+              >
+                {operation === "reconnect" ? "Reconnecting…" : "Reconnect"}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="destructive-ghost"
+              disabled={busy || loading}
+              onClick={() => onDisconnect(provider)}
+            >
+              {operation === "disconnect" ? "Disconnecting…" : disconnecting ? "Retry disconnect" : "Disconnect"}
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function IntegrationStatus({ integration, loading, unavailable }: {
   readonly integration?: IntegrationConnectionSummary
   readonly loading: boolean
+  readonly unavailable: boolean
 }) {
   const available = integration?.availability === "available"
   const [label, tone]: readonly [string, StatusTone] = loading
     ? ["Loading", "neutral"]
-    : !integration || integration.status === "disconnected"
+    : unavailable
+      ? ["Unavailable", "warning"]
+    : !integration
       ? ["Not connected", "neutral"]
-      : integration.status === "reauthorization_required"
-        ? ["Reconnect required", "warning"]
-        : available
-          ? ["Connected", "success"]
-          : ["Unavailable", "warning"]
-  return (
-    <StatusBadge tone={tone} className="px-3 py-1 font-semibold">
-      {label}
-    </StatusBadge>
-  )
+      : integration.status === "disconnecting"
+        ? ["Disconnecting", "warning"]
+        : integration.status === "reauthorization_required"
+          ? ["Reconnect required", "warning"]
+          : available
+            ? ["Connected", "success"]
+            : ["Unavailable", "warning"]
+  return <StatusBadge tone={tone} className="px-3 py-1 font-semibold">{label}</StatusBadge>
 }
 
 function Detail({ label, value }: { readonly label: string; readonly value: string }) {
@@ -305,6 +478,7 @@ function Detail({ label, value }: { readonly label: string; readonly value: stri
 }
 
 function connectionLabel(integration: IntegrationConnectionSummary) {
+  if (integration.status === "disconnecting") return "Disconnecting"
   if (integration.status === "reauthorization_required") return "Reauthorization required"
   if (integration.availability === "global_disabled") return "Disabled for this deployment"
   if (integration.availability === "team_disabled") return "Disabled for this team"
@@ -314,38 +488,53 @@ function connectionLabel(integration: IntegrationConnectionSummary) {
   return integration.status === "connected" ? "Connected" : "Disconnected"
 }
 
-function connectionNotice(integration: IntegrationConnectionSummary) {
-  if (integration.status === "reauthorization_required") {
-    return "Salesforce authorization expired. Reconnect to continue."
-  }
-  if (integration.lastErrorCode === "rate_limited") {
-    return "Salesforce is rate limited. Try again later."
-  }
-  if (integration.lastErrorCode === "authorization_failed") {
-    return "Salesforce denied this operation. Reconnect or review the connected app permissions."
-  }
-  if (integration.lastErrorCode === "provider_unavailable") {
-    return "Salesforce is temporarily unavailable. Try again later."
-  }
-  if (integration.lastErrorCode === "invalid_configuration") {
-    return "Salesforce needs configuration before it can be used."
-  }
+function connectionNotice(provider: Provider, integration?: IntegrationConnectionSummary) {
+  if (!integration) return null
+  const name = providerDetails[provider].name
+  if (integration.status === "reauthorization_required") return `${name} authorization expired. Reconnect to continue.`
+  if (integration.lastErrorCode === "rate_limited") return `${name} is rate limited. Try again later.`
+  if (integration.lastErrorCode === "authorization_failed") return `${name} denied this operation. Reconnect or review the account permissions.`
+  if (integration.lastErrorCode === "provider_unavailable") return `${name} is temporarily unavailable. Try again later.`
+  if (integration.lastErrorCode === "invalid_configuration") return `${name} needs configuration before it can be used.`
   return null
 }
 
 function canReconnect(integration: IntegrationConnectionSummary) {
-  return integration.availability === "available" ||
-    integration.status === "disconnected" ||
+  return integration.status !== "disconnecting" && (
+    integration.availability === "available" ||
     integration.status === "reauthorization_required" ||
     integration.availability === "connection_unavailable" ||
     integration.availability === "credentials_unavailable"
+  )
 }
 
 function formatTimestamp(input: string | null) {
   if (!input) return "Not tested"
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-    new Date(input),
-  )
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(input))
+}
+
+function oauthMessage(result: IntegrationOAuthResult | null) {
+  if (!result) return ""
+  const name = providerDetails[result.provider].name
+  if (result.status === "connected") {
+    return `${name} authorization completed. This team’s connection is shown below.`
+  }
+  if (result.reason === "account_switch") {
+    return `Disconnect the current ${name} account before connecting a different one.`
+  }
+  if (result.reason === "account_in_use") {
+    return `That ${name} account is already connected to another team.`
+  }
+  if (result.reason === "disconnecting") {
+    return `${name} is still being disconnected. Retry disconnect before reconnecting.`
+  }
+  if (result.reason === "forbidden") {
+    return `Only team owners and admins can connect ${name}.`
+  }
+  if (result.reason === "configuration") {
+    return `${name} is not configured for this deployment.`
+  }
+  return `${name} authorization was not completed.`
 }
 
 async function readBoundedJson(response: Response): Promise<unknown> {
@@ -377,27 +566,42 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   }
 }
 
-function authorizationUrl(input: unknown) {
+function authorizationUrl(provider: Provider, input: unknown) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new TypeError("Invalid authorization response")
   const descriptors = Object.getOwnPropertyDescriptors(input)
-  if (Object.getOwnPropertySymbols(input).length > 0 || Object.keys(descriptors).some((key) => key !== "authorizationUrl")) {
+  if (
+    Object.getOwnPropertySymbols(input).length > 0 ||
+    Object.keys(descriptors).length !== 1 ||
+    !("authorizationUrl" in descriptors)
+  ) {
     throw new TypeError("Invalid authorization response")
   }
   const descriptor = descriptors.authorizationUrl
-  if (!descriptor || !("value" in descriptor) || typeof descriptor.value !== "string") {
-    throw new TypeError("Invalid authorization response")
-  }
+  if (!("value" in descriptor) || typeof descriptor.value !== "string") throw new TypeError("Invalid authorization response")
   const url = new URL(descriptor.value)
+  const allowed = provider === "salesforce"
+    ? ["login.salesforce.com/services/oauth2/authorize", "test.salesforce.com/services/oauth2/authorize"]
+    : provider === "instagram"
+      ? ["www.instagram.com/oauth/authorize"]
+      : ["www.tiktok.com/v2/auth/authorize/"]
   if (
     url.protocol !== "https:" ||
     url.username ||
     url.password ||
     url.port ||
-    !["login.salesforce.com", "test.salesforce.com"].includes(url.hostname.toLowerCase()) ||
-    url.pathname !== "/services/oauth2/authorize"
+    !allowed.includes(`${url.hostname.toLowerCase()}${url.pathname}`)
   ) {
     throw new TypeError("Invalid authorization response")
   }
   return url.toString()
 }
 
+function providerAccessRemovalIncomplete(input: unknown) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return false
+  const descriptor = Object.getOwnPropertyDescriptor(input, "providerAccessRemoved")
+  return descriptor !== undefined && "value" in descriptor && descriptor.value === false
+}
+
+function boundedSignal(signal: AbortSignal) {
+  return AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+}

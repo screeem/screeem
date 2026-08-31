@@ -13,12 +13,15 @@ export interface SalesforceOAuthState {
   readonly attemptId: IntegrationIdentifier
   readonly userId: IntegrationIdentifier
   readonly codeVerifier: string
+  readonly redirectUri: string | null
   readonly returnPath: string
   readonly createdAt: string
   readonly expiresAt: string
 }
 
-export type CreateSalesforceOAuthState = Omit<SalesforceOAuthState, "createdAt" | "expiresAt">
+export type CreateSalesforceOAuthState =
+  & Omit<SalesforceOAuthState, "createdAt" | "expiresAt" | "redirectUri">
+  & { readonly redirectUri: string }
 
 export interface SalesforceOAuthStateStore {
   create(state: CreateSalesforceOAuthState): Promise<void>
@@ -54,6 +57,7 @@ interface OAuthStateRow {
   readonly attempt_id: string
   readonly user_id: string
   readonly code_verifier: string
+  readonly redirect_uri: string | null
   readonly return_path: string
   readonly created_at: Date
   readonly expires_at: Date
@@ -83,10 +87,10 @@ export class PostgresSalesforceOAuthStateStore implements SalesforceOAuthStateSt
       await transaction`
         INSERT INTO integration_oauth_states (
           state_hash, provider, team_id, attempt_id, user_id, code_verifier,
-          return_path, created_at, expires_at
+          redirect_uri, return_path, created_at, expires_at
         ) VALUES (
           ${state.stateHash}, ${salesforceProviderName}, ${state.teamId}, ${state.attemptId},
-          ${state.userId}, ${state.codeVerifier}, ${state.returnPath},
+          ${state.userId}, ${state.codeVerifier}, ${state.redirectUri}, ${state.returnPath},
           statement_timestamp(), statement_timestamp() + interval '10 minutes'
         )
       `
@@ -110,7 +114,7 @@ export class PostgresSalesforceOAuthStateStore implements SalesforceOAuthStateSt
         AND attempt.user_id = state.user_id
         AND attempt.expires_at > statement_timestamp()
       RETURNING state.state_hash, state.team_id, state.attempt_id, state.user_id,
-        state.code_verifier, state.return_path, state.created_at, state.expires_at
+        state.code_verifier, state.redirect_uri, state.return_path, state.created_at, state.expires_at
     `
     return rows[0] ? mapOAuthState(rows[0]) : null
   }
@@ -256,6 +260,7 @@ export function snapshotSalesforceOAuthState(input: unknown): SalesforceOAuthSta
     attemptId: snapshotIntegrationIdentifier(value.attemptId),
     userId: snapshotIntegrationIdentifier(value.userId),
     codeVerifier: verifier(value.codeVerifier),
+    redirectUri: value.redirectUri === null ? null : redirectUri(value.redirectUri),
     returnPath: snapshotSalesforceReturnPath(value.returnPath),
     createdAt: validDate(value.createdAt, "OAuth state creation time").toISOString(),
     expiresAt: validDate(value.expiresAt, "OAuth state expiry").toISOString(),
@@ -275,6 +280,7 @@ function snapshotSalesforceOAuthStateInput(input: unknown): CreateSalesforceOAut
     attemptId: snapshotIntegrationIdentifier(value.attemptId),
     userId: snapshotIntegrationIdentifier(value.userId),
     codeVerifier: verifier(value.codeVerifier),
+    redirectUri: redirectUri(value.redirectUri),
     returnPath: snapshotSalesforceReturnPath(value.returnPath),
   })
 }
@@ -286,6 +292,7 @@ function mapOAuthState(row: OAuthStateRow) {
     attemptId: row.attempt_id,
     userId: row.user_id,
     codeVerifier: row.code_verifier,
+    redirectUri: row.redirect_uri,
     returnPath: row.return_path,
     createdAt: row.created_at.toISOString(),
     expiresAt: row.expires_at.toISOString(),
@@ -311,6 +318,18 @@ function verifier(input: unknown) {
     throw new TypeError("Invalid OAuth code verifier")
   }
   return input
+}
+
+function redirectUri(input: unknown) {
+  if (typeof input !== "string" || input.length === 0 || input.length > 2_048) {
+    throw new TypeError("Invalid OAuth redirect URI")
+  }
+  const url = new URL(input)
+  const localHttp = url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname)
+  if ((url.protocol !== "https:" && !localHttp) || url.username || url.password || url.hash) {
+    throw new TypeError("Invalid OAuth redirect URI")
+  }
+  return url.toString()
 }
 
 function validDate(input: unknown, label: string) {

@@ -64,6 +64,7 @@ describe("Salesforce integration contracts", () => {
       attemptId: snapshotIntegrationIdentifier("74000000-0000-0000-0000-000000000001"),
       userId,
       codeVerifier: "v".repeat(64),
+      redirectUri: "http://localhost:3000/api/integrations/salesforce/callback",
       returnPath: "/dashboard/forms",
       createdAt: now,
       expiresAt: "2026-08-14T10:10:00.000Z",
@@ -85,6 +86,7 @@ describe("Salesforce integration contracts", () => {
       attemptId: snapshotIntegrationIdentifier("74000000-0000-0000-0000-000000000001"),
       userId,
       codeVerifier: "v".repeat(64),
+      redirectUri: "http://localhost:3000/api/integrations/salesforce/callback",
       returnPath: "/dashboard/forms",
     })
 

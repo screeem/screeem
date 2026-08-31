@@ -316,7 +316,14 @@ export class MemoryIntegrationCredentialStore implements IntegrationCredentialSt
   ): Promise<StoredIntegrationCredential> {
     const safeTeamId = snapshotIntegrationIdentifier(teamId)
     const safeConnectionId = snapshotIntegrationIdentifier(connectionId)
-    await this.connections.get(safeTeamId, safeConnectionId)
+    const connection = await this.connections.get(safeTeamId, safeConnectionId)
+    if (!connection.enabled || connection.status !== "connected") {
+      throw new IntegrationCredentialRevisionConflictError(
+        safeConnectionId,
+        expectedRevision,
+        null,
+      )
+    }
     const teamCredentials = this.#credentials.get(safeTeamId) ?? new Map()
     const current = teamCredentials.get(safeConnectionId)
     const currentRevision = current?.revision ?? null

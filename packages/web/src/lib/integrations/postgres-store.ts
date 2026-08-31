@@ -430,9 +430,7 @@ export class PostgresIntegrationTeamControlStore implements IntegrationTeamContr
 export class PostgresIntegrationCredentialStore implements IntegrationCredentialStore {
   constructor(
     private readonly database: Database = getDatabase(),
-    private readonly connections: IntegrationConnectionStore = new PostgresIntegrationConnectionStore(
-      database,
-    ),
+    _connections: IntegrationConnectionStore = new PostgresIntegrationConnectionStore(database),
   ) {}
 
   async load(
@@ -479,12 +477,21 @@ export class PostgresIntegrationCredentialStore implements IntegrationCredential
   ): Promise<StoredIntegrationCredential> {
     const safeTeamId = snapshotIntegrationIdentifier(teamId)
     const safeConnectionId = snapshotIntegrationIdentifier(connectionId)
-    await this.connections.get(safeTeamId, safeConnectionId)
     const safe = snapshotSealedIntegrationCredential(credential)
     const time = normalizeDate(updatedAt, "integration credential update time")
-    const rows = await safeDatabaseCall(async () =>
-      expectedRevision === null
-        ? await this.database<CredentialRow[]>`
+    const rows = await safeDatabaseCall(() => this.database.begin(async (transaction) => {
+      const active = await transaction<{ readonly present: boolean }[]>`
+        SELECT true AS present
+        FROM integration_connections
+        WHERE team_id = ${safeTeamId}
+          AND id = ${safeConnectionId}
+          AND enabled
+          AND status = 'connected'
+        FOR UPDATE
+      `
+      if (!active[0]) return [] as CredentialRow[]
+      return expectedRevision === null
+        ? transaction<CredentialRow[]>`
             INSERT INTO integration_credentials (
               team_id, connection_id, key_id, sealed_payload, revision, updated_at
             ) VALUES (
@@ -493,18 +500,19 @@ export class PostgresIntegrationCredentialStore implements IntegrationCredential
             ON CONFLICT (team_id, connection_id) DO NOTHING
             RETURNING team_id, connection_id, key_id, sealed_payload, revision, updated_at
           `
-        : await this.database<CredentialRow[]>`
-            UPDATE integration_credentials
+        : transaction<CredentialRow[]>`
+            UPDATE integration_credentials AS credential
             SET key_id = ${safe.keyId},
                 sealed_payload = ${safe.sealed},
-                revision = revision + 1,
+                revision = credential.revision + 1,
                 updated_at = ${time}
-            WHERE team_id = ${safeTeamId}
-              AND connection_id = ${safeConnectionId}
-              AND revision = ${expectedRevision}
-            RETURNING team_id, connection_id, key_id, sealed_payload, revision, updated_at
-          `,
-    )
+            WHERE credential.team_id = ${safeTeamId}
+              AND credential.connection_id = ${safeConnectionId}
+              AND credential.revision = ${expectedRevision}
+            RETURNING credential.team_id, credential.connection_id, credential.key_id,
+              credential.sealed_payload, credential.revision, credential.updated_at
+          `
+    }))
     if (rows[0]) return mapCredentialRow(rows[0])
     const current = await this.load(safeTeamId, safeConnectionId)
     throw new IntegrationCredentialRevisionConflictError(

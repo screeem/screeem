@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 
-SELECT plan(36);
+SELECT plan(42);
 
 SELECT has_table('integration_oauth_attempts');
 SELECT has_table('integration_oauth_states');
@@ -12,6 +12,9 @@ SELECT has_column('integration_oauth_states', 'state_hash');
 SELECT has_column('integration_oauth_states', 'attempt_id');
 SELECT has_column('integration_oauth_states', 'team_id');
 SELECT has_column('integration_oauth_states', 'user_id');
+SELECT has_column('integration_oauth_states', 'redirect_uri');
+SELECT col_is_null('integration_oauth_states', 'redirect_uri');
+SELECT col_is_null('integration_oauth_states', 'code_verifier');
 SELECT hasnt_column('integration_oauth_states', 'consumed_at');
 SELECT has_index('integration_oauth_attempts', 'integration_oauth_attempts_expires_idx');
 SELECT has_index('integration_oauth_states', 'integration_oauth_states_expires_idx');
@@ -60,13 +63,14 @@ SELECT lives_ok(
 SELECT lives_ok(
   $$ INSERT INTO integration_oauth_states (
        state_hash, provider, team_id, attempt_id, user_id,
-       code_verifier, return_path, created_at, expires_at
+       code_verifier, redirect_uri, return_path, created_at, expires_at
      ) VALUES (
        repeat('s', 43), 'salesforce',
        '77000000-0000-0000-0000-000000000001',
        '78000000-0000-0000-0000-000000000001',
        '76000000-0000-0000-0000-000000000001',
-       repeat('v', 64), '/dashboard', now(), now() + interval '10 minutes'
+       repeat('v', 64), 'https://app.screeem.com/api/integrations/salesforce/callback',
+       '/dashboard', now(), now() + interval '10 minutes'
      ) $$,
   'a state can reference the exact current tenant attempt'
 );
@@ -80,6 +84,18 @@ SELECT throws_ok(
   '23514', NULL, 'OAuth return paths cannot be protocol-relative'
 );
 SELECT throws_ok(
+  $$ UPDATE integration_oauth_states SET return_path = '/%5cevil.invalid' $$,
+  '23514', NULL, 'OAuth return paths cannot contain encoded backslashes'
+);
+SELECT throws_ok(
+  $$ UPDATE integration_oauth_states SET redirect_uri = '//evil.invalid/callback' $$,
+  '23514', NULL, 'OAuth redirect URIs include an HTTP scheme'
+);
+SELECT lives_ok(
+  $$ UPDATE integration_oauth_states SET code_verifier = NULL $$,
+  'social OAuth state does not require a PKCE verifier'
+);
+SELECT throws_ok(
   $$ UPDATE integration_oauth_states SET expires_at = created_at $$,
   '23514', NULL, 'OAuth state expiry must follow creation'
 );
@@ -90,9 +106,9 @@ SELECT throws_ok(
 SELECT throws_ok(
   $$ INSERT INTO integration_oauth_states (
        state_hash, provider, team_id, attempt_id, user_id,
-       code_verifier, return_path, created_at, expires_at
+       code_verifier, redirect_uri, return_path, created_at, expires_at
      ) SELECT repeat('t', 43), provider, team_id, attempt_id, user_id,
-       code_verifier, return_path, created_at, expires_at
+       code_verifier, redirect_uri, return_path, created_at, expires_at
        FROM integration_oauth_states $$,
   '23505', NULL, 'only one active state exists for a team and provider'
 );

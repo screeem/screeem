@@ -122,7 +122,6 @@ export function IntegrationManagementPlayground() {
           oauthResult={null}
           fetcher={fetcher}
           navigate={simulateAuthorization}
-          confirmDisconnect={() => true}
         />
       </div>
     </main>

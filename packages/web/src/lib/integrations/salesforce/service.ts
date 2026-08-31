@@ -47,6 +47,7 @@ export interface SalesforceConnectionServiceDependencies {
   readonly execution: IntegrationExecutionStore
   readonly identify: (credential: SalesforceAccessCredential) => Promise<SalesforceIdentity>
   readonly resolveClient: (teamId: IntegrationIdentifier) => Promise<SalesforceClient>
+  readonly redirectUri: string
   readonly now?: () => Date
 }
 
@@ -72,6 +73,7 @@ export class SalesforceConnectionService {
       attemptId,
       userId,
       codeVerifier: verifier,
+      redirectUri: this.dependencies.redirectUri,
       returnPath: snapshotSalesforceReturnPath(returnPath),
     })
     return Object.freeze({
