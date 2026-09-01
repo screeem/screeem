@@ -89,6 +89,65 @@ token to a long-lived token. The adapter publishes an image, Reel, or carousel
 and models the acknowledged child-container, carousel, and final-publish states
 as receipt transitions.
 
+### Scheduled post contracts
+
+Scheduling input and durable delivery state are separate Effect Schema
+contracts. A browser may submit a schedule and an immutable asset reference:
+
+```ts
+const input = {
+  schema: "screeem.instagram-scheduled-post-input",
+  schemaVersion: 1,
+  schedule: {
+    publishAt: "2026-09-01T17:30:00.000Z",
+    timezone: "Europe/London",
+  },
+  template: {
+    kind: "instagram.image",
+    version: 1,
+    caption: "A scheduled image",
+    isAiGenerated: false,
+    image: {
+      asset: {
+        schema: "screeem.social-media-asset",
+        schemaVersion: 1,
+        assetId: "10000000-0000-4000-8000-000000000006",
+        checksum: "sha256:<64 lowercase hex characters>",
+      },
+      altText: "A desk by a window",
+    },
+  },
+}
+```
+
+The server verifies that asset reference, inspects the exact stored bytes, and
+creates `ScheduledInstagramPostV1`. That durable target adds the authorized
+team, calendar revision, connection, actor, and inspected media metadata. Those
+fields are deliberately absent from `InstagramScheduledPostInputV1`; never
+accept the durable shape from a browser.
+
+Image V1 accepts server-inspected standard JPEG and excludes extended JPEG
+formats. Reel V1 records the inspected container, codec, frame rate, dimensions,
+duration, file size, and audio/video bitrates, and requires an explicit
+`shareToFeed` choice. Carousel V1 contains two to ten image items. V1 does not
+support carousel video; add it only after defining a separate `VIDEO` media
+profile. Templates store immutable asset IDs and checksums, never provider fetch
+URLs. The worker resolves a short-lived public URL from the trusted asset record
+immediately before dispatch.
+
+Envelope and asset-reference shapes use `schemaVersion`; template variants use
+`version`. Unknown fields are rejected. An unsupported version produces
+`UnsupportedInstagramPostVersionError`, while malformed data produces
+`InvalidInstagramPostContractError`. Any field or meaning change gets a new
+version and decoder; the provider Graph API version remains a separate concern.
+Encode decoded values before JSON persistence because timestamps and timezones
+decode to Effect values.
+
+Before dispatch, re-check the exact calendar revision, approval, connection and
+account binding, current publishing quota, current provider capabilities, and
+the inspected asset checksum. An edited post supersedes its old immutable
+target instead of mutating a claimed delivery in place.
+
 Meta does not provide idempotency keys for these mutations. Persist a durable
 dispatch attempt before calling `publish()` and provide both `publish()` and
 `advancePublish()` a `SocialPublishPersistence` boundary. Its `claim` callback

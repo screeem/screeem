@@ -37,3 +37,19 @@ export type {
   SocialProviderConstruction,
   SocialPublishPersistence,
 } from "./provider.js"
+export {
+  NonNegativeSafeIntegerSchema,
+  PositiveSafeIntegerSchema,
+  SafeIntegerSchema,
+  ScheduledSocialPostTargetMetadataV1Schema,
+  SocialMediaAssetReferenceV1Schema,
+  SocialPostScheduleV1Schema,
+} from "./scheduling.js"
+export type {
+  ScheduledSocialPostTargetMetadataV1,
+  ScheduledSocialPostTargetMetadataV1Encoded,
+  SocialMediaAssetReferenceV1,
+  SocialMediaAssetReferenceV1Encoded,
+  SocialPostScheduleV1,
+  SocialPostScheduleV1Encoded,
+} from "./scheduling.js"
