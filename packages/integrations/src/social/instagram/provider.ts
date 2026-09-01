@@ -308,6 +308,7 @@ function makeInstagramProvider(configuration: ResolvedConfiguration): InstagramP
                   mediaId: null,
                   caption: request.caption,
                   isAiGenerated: request.isAiGenerated ?? null,
+                  shareToFeed: request.shareToFeed ?? null,
                   failureReason: null,
                 })),
               ),
@@ -442,10 +443,13 @@ function createMediaContainer(
           image_url: media.url,
           ...(media.altText ? { alt_text: media.altText } : {}),
         }
-      : {
+        : {
           video_url: media.url,
           media_type: carousel ? "VIDEO" : "REELS",
           ...(media.coverTimestampMs === undefined ? {} : { thumb_offset: media.coverTimestampMs }),
+          ...(carousel || request.shareToFeed === undefined
+            ? {}
+            : { share_to_feed: request.shareToFeed }),
         }),
     ...(carousel ? { is_carousel_item: true } : { caption: request.caption }),
     ...(carousel || request.isAiGenerated === undefined
@@ -485,6 +489,7 @@ function createNextMediaContainer<Requirements>(
     caption: receipt.caption,
     media: receipt.media,
     ...(receipt.isAiGenerated === null ? {} : { isAiGenerated: receipt.isAiGenerated }),
+    ...(receipt.shareToFeed === null ? {} : { shareToFeed: receipt.shareToFeed }),
   })
   return commitNonIdempotentMutation(
     "create media container",
@@ -833,6 +838,9 @@ function instagramPublishRequest(input: InstagramPublishRequest): InstagramPubli
   if (input.isAiGenerated !== undefined && typeof input.isAiGenerated !== "boolean") {
     throw new TypeError("AI disclosure is invalid")
   }
+  if (input.shareToFeed !== undefined && typeof input.shareToFeed !== "boolean") {
+    throw new TypeError("Reel feed sharing is invalid")
+  }
   const media = input.media.map((item): InstagramMedia => {
     if (!item || typeof item !== "object" || (item.kind !== "image" && item.kind !== "video")) {
       throw new TypeError("media item is invalid")
@@ -856,10 +864,17 @@ function instagramPublishRequest(input: InstagramPublishRequest): InstagramPubli
       ...(coverTimestampMs === undefined ? {} : { coverTimestampMs }),
     })
   })
+  if (
+    input.shareToFeed !== undefined &&
+    (media.length !== 1 || media[0]?.kind !== "video")
+  ) {
+    throw new TypeError("Reel feed sharing applies only to a single video")
+  }
   return Object.freeze({
     caption,
     media: Object.freeze(media),
     ...(input.isAiGenerated === undefined ? {} : { isAiGenerated: input.isAiGenerated }),
+    ...(input.shareToFeed === undefined ? {} : { shareToFeed: input.shareToFeed }),
   })
 }
 
@@ -893,10 +908,12 @@ function instagramReceipt(input: InstagramPublishReceipt): InstagramPublishRecei
   const isAiGenerated = input.isAiGenerated === null || typeof input.isAiGenerated === "boolean"
     ? input.isAiGenerated
     : (() => { throw new TypeError("Instagram publish receipt is invalid") })()
+  const shareToFeed = instagramReceiptShareToFeed(input.shareToFeed)
   const request = instagramPublishRequest({
     caption: input.caption,
     media: input.media,
     ...(isAiGenerated === null ? {} : { isAiGenerated }),
+    ...(shareToFeed === null ? {} : { shareToFeed }),
   })
   if (!Array.isArray(input.childContainerIds) || input.childContainerIds.length === 0 || input.childContainerIds.length > maximumCarouselItems) {
     throw new TypeError("Instagram publish receipt is invalid")
@@ -934,6 +951,7 @@ function instagramReceipt(input: InstagramPublishReceipt): InstagramPublishRecei
     containerId,
     caption: request.caption,
     isAiGenerated,
+    shareToFeed,
   }
   if (input.phase === "processing") {
     if (input.mediaId !== null || input.failureReason !== null) {
@@ -963,6 +981,12 @@ function instagramReceipt(input: InstagramPublishReceipt): InstagramPublishRecei
     mediaId: null,
     failureReason: boundedString(input.failureReason, "Instagram failure reason", 512),
   })
+}
+
+function instagramReceiptShareToFeed(input: unknown): boolean | null {
+  if (input === undefined || input === null) return null
+  if (typeof input === "boolean") return input
+  throw new TypeError("Instagram publish receipt is invalid")
 }
 
 function resolveConfiguration(input: InstagramProviderConfiguration): ResolvedConfiguration {

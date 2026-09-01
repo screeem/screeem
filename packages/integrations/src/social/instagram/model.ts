@@ -32,6 +32,8 @@ export interface InstagramPublishRequest {
   readonly caption: string
   readonly media: readonly InstagramMedia[]
   readonly isAiGenerated?: boolean
+  /** Applies only when publishing one Reel. */
+  readonly shareToFeed?: boolean
 }
 
 interface InstagramPublishReceiptBase {
@@ -45,6 +47,7 @@ interface InstagramPublishReceiptBase {
   readonly containerId: string | null
   readonly caption: string
   readonly isAiGenerated: boolean | null
+  readonly shareToFeed: boolean | null
 }
 
 /** Server-only state. Persist each transition and serialize advancement per receipt. */

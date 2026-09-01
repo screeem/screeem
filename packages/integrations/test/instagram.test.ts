@@ -155,6 +155,84 @@ describe("Instagram provider", () => {
     expect(JSON.parse(httpClient.requests[4]!.body!)).toEqual({ creation_id: "container_1" })
   })
 
+  it("sends the explicit Reel feed destination and persists it for resumption", async () => {
+    const httpClient = new QueueHttpClient([
+      accountInfo(),
+      jsonResponse({ id: "reel_container" }),
+      accountInfo(),
+      jsonResponse({ status_code: "FINISHED" }),
+      jsonResponse({ id: "published_reel" }),
+    ])
+    const api = provider(httpClient)
+    const initial = await Effect.runPromise(api.publish(credential(), {
+      caption: "A scheduled Reel",
+      media: [{ kind: "video", url: "https://media.example.test/reel.mp4" }],
+      shareToFeed: false,
+    }, acknowledge))
+    const persisted = JSON.parse(JSON.stringify(initial)) as InstagramPublishReceipt
+    const completed = await Effect.runPromise(api.advancePublish(
+      credential(),
+      persisted,
+      acknowledge,
+    ))
+
+    expect(initial).toMatchObject({ shareToFeed: false })
+    expect(completed).toMatchObject({ phase: "published", shareToFeed: false })
+    expect(JSON.parse(httpClient.requests[1]!.body!)).toEqual({
+      video_url: "https://media.example.test/reel.mp4",
+      media_type: "REELS",
+      caption: "A scheduled Reel",
+      share_to_feed: false,
+    })
+  })
+
+  it("normalizes legacy receipts without Reel feed state", async () => {
+    const httpClient = new QueueHttpClient([
+      accountInfo(),
+      jsonResponse({ id: "legacy_container" }),
+      accountInfo(),
+      jsonResponse({ status_code: "FINISHED" }),
+      jsonResponse({ id: "legacy_media" }),
+    ])
+    const api = provider(httpClient)
+    const initial = await Effect.runPromise(api.publish(credential(), {
+      caption: "Legacy image",
+      media: [{ kind: "image", url: "https://media.example.test/legacy.jpg" }],
+    }, acknowledge))
+    const { shareToFeed: _missingInLegacyReceipt, ...legacy } = JSON.parse(
+      JSON.stringify(initial),
+    ) as InstagramPublishReceipt
+    const completed = await Effect.runPromise(api.advancePublish(
+      credential(),
+      legacy as InstagramPublishReceipt,
+      acknowledge,
+    ))
+
+    expect(completed).toMatchObject({ phase: "published", shareToFeed: null })
+  })
+
+  it("rejects Reel feed sharing on image and carousel requests", async () => {
+    const api = provider(new QueueHttpClient([]))
+    const image = await Effect.runPromise(Effect.either(api.publish(credential(), {
+      caption: "Image",
+      media: [{ kind: "image", url: "https://media.example.test/image.jpg" }],
+      shareToFeed: true,
+    }, acknowledge)))
+    const carousel = await Effect.runPromise(Effect.either(api.publish(credential(), {
+      caption: "Carousel",
+      media: [
+        { kind: "video", url: "https://media.example.test/one.mp4" },
+        { kind: "video", url: "https://media.example.test/two.mp4" },
+      ],
+      shareToFeed: true,
+    }, acknowledge)))
+
+    expect(Either.isLeft(image)).toBe(true)
+    expect(Either.isLeft(carousel)).toBe(true)
+    if (Either.isLeft(image)) expect(image.left).toBeInstanceOf(InvalidSocialRequestError)
+    if (Either.isLeft(carousel)) expect(carousel.left).toBeInstanceOf(InvalidSocialRequestError)
+  })
+
   it("resumes a carousel through child processing, parent processing, and publish", async () => {
     const httpClient = new QueueHttpClient([
       accountInfo(),
