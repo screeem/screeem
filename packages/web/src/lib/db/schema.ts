@@ -60,6 +60,12 @@ export const calendarEvents = pgTable(
   },
   (table) => [
     unique("calendar_events_team_client_key").on(table.teamId, table.clientEventId),
+    unique("calendar_events_team_aggregate_client_type_key").on(
+      table.teamId,
+      table.aggregateId,
+      table.clientEventId,
+      table.eventType,
+    ),
     index("calendar_events_team_id_id_idx").on(table.teamId, table.id),
     index("calendar_events_aggregate_id_id_idx").on(table.teamId, table.aggregateId, table.id),
   ],
@@ -249,6 +255,159 @@ export const integrationTeamControls = pgTable(
       "integration_team_controls_disabled_state_check",
       sql`(${table.enabled} AND ${table.disabledAt} IS NULL) OR (NOT ${table.enabled} AND ${table.disabledAt} IS NOT NULL)`,
     ),
+  ],
+)
+
+export const socialMediaAssets = pgTable(
+  "social_media_assets",
+  {
+    id: uuid("id").notNull().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    bucket: text("bucket").notNull().default("team-objects"),
+    objectKey: text("object_key").notNull(),
+    objectEtag: text("object_etag").notNull(),
+    checksum: text("checksum").notNull(),
+    kind: text("kind", { enum: ["image", "video"] }).notNull(),
+    byteLength: bigint("byte_length", { mode: "number" }).notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    assetContract: jsonb("asset_contract").notNull(),
+    status: text("status", { enum: ["ready", "tombstoned"] })
+      .notNull()
+      .default("ready"),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    readyAt: timestamp("ready_at", { withTimezone: true }).notNull().defaultNow(),
+    tombstonedAt: timestamp("tombstoned_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.id] }),
+    unique("social_media_assets_team_id_id_checksum_key").on(
+      table.teamId,
+      table.id,
+      table.checksum,
+    ),
+    unique("social_media_assets_team_id_object_key_key").on(table.teamId, table.objectKey),
+    check("social_media_assets_bucket_check", sql`char_length(${table.bucket}) BETWEEN 1 AND 100`),
+    check("social_media_assets_object_etag_check", sql`char_length(${table.objectEtag}) BETWEEN 1 AND 512`),
+    check("social_media_assets_checksum_check", sql`${table.checksum} ~ '^sha256:[a-f0-9]{64}$'`),
+    check("social_media_assets_kind_check", sql`${table.kind} IN ('image', 'video')`),
+    check("social_media_assets_byte_length_check", sql`${table.byteLength} > 0 AND ${table.byteLength} <= 52428800`),
+    check("social_media_assets_schema_version_check", sql`${table.schemaVersion} = 1`),
+    check("social_media_assets_object_key_check", sql`${table.objectKey} = 'teams/' || ${table.teamId}::text || '/social-post-media/' || ${table.id}::text`),
+    check("social_media_assets_contract_check", sql`(jsonb_typeof(${table.assetContract}) = 'object' AND pg_column_size(${table.assetContract}) <= 32768 AND ${table.assetContract}->>'schema' = 'screeem.social-media-asset' AND ${table.assetContract} @> '{"schemaVersion": 1}'::jsonb AND ${table.assetContract}->>'assetId' = ${table.id}::text AND ${table.assetContract}->>'checksum' = ${table.checksum} AND ${table.assetContract}->>'kind' = ${table.kind} AND ${table.assetContract}->>'sizeBytes' = ${table.byteLength}::text) IS TRUE`),
+    check("social_media_assets_status_check", sql`(${table.status} = 'ready' AND ${table.tombstonedAt} IS NULL) OR (${table.status} = 'tombstoned' AND ${table.tombstonedAt} IS NOT NULL)`),
+  ],
+)
+
+export const socialPostTargets = pgTable(
+  "social_post_targets",
+  {
+    id: uuid("id").notNull().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    requestId: uuid("request_id").notNull(),
+    calendarPostId: uuid("calendar_post_id").notNull(),
+    calendarRevision: bigint("calendar_revision", { mode: "number" }).notNull(),
+    provider: text("provider", { enum: ["instagram"] }).notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    externalAccountId: text("external_account_id").notNull(),
+    sourceClientEventId: uuid("source_client_event_id").notNull(),
+    sourceEventType: text("source_event_type", {
+      enum: ["instagram.target.configured"],
+    }).notNull().default("instagram.target.configured"),
+    schemaVersion: integer("schema_version").notNull(),
+    templateVersion: integer("template_version").notNull(),
+    targetContract: jsonb("target_contract").notNull(),
+    publishAt: timestamp("publish_at", { withTimezone: true }).notNull(),
+    timezone: text("timezone").notNull(),
+    status: text("status", { enum: ["scheduled", "superseded", "cancelled"] })
+      .notNull()
+      .default("scheduled"),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.id] }),
+    unique("social_post_targets_team_request_key").on(table.teamId, table.requestId),
+    unique("social_post_targets_team_post_provider_revision_key").on(
+      table.teamId,
+      table.calendarPostId,
+      table.provider,
+      table.calendarRevision,
+    ),
+    foreignKey({
+      columns: [table.teamId, table.calendarPostId],
+      foreignColumns: [calendarPostWorkflows.teamId, calendarPostWorkflows.aggregateId],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.teamId, table.connectionId],
+      foreignColumns: [integrationConnections.teamId, integrationConnections.id],
+    }).onDelete("no action"),
+    foreignKey({
+      columns: [
+        table.teamId,
+        table.calendarPostId,
+        table.sourceClientEventId,
+        table.sourceEventType,
+      ],
+      foreignColumns: [
+        calendarEvents.teamId,
+        calendarEvents.aggregateId,
+        calendarEvents.clientEventId,
+        calendarEvents.eventType,
+      ],
+    }).onDelete("no action"),
+    uniqueIndex("social_post_targets_active_post_provider_key")
+      .on(table.teamId, table.calendarPostId, table.provider)
+      .where(sql`${table.status} = 'scheduled'`),
+    index("social_post_targets_due_idx")
+      .on(table.publishAt, table.id)
+      .where(sql`${table.status} = 'scheduled'`),
+    index("social_post_targets_team_post_idx").on(
+      table.teamId,
+      table.calendarPostId,
+      table.createdAt.desc(),
+    ),
+    check("social_post_targets_calendar_revision_check", sql`${table.calendarRevision} > 0`),
+    check("social_post_targets_provider_check", sql`${table.provider} = 'instagram'`),
+    check("social_post_targets_external_account_id_check", sql`char_length(${table.externalAccountId}) BETWEEN 1 AND 256`),
+    check("social_post_targets_schema_version_check", sql`${table.schemaVersion} = 1`),
+    check("social_post_targets_source_event_type_check", sql`${table.sourceEventType} = 'instagram.target.configured'`),
+    check("social_post_targets_template_version_check", sql`${table.templateVersion} = 1`),
+    check("social_post_targets_timezone_check", sql`char_length(${table.timezone}) BETWEEN 1 AND 128`),
+    check("social_post_targets_status_check", sql`${table.status} IN ('scheduled', 'superseded', 'cancelled')`),
+    check("social_post_targets_contract_check", sql`(jsonb_typeof(${table.targetContract}) = 'object' AND pg_column_size(${table.targetContract}) <= 262144 AND ${table.targetContract}->>'schema' = 'screeem.social-post-target' AND ${table.targetContract} @> '{"schemaVersion": 1, "provider": "instagram"}'::jsonb AND ${table.targetContract}->>'id' = ${table.id}::text AND ${table.targetContract}->>'teamId' = ${table.teamId}::text AND ${table.targetContract}->>'calendarPostId' = ${table.calendarPostId}::text AND ${table.targetContract}->>'calendarRevision' = ${table.calendarRevision}::text AND ${table.targetContract}->>'connectionId' = ${table.connectionId}::text AND ${table.targetContract}->'template'->>'version' = ${table.templateVersion}::text AND ${table.targetContract}->'schedule'->>'publishAt' IS NOT NULL AND ${table.targetContract}->'schedule'->>'timezone' = ${table.timezone} AND ${table.targetContract}->>'createdBy' = ${table.createdBy}::text AND (${table.targetContract}->'schedule'->>'publishAt')::timestamp with time zone = ${table.publishAt} AND (${table.targetContract}->>'createdAt')::timestamp with time zone = ${table.createdAt}) IS TRUE`),
+    check("social_post_targets_status_timestamps_check", sql`(${table.status} = 'scheduled' AND ${table.supersededAt} IS NULL AND ${table.cancelledAt} IS NULL) OR (${table.status} = 'superseded' AND ${table.supersededAt} IS NOT NULL AND ${table.cancelledAt} IS NULL) OR (${table.status} = 'cancelled' AND ${table.supersededAt} IS NULL AND ${table.cancelledAt} IS NOT NULL)`),
+  ],
+)
+
+export const socialPostTargetAssets = pgTable(
+  "social_post_target_assets",
+  {
+    teamId: uuid("team_id").notNull(),
+    targetId: uuid("target_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    assetId: uuid("asset_id").notNull(),
+    checksum: text("checksum").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.targetId, table.ordinal] }),
+    foreignKey({
+      columns: [table.teamId, table.targetId],
+      foreignColumns: [socialPostTargets.teamId, socialPostTargets.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.teamId, table.assetId, table.checksum],
+      foreignColumns: [socialMediaAssets.teamId, socialMediaAssets.id, socialMediaAssets.checksum],
+    }).onDelete("no action"),
+    index("social_post_target_assets_asset_idx").on(table.teamId, table.assetId),
+    check("social_post_target_assets_ordinal_check", sql`${table.ordinal} BETWEEN 0 AND 9`),
+    check("social_post_target_assets_checksum_check", sql`${table.checksum} ~ '^sha256:[a-f0-9]{64}$'`),
   ],
 )
 

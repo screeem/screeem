@@ -90,6 +90,18 @@ describe("calendar event replay", () => {
     expect(post.approval.status).toBe("draft")
   })
 
+  it("includes Instagram target configuration in the approved revision", () => {
+    const post = replayCalendar([
+      event(1, "post.created", { title: "First", targets: ["Instagram"] }),
+      event(2, "approval.requested", { revision: 1 }),
+      event(3, "approval.granted", { revision: 1 }),
+      event(4, "instagram.target.configured", { input: {} }),
+    ])[0]
+
+    expect(post.revision).toBe(2)
+    expect(post.approval.status).toBe("draft")
+  })
+
   it("rejects stale and unauthorized approval transitions", () => {
     const post = replayCalendar([
       event(1, "post.created", { title: "First", targets: ["X"] }),

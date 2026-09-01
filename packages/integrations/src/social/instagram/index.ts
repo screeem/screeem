@@ -53,3 +53,8 @@ export type {
   ScheduledInstagramPostV1,
   ScheduledInstagramPostV1Encoded,
 } from "./template.js"
+export {
+  InstagramAssetResolutionError,
+  materializeScheduledInstagramPostV1,
+} from "./materialize.js"
+export type { InstagramMaterializationError } from "./materialize.js"

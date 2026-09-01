@@ -60,6 +60,8 @@ export interface SignedUploadRequest {
   readonly contentType: string
   readonly expiresInSeconds?: number
   readonly maximumByteLength?: number
+  /** Requests replacement of an existing key when the scope allows it. */
+  readonly overwrite?: boolean
 }
 
 export interface SignedUpload {
@@ -97,6 +99,9 @@ export interface ObjectScopePolicy {
   /** Exact types such as `image/png`, or a subtype wildcard such as `image/*`. */
   readonly allowedContentTypes: readonly string[]
   readonly maximumByteLength: number
+  readonly allowPut?: boolean
+  readonly allowDelete?: boolean
+  readonly allowSignedUploadOverwrite?: boolean
   readonly signedUrl?: Partial<SignedUrlLimits>
 }
 

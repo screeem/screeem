@@ -9,6 +9,7 @@
     "test": "vitest run",
     "test:forms-db": "if [ -f ./.env.local ]; then set -a; . ./.env.local; set +a; fi; FORM_PERSISTENCE_DB_TESTS=1 vitest run test/form-persistence.integration.test.ts test/integration-persistence.integration.test.ts test/salesforce-persistence.integration.test.ts",
     "test:object-storage-db": "if [ -f ./.env.local ]; then set -a; . ./.env.local; set +a; fi; OBJECT_STORAGE_DB_TESTS=1 vitest run test/object-storage.integration.test.ts",
+    "test:instagram-scheduling-db": "if [ -f ./.env.local ]; then set -a; . ./.env.local; set +a; fi; INSTAGRAM_SCHEDULING_DB_TESTS=1 vitest run test/instagram-scheduling.integration.test.ts --maxWorkers=1 --fileParallelism=false",
     "test:salesforce-sandbox": "SALESFORCE_SANDBOX_TESTS=1 vitest run test/salesforce-sandbox.integration.test.ts",
     "start": "next start",
     "lint": "eslint .",

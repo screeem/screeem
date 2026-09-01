@@ -69,6 +69,7 @@ export interface AdapterSignedUploadRequest {
   readonly contentType: string
   readonly expiresInSeconds: number
   readonly maximumByteLength: number
+  readonly overwrite: boolean
 }
 
 export interface AdapterSignedUpload {

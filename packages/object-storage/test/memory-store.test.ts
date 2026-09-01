@@ -68,6 +68,22 @@ describe("memory object store", () => {
     expect(description.adapter).toBe("memory")
     expect(description.scopes.map((scope) => scope.scope)).toEqual(["contract", "contract-locked"])
     expect(description.scopes[0]?.signedUrl).toEqual({ defaultSeconds: 60, maximumSeconds: 600 })
+    expect(description.scopes[1]).toMatchObject({ allowPut: false, allowDelete: false })
+  })
+
+  it("enforces scopes that only allow signed creation", async () => {
+    const store = contractStore()
+    const key = {
+      teamId: "team-primary",
+      scope: "contract-locked",
+      path: ["document.pdf"],
+    }
+
+    await expectFailure(
+      store.put({ key, bytes: bytes([1]), contentType: "application/pdf" }),
+      InvalidObjectRequestError,
+    )
+    await expectFailure(store.delete(key), InvalidObjectRequestError)
   })
 
   it("refuses metadata that a backend could not carry", async () => {
