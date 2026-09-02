@@ -229,7 +229,7 @@ export function createSupabaseObjectStoreAdapter(
       upload: AdapterSignedUploadRequest,
     ): Effect.Effect<AdapterSignedUpload, ObjectStoreFailure> =>
       request(
-        () => files().createSignedUploadUrl(upload.canonicalKey, { upsert: true }),
+        () => files().createSignedUploadUrl(upload.canonicalKey, { upsert: upload.overwrite }),
         upload.canonicalKey,
         bucketByteLimit,
         0,
@@ -239,7 +239,7 @@ export function createSupabaseObjectStoreAdapter(
           method: "PUT" as const,
           headers: {
             "content-type": upload.contentType,
-            "x-upsert": "true",
+            "x-upsert": String(upload.overwrite),
           },
           expiresAt: signatureExpiry(signed.signedUrl),
         })),

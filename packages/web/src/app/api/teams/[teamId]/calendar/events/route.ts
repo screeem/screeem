@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
+import { decodeInstagramScheduledPostInputV1 } from "@screeem/integrations/social/instagram"
+import { Effect, Either } from "effect"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { canManage, getMembership } from "@/lib/teams/server"
+import { readIntegrationJson } from "@/lib/integrations/api"
 import {
   isValidCalendarTag,
   isValidCalendarTags,
@@ -20,6 +23,7 @@ const eventTypes = new Set<CalendarEventType>([
   "post.created", "title.changed", "copy.changed", "schedule.changed",
   "tag.added", "tag.removed",
   "target.added", "target.removed", "change.reverted",
+  "instagram.target.configured",
   "approval.requested", "approval.granted", "approval.changes_requested", "approval.withdrawn",
 ])
 const targets = new Set<CalendarTarget>(["X", "LinkedIn", "Instagram"])
@@ -36,7 +40,7 @@ async function authorize(teamId: string) {
   return { user, membership }
 }
 
-function validPayload(type: CalendarEventType, payload: Record<string, unknown>) {
+async function validPayload(type: CalendarEventType, payload: Record<string, unknown>) {
   if (type === "post.created") {
     return typeof payload.title === "string" && payload.title.trim().length > 0
       && payload.title.length <= 160 && typeof payload.copy === "string" && payload.copy.length <= 10000
@@ -49,6 +53,15 @@ function validPayload(type: CalendarEventType, payload: Record<string, unknown>)
   if (type === "tag.added" || type === "tag.removed") return isValidCalendarTag(payload.value)
   if (type === "target.added" || type === "target.removed") return targets.has(payload.value as CalendarTarget)
   if (type === "schedule.changed") return typeof payload.date === "string" && typeof payload.time === "string"
+  if (type === "instagram.target.configured") {
+    if (Object.keys(payload).some((key) => key !== "expectedRevision" && key !== "input")
+      || !Number.isSafeInteger(payload.expectedRevision)
+      || Number(payload.expectedRevision) <= 0) return false
+    const decoded = await Effect.runPromise(Effect.either(
+      decodeInstagramScheduledPostInputV1(payload.input),
+    ))
+    return Either.isRight(decoded)
+  }
   if (isApprovalEventType(type)) {
     return Number.isSafeInteger(payload.revision) && Number(payload.revision) > 0
       && (payload.comment === undefined
@@ -131,8 +144,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ te
   const { teamId } = await context.params
   const auth = await authorize(teamId)
   if (auth.error) return auth.error
-  const body = await request.json().catch(() => null) as { events?: unknown[] } | null
-  if (!body?.events?.length || body.events.length > 50) {
+  const parsedBody = await readIntegrationJson(request, 1024 * 1024, request.signal)
+  if ("response" in parsedBody) return parsedBody.response
+  const body = parsedBody.value as { events?: unknown[] } | null
+  if (!Array.isArray(body?.events) || body.events.length === 0 || body.events.length > 50) {
     return NextResponse.json({ error: "Provide between 1 and 50 events" }, { status: 400 })
   }
   const rows = []
@@ -143,7 +158,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ te
     const payload = item.payload
     if (!eventTypes.has(type) || !uuidPattern.test(String(item.aggregateId))
       || !uuidPattern.test(String(item.clientEventId)) || !payload || typeof payload !== "object"
-      || Array.isArray(payload) || !validPayload(type, payload as Record<string, unknown>)) {
+      || Array.isArray(payload) || !(await validPayload(type, payload as Record<string, unknown>))) {
       return NextResponse.json({ error: "Invalid calendar event" }, { status: 400 })
     }
     const reverts = type === "change.reverted" ? Number(item.revertsEventId) : null
@@ -156,6 +171,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ te
   const revertedIds = rows.flatMap((row) => row.reverts_event_id === null ? [] : [row.reverts_event_id])
   const admin = createAdminClient()
   const approvalRows = rows.filter((row) => isApprovalEventType(row.event_type))
+  const instagramRows = rows.filter((row) => row.event_type === "instagram.target.configured")
+  if (instagramRows.length && rows.length !== 1) {
+    return NextResponse.json(
+      { error: "Instagram configuration must be submitted separately" },
+      { status: 400 },
+    )
+  }
   if (approvalRows.length) {
     if (rows.length !== 1) {
       return NextResponse.json({ error: "Approval actions must be submitted separately" }, { status: 400 })
