@@ -7,6 +7,9 @@ vi.mock("server-only", () => ({}))
 import {
   PostgresInstagramSchedulingStore,
 } from "../src/lib/integrations/social/instagram-scheduling"
+import {
+  PostgresSocialDeliveryEventStore,
+} from "../src/lib/integrations/social/delivery-events"
 
 const suite = process.env.INSTAGRAM_SCHEDULING_DB_TESTS === "1" ? describe : describe.skip
 
@@ -123,6 +126,16 @@ suite("Postgres Instagram scheduling", () => {
       FROM social_post_target_assets
       WHERE team_id = ${fixture.team} AND target_id = ${target.id}
     `
+    const events = await database<{
+      readonly sequence: number
+      readonly event_type: string
+      readonly event_contract: Record<string, unknown>
+    }[]>`
+      SELECT sequence::int, event_type, event_contract
+      FROM social_delivery_events
+      WHERE team_id = ${fixture.team} AND target_id = ${target.id}
+      ORDER BY sequence
+    `
 
     expect(target).toMatchObject({
       teamId: fixture.team,
@@ -136,6 +149,25 @@ suite("Postgres Instagram scheduling", () => {
       asset_id: fixture.asset,
       checksum,
     }])
+    expect(events).toEqual([expect.objectContaining({
+      sequence: 1,
+      event_type: "target.scheduled",
+      event_contract: expect.objectContaining({
+        id: fixture.request,
+        teamId: fixture.team,
+        targetId: target.id,
+        eventType: "target.scheduled",
+      }),
+    })])
+    await expect(database`
+      UPDATE social_delivery_events
+      SET event_type = 'target.cancelled'
+      WHERE team_id = ${fixture.team} AND target_id = ${target.id}
+    `).rejects.toThrow(/social_delivery_events_are_immutable/)
+    await expect(database`
+      DELETE FROM social_delivery_events
+      WHERE team_id = ${fixture.team} AND target_id = ${target.id}
+    `).rejects.toThrow(/social_delivery_events_are_immutable/)
     await expect(database`
       UPDATE social_post_target_assets
       SET ordinal = 1
@@ -166,12 +198,474 @@ suite("Postgres Instagram scheduling", () => {
         ${fixture.actor}
       )
     `
-    const rows = await database<{ readonly status: string }[]>`
-      SELECT status FROM social_post_targets
-      WHERE team_id = ${fixture.team} AND id = ${target.id}
+    const rows = await database<{
+      readonly status: string
+      readonly event_types: string[]
+    }[]>`
+      SELECT target.status, array_agg(event.event_type ORDER BY event.sequence) AS event_types
+      FROM social_post_targets AS target
+      JOIN social_delivery_events AS event
+        ON event.team_id = target.team_id AND event.target_id = target.id
+      WHERE target.team_id = ${fixture.team} AND target.id = ${target.id}
+      GROUP BY target.status
     `
 
     expect(rows[0]?.status).toBe("superseded")
+    expect(rows[0]?.event_types).toEqual(["target.scheduled", "target.superseded"])
+  })
+
+  it("cancels a target by appending a compensating event", async () => {
+    const target = await createTarget()
+    const cancelled = await cancelTarget(target.id)
+    const replay = await cancelTarget(target.id)
+    const rows = await database<{
+      readonly status: string
+      readonly transition_event_id: string | null
+    }[]>`
+      SELECT status, transition_event_id
+      FROM social_post_targets
+      WHERE team_id = ${fixture.team} AND id = ${target.id}
+    `
+
+    expect(cancelled).toMatchObject({
+      id: fixture.cancelEvent,
+      eventType: "target.cancelled",
+      actor: { kind: "user", userId: fixture.actor },
+      data: { reason: "user_requested" },
+    })
+    expect(replay).toEqual(cancelled)
+    expect(rows[0]).toEqual({
+      status: "cancelled",
+      transition_event_id: fixture.cancelEvent,
+    })
+  })
+
+  it("persists sanitized publish progress with a sealed private receipt", async () => {
+    const target = await createTarget()
+    await appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })
+    const progress = await appendDeliveryEvent(target.id, fixture.publishProgressedEvent, {
+      eventType: "publish.progressed",
+      data: { attemptId: fixture.attempt, phase: "processing", receiptRevision: 1 },
+    }, {
+      expectedPreviousRevision: 0,
+      keyId: "key-v1",
+      sealedPayload: "v1.receipt",
+    })
+    const replay = await appendDeliveryEvent(target.id, fixture.publishProgressedEvent, {
+      eventType: "publish.progressed",
+      data: { attemptId: fixture.attempt, phase: "processing", receiptRevision: 1 },
+    }, {
+      expectedPreviousRevision: 0,
+      keyId: "key-v1",
+      sealedPayload: "v1.receipt",
+    })
+    expect(replay).toEqual(progress)
+    await expect(appendDeliveryEvent(target.id, fixture.publishProgressedEvent, {
+      eventType: "publish.progressed",
+      data: { attemptId: fixture.attempt, phase: "processing", receiptRevision: 1 },
+    }, {
+      expectedPreviousRevision: 0,
+      keyId: "key-v1",
+      sealedPayload: "v1.different",
+    })).rejects.toMatchObject({
+      _tag: "SocialDeliveryEventStateError",
+      reason: "receipt_conflict",
+    })
+    await appendDeliveryEvent(target.id, fixture.publishProgressedEvent2, {
+      eventType: "publish.progressed",
+      data: { attemptId: fixture.attempt, phase: "processing", receiptRevision: 2 },
+    }, {
+      expectedPreviousRevision: 1,
+      keyId: "key-v1",
+      sealedPayload: "v1.receipt-two",
+    })
+    const succeeded = await appendDeliveryEvent(target.id, fixture.publishSucceededEvent, {
+      eventType: "publish.succeeded",
+      data: {
+        attemptId: fixture.attempt,
+        permalink: "https://www.instagram.com/p/example/",
+        receiptRevision: 3,
+        remotePostId: "remote-post-1",
+      },
+    }, {
+      expectedPreviousRevision: 2,
+      keyId: "key-v1",
+      sealedPayload: "v1.receipt-three",
+    })
+    const succeededReplay = await appendDeliveryEvent(
+      target.id,
+      fixture.publishSucceededEvent,
+      {
+        eventType: "publish.succeeded",
+        data: {
+          attemptId: fixture.attempt,
+          permalink: "https://www.instagram.com/p/example/",
+          receiptRevision: 3,
+          remotePostId: "remote-post-1",
+        },
+      },
+      {
+        expectedPreviousRevision: 2,
+        keyId: "key-v1",
+        sealedPayload: "v1.receipt-three",
+      },
+    )
+    expect(succeededReplay).toEqual(succeeded)
+    await expect(appendDeliveryEvent(target.id, fixture.publishSucceededEvent, {
+      eventType: "publish.succeeded",
+      data: {
+        attemptId: fixture.attempt,
+        permalink: "https://www.instagram.com/p/example/",
+        receiptRevision: 3,
+        remotePostId: "remote-post-1",
+      },
+    }, {
+      expectedPreviousRevision: 2,
+      keyId: "key-v1",
+      sealedPayload: "v1.changed-terminal-receipt",
+    })).rejects.toMatchObject({
+      _tag: "SocialDeliveryEventStateError",
+      reason: "receipt_conflict",
+    })
+    await appendDeliveryEvent(target.id, fixture.deleteRequestedEvent, {
+      eventType: "remote-delete.requested",
+      data: { remotePostId: "remote-post-1" },
+    })
+    await appendDeliveryEvent(target.id, fixture.deleteSucceededEvent, {
+      eventType: "remote-delete.succeeded",
+      data: { remotePostId: "remote-post-1" },
+    })
+
+    const events = await database<{
+      readonly event_type: string
+      readonly event_contract: unknown
+    }[]>`
+      SELECT event_type, event_contract
+      FROM social_delivery_events
+      WHERE team_id = ${fixture.team} AND target_id = ${target.id}
+      ORDER BY sequence
+    `
+    const receipts = await database<{
+      readonly attempt_id: string
+      readonly revision: number
+      readonly sealed_payload: string
+    }[]>`
+      SELECT attempt_id, revision::int, sealed_payload
+      FROM social_delivery_receipts
+      WHERE team_id = ${fixture.team} AND target_id = ${target.id}
+      ORDER BY revision
+    `
+
+    expect(events.map((event) => event.event_type)).toEqual([
+      "target.scheduled",
+      "publish.started",
+      "publish.progressed",
+      "publish.progressed",
+      "publish.succeeded",
+      "remote-delete.requested",
+      "remote-delete.succeeded",
+    ])
+    expect(JSON.stringify(events)).not.toContain("v1.receipt")
+    expect(receipts).toEqual([
+      {
+        attempt_id: fixture.attempt,
+        revision: 1,
+        sealed_payload: "v1.receipt",
+      },
+      {
+        attempt_id: fixture.attempt,
+        revision: 2,
+        sealed_payload: "v1.receipt-two",
+      },
+      {
+        attempt_id: fixture.attempt,
+        revision: 3,
+        sealed_payload: "v1.receipt-three",
+      },
+    ])
+    await expect(database`
+      UPDATE social_delivery_receipts
+      SET sealed_payload = 'v1.rewritten'
+      WHERE team_id = ${fixture.team} AND target_id = ${target.id}
+    `).rejects.toThrow(/social_delivery_receipts_are_immutable/)
+    await expect(database`
+      DELETE FROM social_delivery_receipts
+      WHERE team_id = ${fixture.team} AND target_id = ${target.id}
+    `).rejects.toThrow(/social_delivery_receipts_are_immutable/)
+  })
+
+  it("records an uncertain outcome and blocks automatic retry and cancellation", async () => {
+    const target = await createTarget()
+    await appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })
+    await appendDeliveryEvent(target.id, fixture.publishUncertainEvent, {
+      eventType: "publish.uncertain",
+      data: {
+        attemptId: fixture.attempt,
+        errorCode: "provider_outcome_unknown",
+        providerReference: "container-1",
+      },
+    })
+
+    await expect(appendDeliveryEvent(target.id, crypto.randomUUID(), {
+      eventType: "publish.started",
+      data: { attemptId: crypto.randomUUID() },
+    })).rejects.toMatchObject({
+      _tag: "SocialDeliveryEventStateError",
+      reason: "invalid_transition",
+    })
+    await expect(cancelTarget(target.id)).rejects.toMatchObject({
+      _tag: "InstagramSchedulingStateError",
+      reason: "delivery_active",
+    })
+  })
+
+  it("requires a provider progress receipt before publish success", async () => {
+    const target = await createTarget()
+    await appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })
+
+    await expect(appendDeliveryEvent(target.id, fixture.publishSucceededEvent, {
+      eventType: "publish.succeeded",
+      data: {
+        attemptId: fixture.attempt,
+        permalink: "https://www.instagram.com/p/example/",
+        receiptRevision: 1,
+        remotePostId: "remote-post-1",
+      },
+    }, {
+      expectedPreviousRevision: 0,
+      keyId: "key-v1",
+      sealedPayload: "v1.direct-success",
+    })).rejects.toMatchObject({
+      _tag: "SocialDeliveryEventStateError",
+      reason: "invalid_transition",
+    })
+  })
+
+  it("does not reuse an earlier publish attempt id for a retry", async () => {
+    const target = await createTarget()
+    await appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })
+    await appendDeliveryEvent(target.id, crypto.randomUUID(), {
+      eventType: "publish.failed",
+      data: {
+        attemptId: fixture.attempt,
+        errorCode: "provider_unavailable",
+        receipt: { kind: "unchanged", revision: null },
+        retryable: true,
+        retryAt: null,
+        retryMode: "restart",
+      },
+    })
+
+    await expect(appendDeliveryEvent(target.id, crypto.randomUUID(), {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })).rejects.toMatchObject({
+      _tag: "SocialDeliveryEventStateError",
+      reason: "invalid_transition",
+    })
+
+    await expect(appendDeliveryEvent(target.id, crypto.randomUUID(), {
+      eventType: "publish.started",
+      data: { attemptId: crypto.randomUUID() },
+    })).resolves.toMatchObject({ eventType: "publish.started" })
+  })
+
+  it("resumes the same attempt from its last sealed processing receipt", async () => {
+    const target = await createTarget()
+    await appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })
+    await appendDeliveryEvent(target.id, fixture.publishProgressedEvent, {
+      eventType: "publish.progressed",
+      data: { attemptId: fixture.attempt, phase: "processing", receiptRevision: 1 },
+    }, {
+      expectedPreviousRevision: 0,
+      keyId: "key-v1",
+      sealedPayload: "v1.processing",
+    })
+    await appendDeliveryEvent(target.id, crypto.randomUUID(), {
+      eventType: "publish.failed",
+      data: {
+        attemptId: fixture.attempt,
+        errorCode: "provider_unavailable",
+        receipt: { kind: "unchanged", revision: 1 },
+        retryable: true,
+        retryAt: null,
+        retryMode: "resume",
+      },
+    })
+    await appendDeliveryEvent(target.id, crypto.randomUUID(), {
+      eventType: "publish.resumed",
+      data: { attemptId: fixture.attempt, receiptRevision: 1 },
+    })
+    await appendDeliveryEvent(target.id, fixture.publishProgressedEvent2, {
+      eventType: "publish.progressed",
+      data: { attemptId: fixture.attempt, phase: "processing", receiptRevision: 2 },
+    }, {
+      expectedPreviousRevision: 1,
+      keyId: "key-v1",
+      sealedPayload: "v1.processing-two",
+    })
+
+    const rows = await database<{
+      readonly event_types: string[]
+      readonly receipt_revisions: number[]
+    }[]>`
+      SELECT
+        array_agg(DISTINCT event.event_type ORDER BY event.event_type)
+          AS event_types,
+        array_agg(DISTINCT receipt.revision::int ORDER BY receipt.revision::int)
+          AS receipt_revisions
+      FROM social_delivery_events AS event
+      JOIN social_delivery_receipts AS receipt
+        ON receipt.team_id = event.team_id AND receipt.target_id = event.target_id
+      WHERE event.team_id = ${fixture.team} AND event.target_id = ${target.id}
+    `
+    expect(rows[0]?.event_types).toContain("publish.resumed")
+    expect(rows[0]?.receipt_revisions).toEqual([1, 2])
+  })
+
+  it("finishes an in-flight attempt before superseding edited content", async () => {
+    const target = await createTarget()
+    await appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })
+    await database`
+      INSERT INTO calendar_events (
+        team_id, aggregate_id, client_event_id, event_type, payload, actor_id
+      ) VALUES (
+        ${fixture.team}, ${fixture.post}, ${crypto.randomUUID()},
+        'copy.changed', '{"value": "Edited during delivery"}'::jsonb,
+        ${fixture.actor}
+      )
+    `
+    const active = await database<{ readonly status: string }[]>`
+      SELECT status
+      FROM social_post_targets
+      WHERE team_id = ${fixture.team} AND id = ${target.id}
+    `
+    expect(active[0]?.status).toBe("scheduled")
+
+    await appendDeliveryEvent(target.id, fixture.publishProgressedEvent, {
+      eventType: "publish.progressed",
+      data: { attemptId: fixture.attempt, phase: "processing", receiptRevision: 1 },
+    }, {
+      expectedPreviousRevision: 0,
+      keyId: "key-v1",
+      sealedPayload: "v1.processing",
+    })
+    await appendDeliveryEvent(target.id, crypto.randomUUID(), {
+      eventType: "publish.failed",
+      data: {
+        attemptId: fixture.attempt,
+        errorCode: "invalid_media",
+        receipt: { kind: "recorded", phase: "failed", revision: 2 },
+        retryable: false,
+        retryAt: null,
+        retryMode: null,
+      },
+    }, {
+      expectedPreviousRevision: 1,
+      keyId: "key-v1",
+      sealedPayload: "v1.failed",
+    })
+
+    const terminal = await database<{
+      readonly event_types: string[]
+      readonly status: string
+    }[]>`
+      SELECT target.status,
+        array_agg(event.event_type ORDER BY event.sequence) AS event_types
+      FROM social_post_targets AS target
+      JOIN social_delivery_events AS event
+        ON event.team_id = target.team_id AND event.target_id = target.id
+      WHERE target.team_id = ${fixture.team} AND target.id = ${target.id}
+      GROUP BY target.status
+    `
+    expect(terminal[0]).toEqual({
+      status: "superseded",
+      event_types: [
+        "target.scheduled",
+        "publish.started",
+        "publish.progressed",
+        "publish.failed",
+        "target.superseded",
+      ],
+    })
+  })
+
+  it("keeps a delivery event id bound to its canonical action", async () => {
+    const target = await createTarget()
+    const first = await appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })
+    const replay = await appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })
+
+    expect(replay).toEqual(first)
+    await expect(appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: crypto.randomUUID() },
+    })).rejects.toMatchObject({
+      _tag: "SocialDeliveryEventStateError",
+      reason: "request_conflict",
+    })
+  })
+
+  it("serializes cancellation against a publish claim", async () => {
+    const target = await createTarget()
+    const schedulingStore = instagramStore()
+    const deliveryStore = deliveryEventStore()
+    const [cancellation, publish] = await Promise.all([
+      Effect.runPromise(Effect.either(schedulingStore.cancelScheduledTarget({
+        teamId: fixture.team,
+        calendarPostId: fixture.post,
+        targetId: target.id,
+        expectedCalendarRevision: 2,
+        requestId: fixture.cancelEvent,
+        actorId: fixture.actor,
+      }))),
+      Effect.runPromise(Effect.either(deliveryStore.appendSystemEvent({
+        teamId: fixture.team,
+        targetId: target.id,
+        eventId: fixture.publishStartedEvent,
+        action: {
+          eventType: "publish.started",
+          data: { attemptId: fixture.attempt },
+        },
+      }))),
+    ])
+
+    expect(Number(Either.isRight(cancellation)) + Number(Either.isRight(publish))).toBe(1)
+    expect(Number(Either.isLeft(cancellation)) + Number(Either.isLeft(publish))).toBe(1)
+    const eventTypes = await database<{ readonly event_type: string }[]>`
+      SELECT event_type
+      FROM social_delivery_events
+      WHERE team_id = ${fixture.team} AND target_id = ${target.id}
+      ORDER BY sequence
+    `
+    expect(eventTypes.map((event) => event.event_type)).toEqual(
+      Either.isRight(cancellation)
+        ? ["target.scheduled", "target.cancelled"]
+        : ["target.scheduled", "publish.started"],
+    )
   })
 
   it("rejects a target for a reverted calendar post", async () => {
@@ -381,12 +875,22 @@ suite("Postgres Instagram scheduling", () => {
       readonly asset_insert: boolean
       readonly target_insert: boolean
       readonly target_update: boolean
+      readonly event_insert: boolean
+      readonly event_update: boolean
+      readonly receipt_select: boolean
+      readonly service_event_insert: boolean
+      readonly service_receipt_insert: boolean
     }[]>`
       SELECT
         has_table_privilege('authenticated', 'calendar_events', 'INSERT') AS calendar_insert,
         has_table_privilege('authenticated', 'social_media_assets', 'INSERT') AS asset_insert,
         has_table_privilege('authenticated', 'social_post_targets', 'INSERT') AS target_insert,
-        has_table_privilege('authenticated', 'social_post_targets', 'UPDATE') AS target_update
+        has_table_privilege('authenticated', 'social_post_targets', 'UPDATE') AS target_update,
+        has_table_privilege('authenticated', 'social_delivery_events', 'INSERT') AS event_insert,
+        has_table_privilege('authenticated', 'social_delivery_events', 'UPDATE') AS event_update,
+        has_table_privilege('authenticated', 'social_delivery_receipts', 'SELECT') AS receipt_select,
+        has_table_privilege('service_role', 'social_delivery_events', 'INSERT') AS service_event_insert,
+        has_table_privilege('service_role', 'social_delivery_receipts', 'INSERT') AS service_receipt_insert
     `
 
     expect(privileges[0]).toEqual({
@@ -394,11 +898,28 @@ suite("Postgres Instagram scheduling", () => {
       asset_insert: false,
       target_insert: false,
       target_update: false,
+      event_insert: false,
+      event_update: false,
+      receipt_select: false,
+      service_event_insert: false,
+      service_receipt_insert: false,
     })
   })
 
-  it("deletes a team that has a scheduled target", async () => {
-    await createTarget()
+  it("deletes a team with delivery events and a private receipt", async () => {
+    const target = await createTarget()
+    await appendDeliveryEvent(target.id, fixture.publishStartedEvent, {
+      eventType: "publish.started",
+      data: { attemptId: fixture.attempt },
+    })
+    await appendDeliveryEvent(target.id, fixture.publishProgressedEvent, {
+      eventType: "publish.progressed",
+      data: { attemptId: fixture.attempt, phase: "processing", receiptRevision: 1 },
+    }, {
+      expectedPreviousRevision: 0,
+      keyId: "key-v1",
+      sealedPayload: "v1.receipt",
+    })
 
     await expect(database`
       DELETE FROM teams WHERE id = ${fixture.team}
@@ -441,23 +962,66 @@ suite("Postgres Instagram scheduling", () => {
     readonly expectedCalendarRevision?: number
     readonly requestId?: string
   } = {}) {
-    const store = new PostgresInstagramSchedulingStore(
-      database,
-      () => fixture.target,
-      () => new Date("2026-09-01T12:00:00.000Z"),
-    )
+    const store = instagramStore()
     return Effect.runPromise(Effect.either(store.createApprovedTarget({
       teamId: fixture.team,
       calendarPostId: fixture.post,
       expectedCalendarRevision: options.expectedCalendarRevision ?? 2,
       requestId: options.requestId ?? fixture.request,
       actorId: fixture.actor,
-    }))).then((result) => {
-      if (Either.isLeft(result)) throw result.left
-      return result.right
-    })
+    }))).then(unwrapEffectResult)
+  }
+
+  function cancelTarget(targetId: string) {
+    return Effect.runPromise(Effect.either(instagramStore().cancelScheduledTarget({
+      teamId: fixture.team,
+      calendarPostId: fixture.post,
+      targetId,
+      expectedCalendarRevision: 2,
+      requestId: fixture.cancelEvent,
+      actorId: fixture.actor,
+    }))).then(unwrapEffectResult)
+  }
+
+  function appendDeliveryEvent(
+    targetId: string,
+    eventId: string,
+    action: unknown,
+    receipt?: {
+      readonly expectedPreviousRevision: number
+      readonly keyId: string
+      readonly sealedPayload: string
+    },
+  ) {
+    return Effect.runPromise(Effect.either(deliveryEventStore().appendSystemEvent({
+      teamId: fixture.team,
+      targetId,
+      eventId,
+      action,
+      ...(receipt ? { receipt } : {}),
+    }))).then(unwrapEffectResult)
+  }
+
+  function instagramStore() {
+    return new PostgresInstagramSchedulingStore(
+      database,
+      () => fixture.target,
+      () => new Date("2026-09-01T12:00:00.000Z"),
+    )
+  }
+
+  function deliveryEventStore() {
+    return new PostgresSocialDeliveryEventStore(
+      database,
+      () => new Date("2026-09-02T09:00:00.000Z"),
+    )
   }
 })
+
+function unwrapEffectResult<A, E>(result: Either.Either<A, E>): A {
+  if (Either.isLeft(result)) throw result.left
+  return result.right
+}
 
 function identifiers() {
   return {
@@ -468,6 +1032,15 @@ function identifiers() {
     connection: crypto.randomUUID(),
     target: crypto.randomUUID(),
     request: crypto.randomUUID(),
+    cancelEvent: crypto.randomUUID(),
+    attempt: crypto.randomUUID(),
+    publishStartedEvent: crypto.randomUUID(),
+    publishProgressedEvent: crypto.randomUUID(),
+    publishProgressedEvent2: crypto.randomUUID(),
+    publishSucceededEvent: crypto.randomUUID(),
+    publishUncertainEvent: crypto.randomUUID(),
+    deleteRequestedEvent: crypto.randomUUID(),
+    deleteSucceededEvent: crypto.randomUUID(),
     createdEvent: crypto.randomUUID(),
     configuredEvent: crypto.randomUUID(),
     reviewEvent: crypto.randomUUID(),

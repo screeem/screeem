@@ -330,6 +330,8 @@ export const socialPostTargets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     supersededAt: timestamp("superseded_at", { withTimezone: true }),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    transitionEventId: uuid("transition_event_id"),
+    transitionedBy: uuid("transitioned_by"),
   },
   (table) => [
     primaryKey({ columns: [table.teamId, table.id] }),
@@ -408,6 +410,120 @@ export const socialPostTargetAssets = pgTable(
     index("social_post_target_assets_asset_idx").on(table.teamId, table.assetId),
     check("social_post_target_assets_ordinal_check", sql`${table.ordinal} BETWEEN 0 AND 9`),
     check("social_post_target_assets_checksum_check", sql`${table.checksum} ~ '^sha256:[a-f0-9]{64}$'`),
+  ],
+)
+
+export const socialDeliveryEvents = pgTable(
+  "social_delivery_events",
+  {
+    teamId: uuid("team_id").notNull(),
+    targetId: uuid("target_id").notNull(),
+    sequence: bigint("sequence", { mode: "number" }).notNull(),
+    eventId: uuid("event_id").notNull(),
+    provider: text("provider", { enum: ["instagram"] }).notNull(),
+    eventType: text("event_type", {
+      enum: [
+        "target.scheduled",
+        "target.cancelled",
+        "target.superseded",
+        "publish.started",
+        "publish.progressed",
+        "publish.resumed",
+        "publish.succeeded",
+        "publish.failed",
+        "publish.uncertain",
+        "remote-delete.requested",
+        "remote-delete.succeeded",
+        "remote-delete.failed",
+      ],
+    }).notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    eventContract: jsonb("event_contract").notNull(),
+    actorKind: text("actor_kind", { enum: ["system", "user"] }).notNull(),
+    actorId: uuid("actor_id"),
+    systemSource: text("system_source", {
+      enum: ["database", "dispatcher", "scheduler"],
+    }),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.targetId, table.sequence] }),
+    unique("social_delivery_events_team_event_key").on(table.teamId, table.eventId),
+    unique("social_delivery_events_target_event_key").on(
+      table.teamId,
+      table.targetId,
+      table.eventId,
+    ),
+    foreignKey({
+      columns: [table.teamId, table.targetId],
+      foreignColumns: [socialPostTargets.teamId, socialPostTargets.id],
+    }).onDelete("cascade"),
+    index("social_delivery_events_team_created_idx").on(
+      table.teamId,
+      table.createdAt.desc(),
+    ),
+    index("social_delivery_events_target_occurred_idx").on(
+      table.teamId,
+      table.targetId,
+      table.occurredAt,
+      table.sequence,
+    ),
+    check("social_delivery_events_sequence_check", sql`${table.sequence} > 0`),
+    check("social_delivery_events_provider_check", sql`${table.provider} = 'instagram'`),
+    check("social_delivery_events_schema_version_check", sql`${table.schemaVersion} = 1`),
+    check("social_delivery_events_event_type_check", sql`${table.eventType} IN ('target.scheduled', 'target.cancelled', 'target.superseded', 'publish.started', 'publish.progressed', 'publish.resumed', 'publish.succeeded', 'publish.failed', 'publish.uncertain', 'remote-delete.requested', 'remote-delete.succeeded', 'remote-delete.failed')`),
+    check("social_delivery_events_actor_kind_check", sql`${table.actorKind} IN ('system', 'user')`),
+    check("social_delivery_events_system_source_check", sql`${table.systemSource} IS NULL OR ${table.systemSource} IN ('database', 'dispatcher', 'scheduler')`),
+    check("social_delivery_events_actor_check", sql`(${table.actorKind} = 'user' AND ${table.actorId} IS NOT NULL AND ${table.systemSource} IS NULL) OR (${table.actorKind} = 'system' AND ${table.actorId} IS NULL AND ${table.systemSource} IS NOT NULL)`),
+    check("social_delivery_events_contract_check", sql`(jsonb_typeof(${table.eventContract}) = 'object' AND pg_column_size(${table.eventContract}) <= 65536 AND ${table.eventContract}->>'schema' = 'screeem.social-delivery-event' AND ${table.eventContract} @> '{"schemaVersion": 1}'::jsonb AND ${table.eventContract}->>'id' = ${table.eventId}::text AND ${table.eventContract}->>'teamId' = ${table.teamId}::text AND ${table.eventContract}->>'targetId' = ${table.targetId}::text AND ${table.eventContract}->>'provider' = ${table.provider} AND ${table.eventContract}->>'sequence' = ${table.sequence}::text AND ${table.eventContract}->>'eventType' = ${table.eventType} AND jsonb_typeof(${table.eventContract}->'data') = 'object' AND (${table.eventContract}->>'occurredAt')::timestamp with time zone = ${table.occurredAt} AND ((${table.actorKind} = 'user' AND ${table.eventContract}->'actor'->>'kind' = 'user' AND ${table.eventContract}->'actor'->>'userId' = ${table.actorId}::text) OR (${table.actorKind} = 'system' AND ${table.eventContract}->'actor'->>'kind' = 'system' AND ${table.eventContract}->'actor'->>'source' = ${table.systemSource}))) IS TRUE`),
+  ],
+)
+
+export const socialDeliveryReceipts = pgTable(
+  "social_delivery_receipts",
+  {
+    teamId: uuid("team_id").notNull(),
+    targetId: uuid("target_id").notNull(),
+    eventId: uuid("event_id").notNull(),
+    attemptId: uuid("attempt_id").notNull(),
+    revision: bigint("revision", { mode: "number" }).notNull(),
+    keyId: text("key_id").notNull(),
+    sealedPayload: text("sealed_payload").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [
+      table.teamId,
+      table.targetId,
+      table.attemptId,
+      table.revision,
+    ] }),
+    unique("social_delivery_receipts_team_event_key").on(
+      table.teamId,
+      table.eventId,
+    ),
+    foreignKey({
+      columns: [table.teamId, table.targetId],
+      foreignColumns: [socialPostTargets.teamId, socialPostTargets.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.teamId, table.targetId, table.eventId],
+      foreignColumns: [
+        socialDeliveryEvents.teamId,
+        socialDeliveryEvents.targetId,
+        socialDeliveryEvents.eventId,
+      ],
+    }).onDelete("cascade"),
+    check("social_delivery_receipts_revision_check", sql`${table.revision} > 0`),
+    check("social_delivery_receipts_key_id_check", sql`${table.keyId} ~ '^[A-Za-z0-9._-]{1,128}$'`),
+    check("social_delivery_receipts_sealed_payload_check", sql`octet_length(${table.sealedPayload}) BETWEEN 1 AND 131072 AND ${table.sealedPayload} ~ '^v[0-9]+[.][A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*$'`),
+    index("social_delivery_receipts_latest_idx").on(
+      table.teamId,
+      table.targetId,
+      table.updatedAt.desc(),
+      table.revision.desc(),
+    ),
   ],
 )
 

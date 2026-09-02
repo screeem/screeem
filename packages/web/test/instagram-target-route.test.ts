@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   authorizeTeam: vi.fn(),
+  cancelScheduledTarget: vi.fn(),
   createApprovedTarget: vi.fn(),
 }))
 
@@ -18,6 +19,7 @@ vi.mock("@/lib/integrations/social/instagram-scheduling", async (importOriginal)
   return {
     ...actual,
     PostgresInstagramSchedulingStore: class {
+      cancelScheduledTarget = mocks.cancelScheduledTarget
       createApprovedTarget = mocks.createApprovedTarget
     },
   }
@@ -29,12 +31,16 @@ import {
   InstagramSchedulingRequestError,
   InstagramSchedulingStateError,
 } from "../src/lib/integrations/social/instagram-scheduling"
-import { POST } from "../src/app/api/teams/[teamId]/calendar/[postId]/targets/instagram/route"
+import {
+  DELETE,
+  POST,
+} from "../src/app/api/teams/[teamId]/calendar/[postId]/targets/instagram/route"
 
 const teamId = "81000000-0000-4000-8000-000000000001"
 const postId = "81000000-0000-4000-8000-000000000002"
 const actorId = "81000000-0000-4000-8000-000000000003"
 const requestId = "81000000-0000-4000-8000-000000000004"
+const targetId = "81000000-0000-4000-8000-000000000005"
 const context = { params: Promise.resolve({ teamId, postId }) }
 
 beforeEach(() => {
@@ -75,6 +81,50 @@ describe("Instagram target API", () => {
     expect(response.status).toBe(409)
     await expect(response.json()).resolves.toEqual({
       error: "The calendar post changed. Refresh before scheduling.",
+    })
+  })
+
+  it("cancels a scheduled target with a compensating event", async () => {
+    mocks.cancelScheduledTarget.mockReturnValue(Effect.succeed({
+      id: requestId,
+      eventType: "target.cancelled",
+    }))
+
+    const response = await DELETE(request({
+      expectedCalendarRevision: 4,
+      requestId,
+      targetId,
+    }, "DELETE"), context)
+
+    expect(response.status).toBe(200)
+    expect(mocks.cancelScheduledTarget).toHaveBeenCalledWith({
+      teamId,
+      calendarPostId: postId,
+      targetId,
+      expectedCalendarRevision: 4,
+      requestId,
+      actorId,
+    })
+    await expect(response.json()).resolves.toMatchObject({
+      id: requestId,
+      eventType: "target.cancelled",
+    })
+  })
+
+  it("rejects cancellation after publishing starts", async () => {
+    mocks.cancelScheduledTarget.mockReturnValue(Effect.fail(
+      new InstagramSchedulingStateError({ reason: "delivery_active" }),
+    ))
+
+    const response = await DELETE(request({
+      expectedCalendarRevision: 4,
+      requestId,
+      targetId,
+    }, "DELETE"), context)
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      error: "Instagram publishing has already started.",
     })
   })
 
@@ -150,11 +200,11 @@ describe("Instagram target API", () => {
   })
 })
 
-function request(body: unknown) {
+function request(body: unknown, method = "POST") {
   return new NextRequest(
     `http://localhost/api/teams/${teamId}/calendar/${postId}/targets/instagram`,
     {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     },

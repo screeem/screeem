@@ -2,6 +2,11 @@ import "server-only"
 
 import { randomUUID } from "node:crypto"
 import {
+  decodeSocialDeliveryEventV1,
+  encodeSocialDeliveryEventV1,
+  type SocialDeliveryEventV1Encoded,
+} from "@screeem/integrations/social"
+import {
   InstagramAssetResolutionError,
   InvalidInstagramPostContractError,
   UnsupportedInstagramPostVersionError,
@@ -14,6 +19,7 @@ import {
   type ScheduledInstagramPostV1Encoded,
 } from "@screeem/integrations/social/instagram"
 import { Data, Effect, Either } from "effect"
+import type postgres from "postgres"
 
 import { getDatabase } from "../../db/database"
 import { snapshotIntegrationIdentifier } from "../contract"
@@ -21,6 +27,15 @@ import { snapshotIntegrationIdentifier } from "../contract"
 export interface CreateApprovedInstagramTarget {
   readonly teamId: string
   readonly calendarPostId: string
+  readonly expectedCalendarRevision: number
+  readonly requestId: string
+  readonly actorId: string
+}
+
+export interface CancelInstagramTarget {
+  readonly teamId: string
+  readonly calendarPostId: string
+  readonly targetId: string
   readonly expectedCalendarRevision: number
   readonly requestId: string
   readonly actorId: string
@@ -49,6 +64,9 @@ export class InstagramSchedulingStateError extends Data.TaggedError(
     | "not_approved"
     | "request_conflict"
     | "revision_conflict"
+    | "delivery_active"
+    | "target_inactive"
+    | "target_missing"
     | "target_not_configured"
 }> {
   readonly code = "instagram_scheduling_state_conflict" as const
@@ -56,7 +74,7 @@ export class InstagramSchedulingStateError extends Data.TaggedError(
 
 export class InstagramSchedulingPersistenceError extends Data.TaggedError(
   "InstagramSchedulingPersistenceError",
-)<{ readonly operation: "create" | "load" }> {
+)<{ readonly operation: "cancel" | "create" | "load" }> {
   readonly code = "instagram_scheduling_persistence_failed" as const
 }
 
@@ -67,6 +85,7 @@ export type InstagramSchedulingFailure =
   | InstagramSchedulingPersistenceError
 
 type Database = ReturnType<typeof getDatabase>
+type DatabaseTransaction = postgres.TransactionSql
 
 interface CalendarWorkflowRow {
   readonly revision: number | string
@@ -106,6 +125,12 @@ interface TargetRow {
   readonly target_contract: unknown
 }
 
+interface CancelTargetRow {
+  readonly calendar_revision: number | string
+  readonly status: string
+  readonly transition_event_id: string | null
+}
+
 interface TargetConfiguration {
   readonly clientEventId: string
   readonly input: unknown
@@ -127,11 +152,23 @@ export class PostgresInstagramSchedulingStore {
     })
   }
 
+  cancelScheduledTarget(
+    input: CancelInstagramTarget,
+  ): Effect.Effect<SocialDeliveryEventV1Encoded, InstagramSchedulingFailure> {
+    return Effect.tryPromise({
+      try: () => this.persistCancellation(input),
+      catch: schedulingFailure,
+    })
+  }
+
   private async persist(input: CreateApprovedInstagramTarget) {
     const request = schedulingRequest(input)
     return this.database.begin(async (transaction) => {
       await transaction`SELECT pg_advisory_xact_lock(hashtextextended(
         ${`${request.teamId}:${request.requestId}`}, 0
+      ))`
+      await transaction`SELECT pg_advisory_xact_lock(hashtextextended(
+        ${`${request.teamId}:${request.requestId}`}, 2
       ))`
       await transaction`SELECT pg_advisory_xact_lock(hashtextextended(
         ${`${request.teamId}:${request.calendarPostId}`}, 1
@@ -305,7 +342,8 @@ export class PostgresInstagramSchedulingStore {
 
       await transaction`
         UPDATE social_post_targets
-        SET status = 'superseded', superseded_at = ${createdAt}
+        SET status = 'superseded', superseded_at = ${createdAt},
+            transitioned_by = ${request.actorId}
         WHERE team_id = ${request.teamId}
           AND calendar_post_id = ${request.calendarPostId}
           AND provider = 'instagram'
@@ -339,6 +377,82 @@ export class PostgresInstagramSchedulingStore {
       return target
     })
   }
+
+  private async persistCancellation(input: CancelInstagramTarget) {
+    const request = cancellationRequest(input)
+    return this.database.begin(async (transaction) => {
+      await transaction`SELECT pg_advisory_xact_lock(hashtextextended(
+        ${`${request.teamId}:${request.requestId}`}, 2
+      ))`
+      const memberships = await transaction<{ readonly present: boolean }[]>`
+        SELECT true AS present
+        FROM team_members
+        WHERE team_id = ${request.teamId} AND user_id = ${request.actorId}
+        FOR KEY SHARE
+      `
+      if (!memberships[0]) {
+        throw new InstagramSchedulingAuthorizationError({ reason: "forbidden" })
+      }
+
+      const targets = await transaction<CancelTargetRow[]>`
+        SELECT calendar_revision, status, transition_event_id
+        FROM social_post_targets
+        WHERE team_id = ${request.teamId}
+          AND id = ${request.targetId}
+          AND calendar_post_id = ${request.calendarPostId}
+          AND provider = 'instagram'
+        FOR UPDATE
+      `
+      const target = targets[0]
+      if (!target) {
+        throw new InstagramSchedulingStateError({ reason: "target_missing" })
+      }
+      if (positiveDatabaseInteger(target.calendar_revision)
+        !== request.expectedCalendarRevision) {
+        throw new InstagramSchedulingStateError({ reason: "revision_conflict" })
+      }
+      if (target.status === "cancelled"
+        && target.transition_event_id === request.requestId) {
+        return loadDeliveryEvent(transaction, request.teamId, request.requestId)
+      }
+      if (target.status !== "scheduled") {
+        throw new InstagramSchedulingStateError({ reason: "target_inactive" })
+      }
+
+      const eventIdentity = await transaction<{ readonly target_id: string }[]>`
+        SELECT target_id
+        FROM social_delivery_events
+        WHERE team_id = ${request.teamId} AND event_id = ${request.requestId}
+      `
+      if (eventIdentity[0]) {
+        throw new InstagramSchedulingStateError({ reason: "request_conflict" })
+      }
+
+      const latestDelivery = await transaction<{ readonly event_type: string }[]>`
+        SELECT event_type
+        FROM social_delivery_events
+        WHERE team_id = ${request.teamId}
+          AND target_id = ${request.targetId}
+          AND event_type LIKE 'publish.%'
+        ORDER BY sequence DESC
+        LIMIT 1
+      `
+      if (latestDelivery[0]
+        && latestDelivery[0].event_type !== "publish.failed") {
+        throw new InstagramSchedulingStateError({ reason: "delivery_active" })
+      }
+
+      const cancelledAt = this.now().toISOString()
+      await transaction`
+        UPDATE social_post_targets
+        SET status = 'cancelled', cancelled_at = ${cancelledAt},
+            transition_event_id = ${request.requestId},
+            transitioned_by = ${request.actorId}
+        WHERE team_id = ${request.teamId} AND id = ${request.targetId}
+      `
+      return loadDeliveryEvent(transaction, request.teamId, request.requestId)
+    })
+  }
 }
 
 function schedulingRequest(input: CreateApprovedInstagramTarget) {
@@ -354,6 +468,42 @@ function schedulingRequest(input: CreateApprovedInstagramTarget) {
   } catch {
     throw new InstagramSchedulingRequestError({ reason: "invalid" })
   }
+}
+
+function cancellationRequest(input: CancelInstagramTarget) {
+  try {
+    return Object.freeze({
+      teamId: snapshotIntegrationIdentifier(input.teamId),
+      calendarPostId: snapshotIntegrationIdentifier(input.calendarPostId),
+      targetId: snapshotIntegrationIdentifier(input.targetId),
+      requestId: snapshotIntegrationIdentifier(input.requestId),
+      actorId: snapshotIntegrationIdentifier(input.actorId),
+      expectedCalendarRevision: positiveSafeInteger(input.expectedCalendarRevision),
+    })
+  } catch {
+    throw new InstagramSchedulingRequestError({ reason: "invalid" })
+  }
+}
+
+async function loadDeliveryEvent(
+  transaction: DatabaseTransaction,
+  teamId: string,
+  eventId: string,
+): Promise<SocialDeliveryEventV1Encoded> {
+  const rows = await transaction<{ readonly event_contract: unknown }[]>`
+    SELECT event_contract
+    FROM social_delivery_events
+    WHERE team_id = ${teamId} AND event_id = ${eventId}
+  `
+  const result = await Effect.runPromise(Effect.either(
+    decodeSocialDeliveryEventV1(rows[0]?.event_contract).pipe(
+      Effect.flatMap(encodeSocialDeliveryEventV1),
+    ),
+  ))
+  if (Either.isLeft(result)) {
+    throw new InstagramSchedulingPersistenceError({ operation: "load" })
+  }
+  return result.right
 }
 
 async function decodeConfiguredInput(input: unknown) {

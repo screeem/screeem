@@ -21,7 +21,7 @@ export async function POST(
 
   const body = await readIntegrationJson(request, 4_096, request.signal)
   if ("response" in body) return body.response
-  const parsed = requestBody(body.value)
+  const parsed = createRequestBody(body.value)
   if (parsed === null) return response(400, "Invalid request body")
 
   const result = await Effect.runPromise(Effect.either(
@@ -42,7 +42,39 @@ export async function POST(
   return schedulingError(result.left)
 }
 
-function requestBody(input: unknown): {
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ teamId: string; postId: string }> },
+) {
+  const { teamId, postId } = await context.params
+  const authorization = await authorizeTeam(teamId, false, request.signal)
+  if (authorization.error) return authorization.error
+
+  const body = await readIntegrationJson(request, 4_096, request.signal)
+  if ("response" in body) return body.response
+  const parsed = cancelRequestBody(body.value)
+  if (parsed === null) return response(400, "Invalid request body")
+
+  const result = await Effect.runPromise(Effect.either(
+    new PostgresInstagramSchedulingStore().cancelScheduledTarget({
+      teamId,
+      calendarPostId: postId,
+      targetId: parsed.targetId,
+      expectedCalendarRevision: parsed.expectedCalendarRevision,
+      requestId: parsed.requestId,
+      actorId: authorization.user.id,
+    }),
+  ))
+  if (Either.isRight(result)) {
+    return NextResponse.json(result.right, {
+      status: 200,
+      headers: { "Cache-Control": "no-store" },
+    })
+  }
+  return schedulingError(result.left)
+}
+
+function createRequestBody(input: unknown): {
   readonly expectedCalendarRevision: number
   readonly requestId: string
 } | null {
@@ -55,6 +87,26 @@ function requestBody(input: unknown): {
     || typeof value.expectedCalendarRevision !== "number") return null
   return {
     requestId: value.requestId,
+    expectedCalendarRevision: value.expectedCalendarRevision,
+  }
+}
+
+function cancelRequestBody(input: unknown): {
+  readonly expectedCalendarRevision: number
+  readonly requestId: string
+  readonly targetId: string
+} | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null
+  const value = input as Record<string, unknown>
+  if (Object.keys(value).some((key) =>
+    key !== "expectedCalendarRevision" && key !== "requestId" && key !== "targetId"
+  )) return null
+  if (typeof value.requestId !== "string"
+    || typeof value.targetId !== "string"
+    || typeof value.expectedCalendarRevision !== "number") return null
+  return {
+    requestId: value.requestId,
+    targetId: value.targetId,
     expectedCalendarRevision: value.expectedCalendarRevision,
   }
 }
@@ -74,6 +126,7 @@ function schedulingError(
   }
   if (error instanceof InstagramSchedulingStateError) {
     if (error.reason === "calendar_missing") return response(404, "Calendar post not found")
+    if (error.reason === "target_missing") return response(404, "Instagram target not found")
     if (error.reason === "revision_conflict") {
       return response(409, "The calendar post changed. Refresh before scheduling.")
     }
@@ -91,6 +144,12 @@ function schedulingError(
     }
     if (error.reason === "integration_disabled") {
       return response(409, "Team integrations are disabled.")
+    }
+    if (error.reason === "delivery_active") {
+      return response(409, "Instagram publishing has already started.")
+    }
+    if (error.reason === "target_inactive") {
+      return response(409, "The Instagram target is no longer scheduled.")
     }
     return response(409, "The scheduling request conflicts with an existing target.")
   }
