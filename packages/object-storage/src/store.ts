@@ -77,6 +77,9 @@ export interface ObjectScopeDescription {
   readonly scope: string
   readonly allowedContentTypes: readonly string[]
   readonly maximumByteLength: number
+  readonly allowPut: boolean
+  readonly allowDelete: boolean
+  readonly allowSignedUploadOverwrite: boolean
   readonly signedUrl: SignedUrlLimits
 }
 
@@ -91,6 +94,9 @@ interface ResolvedScope {
   readonly scope: string
   readonly allowedContentTypes: readonly string[]
   readonly maximumByteLength: number
+  readonly allowPut: boolean
+  readonly allowDelete: boolean
+  readonly allowSignedUploadOverwrite: boolean
   readonly signedUrl: SignedUrlLimits
 }
 
@@ -150,6 +156,9 @@ export function createObjectStore(
         const key = objectKey(request.key, keyLimits)
         const scope = requireScope(key.scope)
         const canonicalKey = canonicalObjectKey(key, keyLimits)
+        if (!scope.allowPut) {
+          throw new InvalidObjectRequestError(`scope ${scope.scope} does not allow direct writes`)
+        }
         const bytes = readBytes(request.bytes)
 
         if (bytes.byteLength > scope.maximumByteLength) {
@@ -198,7 +207,12 @@ export function createObjectStore(
 
     delete: (key, options) =>
       validated(() => {
-        const canonicalKey = validatedKey(key).canonicalKey
+        const validKey = objectKey(key, keyLimits)
+        const scope = requireScope(validKey.scope)
+        if (!scope.allowDelete) {
+          throw new InvalidObjectRequestError(`scope ${scope.scope} does not allow deletion`)
+        }
+        const canonicalKey = canonicalObjectKey(validKey, keyLimits)
         const precondition = readPrecondition(options?.precondition)
 
         if (precondition?.kind === "absent") {
@@ -264,6 +278,15 @@ export function createObjectStore(
           scope.maximumByteLength,
           canonicalKey,
         )
+        if (request.overwrite !== undefined && typeof request.overwrite !== "boolean") {
+          throw new InvalidObjectRequestError("overwrite must be a boolean")
+        }
+        const overwrite = request.overwrite === true
+        if (overwrite && !scope.allowSignedUploadOverwrite) {
+          throw new InvalidObjectRequestError(
+            `scope ${scope.scope} does not allow signed upload replacement`,
+          )
+        }
 
         return {
           key,
@@ -271,6 +294,7 @@ export function createObjectStore(
           contentType: allowedContentType(scope, canonicalKey, request.contentType),
           expiresInSeconds: readExpiry(request.expiresInSeconds, scope.signedUrl),
           maximumByteLength,
+          overwrite,
         }
       }).pipe(
         Effect.flatMap(({ key, ...request }) =>
@@ -329,6 +353,9 @@ export function createObjectStore(
               scope: scope.scope,
               allowedContentTypes: scope.allowedContentTypes,
               maximumByteLength: scope.maximumByteLength,
+              allowPut: scope.allowPut,
+              allowDelete: scope.allowDelete,
+              allowSignedUploadOverwrite: scope.allowSignedUploadOverwrite,
               signedUrl: scope.signedUrl,
             }),
           ),
@@ -774,6 +801,11 @@ function resolveScopes(
 
     const signedUrl = Object.freeze({ ...limits.signedUrl, ...policy.signedUrl })
     assertSignedUrlLimits(signedUrl, `the signed URL policy for scope ${policy.scope}`)
+    for (const setting of ["allowPut", "allowDelete", "allowSignedUploadOverwrite"] as const) {
+      if (policy[setting] !== undefined && typeof policy[setting] !== "boolean") {
+        throw new Error(`Object storage scope ${policy.scope} has an invalid ${setting} policy`)
+      }
+    }
 
     resolved.set(
       policy.scope,
@@ -781,6 +813,9 @@ function resolveScopes(
         scope: policy.scope,
         allowedContentTypes: Object.freeze(allowedContentTypes),
         maximumByteLength: policy.maximumByteLength,
+        allowPut: policy.allowPut !== false,
+        allowDelete: policy.allowDelete !== false,
+        allowSignedUploadOverwrite: policy.allowSignedUploadOverwrite === true,
         signedUrl,
       }),
     )

@@ -254,12 +254,18 @@ describe("Supabase object store adapter", () => {
         contentType: "image/png",
         expiresInSeconds: 60,
         maximumByteLength: 4_096,
+        overwrite: false,
       }),
     )
 
     expect(upload.expiresAt).toBe("2026-02-17T12:00:00.000Z")
     expect(upload.method).toBe("PUT")
     expect(upload.headers["content-type"]).toBe("image/png")
+    expect(upload.headers["x-upsert"]).toBe("false")
+    expect(storage.signedUploads).toEqual([{
+      path: canonicalKey,
+      options: { upsert: false },
+    }])
   })
 
   it("falls back to the documented upload lifetime when the signature cannot be read", async () => {
@@ -271,6 +277,7 @@ describe("Supabase object store adapter", () => {
         contentType: "image/png",
         expiresInSeconds: 60,
         maximumByteLength: 4_096,
+        overwrite: false,
       }),
     )
 
@@ -350,6 +357,7 @@ interface FakeStorage {
   objects: Map<string, FakeObject>
   bytes: Map<string, Uint8Array>
   uploads: { path: string; options: Record<string, unknown> }[]
+  signedUploads: { path: string; options: unknown }[]
   signedDownloads: { path: string; expiresIn: number; options: unknown }[]
   removed: unknown[] | null
   list: FakeListPage
@@ -363,6 +371,7 @@ function createFakeStorage(): FakeStorage {
     objects: new Map(),
     bytes: new Map(),
     uploads: [],
+    signedUploads: [],
     signedDownloads: [],
     removed: null,
     list: { hasNext: false, folders: [], objects: [] },
@@ -453,17 +462,19 @@ function createFakeStorage(): FakeStorage {
     listV2: (() =>
       state.error ? Promise.resolve(fail()) : Promise.resolve({ data: state.list, error: null })) as never,
 
-    createSignedUploadUrl: ((path: string) =>
-      state.error
-        ? Promise.resolve(fail())
-        : Promise.resolve({
-            data: {
-              signedUrl: `https://storage.invalid/object/upload/sign/${path}?token=${state.uploadToken}`,
-              token: state.uploadToken,
-              path,
-            },
-            error: null,
-          })) as never,
+    createSignedUploadUrl: ((path: string, options: unknown) => {
+      if (state.error) return Promise.resolve(fail())
+
+      state.signedUploads.push({ path, options })
+      return Promise.resolve({
+        data: {
+          signedUrl: `https://storage.invalid/object/upload/sign/${path}?token=${state.uploadToken}`,
+          token: state.uploadToken,
+          path,
+        },
+        error: null,
+      })
+    }) as never,
 
     createSignedUrl: ((path: string, expiresIn: number, options: unknown) => {
       if (state.error) return Promise.resolve(fail())

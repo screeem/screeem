@@ -31,6 +31,8 @@ export const objectStoreContractScopes: readonly ObjectScopePolicy[] = Object.fr
     scope: "contract-locked",
     allowedContentTypes: Object.freeze(["application/pdf"]),
     maximumByteLength: 1_024,
+    allowPut: false,
+    allowDelete: false,
   }),
 ]) as readonly ObjectScopePolicy[]
 
@@ -249,6 +251,10 @@ export function objectStoreContractCases(
           contentType: "image/png",
           expiresInSeconds: 6_000,
         }),
+        InvalidObjectRequestError,
+      )
+      await assertFails(
+        context.store.createUploadUrl({ key, contentType: "image/png", overwrite: true }),
         InvalidObjectRequestError,
       )
 

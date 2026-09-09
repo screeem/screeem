@@ -39,6 +39,7 @@ const eventLabels: Record<CalendarEventType, string> = {
   "colour.changed": "Legacy label changed",
   "target.added": "Social network added",
   "target.removed": "Social network removed",
+  "instagram.target.configured": "Instagram target configured",
   "change.reverted": "Change reverted",
   "approval.requested": "Approval requested",
   "approval.granted": "Post approved",
@@ -56,6 +57,9 @@ function eventDetail(event: CalendarEvent) {
   if (event.eventType === "target.added" || event.eventType === "target.removed"
     || event.eventType === "tag.added" || event.eventType === "tag.removed") return String(event.payload.value)
   if (event.eventType === "colour.changed") return "This legacy label is no longer used"
+  if (event.eventType === "instagram.target.configured") {
+    return JSON.stringify(event.payload.input)
+  }
   if (event.eventType === "change.reverted") return `Event #${event.revertsEventId}`
   if (isApprovalEventType(event.eventType)) {
     const comment = typeof event.payload.comment === "string" ? event.payload.comment : ""
@@ -264,7 +268,7 @@ function History({
   busy: boolean
   onRevert: (event: CalendarEvent) => Promise<void>
 }) {
-  return <section className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Post history</h2><p className="mt-1 text-xs text-muted-foreground">Every edit and approval decision is retained.</p></div><span className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{events.length} events</span></div><div className="mt-5 border-l border-border pl-5">{[...events].sort((a, b) => b.id - a.id).map((event) => { const active = activeEventIds.has(event.id); return <div key={event.id} className="relative flex items-start justify-between gap-4 pb-5 text-xs before:absolute before:-left-[25px] before:top-1 before:size-2 before:rounded-full before:bg-primary"><div><strong className="font-semibold text-foreground">{eventLabels[event.eventType]}</strong><p className="mt-1 max-w-md break-words text-muted-foreground">{eventDetail(event)}</p><p className="mt-1 text-muted-foreground">#{event.id} · {active ? "Active" : "Reverted"} · {actorLabel(event)} · {new Date(event.createdAt).toLocaleString()}</p></div>{active && !isApprovalEventType(event.eventType) ? <button disabled={busy} onClick={() => void onRevert(event)} className="rounded-md px-2 py-1 font-medium text-primary hover:bg-primary-subtle disabled:opacity-40">Revert</button> : null}</div>})}</div></section>
+  return <section className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Post history</h2><p className="mt-1 text-xs text-muted-foreground">Every edit and approval decision is retained.</p></div><span className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{events.length} events</span></div><div className="mt-5 border-l border-border pl-5">{[...events].sort((a, b) => b.id - a.id).map((event) => { const active = activeEventIds.has(event.id); const canRevert = active && !isApprovalEventType(event.eventType) && event.eventType !== "instagram.target.configured"; return <div key={event.id} className="relative flex items-start justify-between gap-4 pb-5 text-xs before:absolute before:-left-[25px] before:top-1 before:size-2 before:rounded-full before:bg-primary"><div><strong className="font-semibold text-foreground">{eventLabels[event.eventType]}</strong><p className="mt-1 max-w-md break-words text-muted-foreground">{eventDetail(event)}</p><p className="mt-1 text-muted-foreground">#{event.id} · {active ? "Active" : "Reverted"} · {actorLabel(event)} · {new Date(event.createdAt).toLocaleString()}</p></div>{canRevert ? <button disabled={busy} onClick={() => void onRevert(event)} className="rounded-md px-2 py-1 font-medium text-primary hover:bg-primary-subtle disabled:opacity-40">Revert</button> : null}</div>})}</div></section>
 }
 
 function SocialPreviews({ post }: { post: CalendarPost }) {

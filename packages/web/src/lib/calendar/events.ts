@@ -3,6 +3,7 @@ export type CalendarApprovalStatus = "draft" | "in_review" | "changes_requested"
 export type CalendarEventType =
   | "post.created" | "title.changed" | "copy.changed" | "schedule.changed"
   | "tag.added" | "tag.removed" | "target.added" | "target.removed" | "change.reverted"
+  | "instagram.target.configured"
   | "colour.changed"
   | "approval.requested" | "approval.granted" | "approval.changes_requested"
   | "approval.withdrawn"
@@ -49,6 +50,7 @@ const targets = new Set<CalendarTarget>(["X", "LinkedIn", "Instagram"])
 const contentEventTypes = new Set<CalendarEventType>([
   "post.created", "title.changed", "copy.changed", "schedule.changed",
   "tag.added", "tag.removed", "target.added", "target.removed", "change.reverted",
+  "instagram.target.configured",
   // Kept for replaying the immutable history written before tags replaced colours.
   "colour.changed",
 ])

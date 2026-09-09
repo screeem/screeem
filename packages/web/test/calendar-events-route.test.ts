@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getUserById: vi.fn(),
 }))
 
+vi.mock("server-only", () => ({}))
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ auth: { getUser: mocks.getUser } }),
 }))
@@ -98,12 +99,70 @@ describe("calendar events API", () => {
     expect((await response.json()).error).toContain("changed since")
   })
 
+  it("rejects a non-array calendar event collection", async () => {
+    const malformed = new NextRequest(
+      `http://localhost/api/teams/${teamId}/calendar/events`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ events: { length: 1 } }),
+      },
+    )
+
+    const response = await POST(malformed, context)
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      error: "Provide between 1 and 50 events",
+    })
+  })
+
   it.each([
     [[" launch"]],
     [["Launch", "launch"]],
     [Array.from({ length: 11 }, (_, index) => `tag-${index}`)],
   ])("rejects invalid post tags", async (tags) => {
     const response = await POST(postCreationRequest(tags), context)
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: "Invalid calendar event" })
+  })
+
+  it("accepts a strict Instagram configuration as its own calendar event", async () => {
+    const persisted = {
+      id: 3,
+      aggregate_id: "74000000-0000-4000-8000-000000000001",
+      event_type: "instagram.target.configured",
+      payload: { expectedRevision: 1, input: instagramInput() },
+      reverts_event_id: null,
+      actor_id: actorId,
+      created_at: "2026-08-14T12:00:00.000Z",
+    }
+    const select = vi.fn().mockResolvedValue({ data: [persisted], error: null })
+    const upsert = vi.fn().mockReturnValue({ select })
+    mocks.createAdminClient.mockReturnValue({
+      from: vi.fn().mockReturnValue({ upsert }),
+      auth: { admin: { getUserById: mocks.getUserById } },
+    })
+
+    const response = await POST(instagramConfigurationRequest(instagramInput()), context)
+
+    expect(response.status).toBe(201)
+    expect(upsert).toHaveBeenCalledWith(
+      [expect.objectContaining({
+        team_id: teamId,
+        event_type: "instagram.target.configured",
+        actor_id: actorId,
+      })],
+      { onConflict: "team_id,client_event_id", ignoreDuplicates: true },
+    )
+  })
+
+  it("rejects authority fields inside Instagram target input", async () => {
+    const response = await POST(instagramConfigurationRequest({
+      ...instagramInput(),
+      teamId,
+    }), context)
 
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toEqual({ error: "Invalid calendar event" })
@@ -179,6 +238,45 @@ function approvalRequest(eventType: string, revision: number) {
       payload: { revision },
     }] }),
   })
+}
+
+function instagramConfigurationRequest(input: unknown) {
+  return new NextRequest(`http://localhost/api/teams/${teamId}/calendar/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ events: [{
+      aggregateId: "74000000-0000-4000-8000-000000000001",
+      clientEventId: "75000000-0000-4000-8000-000000000002",
+      eventType: "instagram.target.configured",
+      payload: { expectedRevision: 1, input },
+    }] }),
+  })
+}
+
+function instagramInput() {
+  return {
+    schema: "screeem.instagram-scheduled-post-input",
+    schemaVersion: 1,
+    schedule: {
+      publishAt: "2026-08-20T08:00:00.000Z",
+      timezone: "Europe/London",
+    },
+    template: {
+      kind: "instagram.image",
+      version: 1,
+      caption: "Launch",
+      isAiGenerated: false,
+      image: {
+        asset: {
+          schema: "screeem.social-media-asset",
+          schemaVersion: 1,
+          assetId: "76000000-0000-4000-8000-000000000001",
+          checksum: `sha256:${"a".repeat(64)}`,
+        },
+        altText: null,
+      },
+    },
+  } as const
 }
 
 function query(result: unknown) {
