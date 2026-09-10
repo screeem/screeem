@@ -98,6 +98,7 @@ function eventsWith(
   latest: { readonly attemptId: string; readonly terminal: boolean } | null = null,
   terminalResult: "recorded" | "conflict" | "target-missing" | null = null,
   startedSequence: Array<"recorded" | "conflict" | "target-missing"> | null = null,
+  terminalSequence: Array<"recorded" | "conflict" | "target-missing"> | null = null,
 ): InstagramDispatchEventWriter & {
   readonly started: number
   readonly failedRetryable: number
@@ -132,7 +133,7 @@ function eventsWith(
     },
     recordAttemptFailedTerminal: async () => {
       failedTerminal += 1
-      return terminalResult ?? result
+      return terminalSequence?.[failedTerminal - 1] ?? terminalResult ?? result
     },
     loadLatestPublishAttempt: async () => latest,
   }
@@ -396,12 +397,9 @@ describe("instagram dispatcher drain", () => {
     )
     expect(liveStats).toEqual({ ...emptyStats, read: 1, retried: 1 })
 
-    // Live latest at the cap: abandon with a fresh attempt's terminal pair.
+    // Live latest at the cap, abandonable by owner id: terminal for latest.
     const stuck = queueWith([queued({ readCt: 5 })])
-    const stuckEvents = eventsWith("conflict", { attemptId: attempt, terminal: false }, "recorded", [
-      "conflict",
-      "recorded",
-    ])
+    const stuckEvents = eventsWith("conflict", { attemptId: attempt, terminal: false }, "recorded")
     const stuckStats = await drainInstagramDispatchQueue(
       stuck,
       gateWith(scheduledDue),
@@ -410,8 +408,28 @@ describe("instagram dispatcher drain", () => {
       { now, maximumAttempts: 5 },
     )
     expect(stuckStats).toEqual({ ...emptyStats, read: 1, terminalArchived: 1 })
-    expect(stuckEvents.started).toBe(2)
+    expect(stuckEvents.started).toBe(1)
     expect(stuckEvents.failedTerminal).toBe(1)
+
+    // Live latest at the cap, owner id rejected: abandon via a fresh pair.
+    const stuckFresh = queueWith([queued({ readCt: 5 })])
+    const stuckFreshEvents = eventsWith(
+      "conflict",
+      { attemptId: attempt, terminal: false },
+      null,
+      ["conflict", "recorded"],
+      ["conflict", "recorded"],
+    )
+    const stuckFreshStats = await drainInstagramDispatchQueue(
+      stuckFresh,
+      gateWith(scheduledDue),
+      publisherWith("succeeded"),
+      stuckFreshEvents,
+      { now, maximumAttempts: 5 },
+    )
+    expect(stuckFreshStats).toEqual({ ...emptyStats, read: 1, terminalArchived: 1 })
+    expect(stuckFreshEvents.started).toBe(2)
+    expect(stuckFreshEvents.failedTerminal).toBe(2)
   })
 
   it("archives duplicates when the terminal write itself conflicts", async () => {

@@ -219,7 +219,7 @@ async function drainOneMessage(
       else stats.alreadySettled += 1
       return
     }
-    await recordTerminal(
+    const templateSettled = await recordTerminal(
       queue,
       events,
       options,
@@ -229,6 +229,7 @@ async function drainOneMessage(
       attemptId,
       "dispatcher_template_unsupported",
     )
+    if (!templateSettled) await archiveDuplicate(queue, stats, queued.msgId)
     return
   }
   if (!target.connectionOk) {
@@ -297,7 +298,7 @@ async function drainOneMessage(
     return
   }
   if (outcome === "stale") {
-    await recordTerminal(
+    const staleSettled = await recordTerminal(
       queue,
       events,
       options,
@@ -307,11 +308,12 @@ async function drainOneMessage(
       attemptId,
       "dispatcher_delivery_stale",
     )
+    if (!staleSettled) await archiveDuplicate(queue, stats, queued.msgId)
     return
   }
   const backoffSeconds = retryDelaySeconds(attempt, options)
   if (outcome === "terminal" || attempt >= options.maximumAttempts) {
-    await recordTerminal(
+    const terminalSettled = await recordTerminal(
       queue,
       events,
       options,
@@ -321,6 +323,7 @@ async function drainOneMessage(
       attemptId,
       outcome === "terminal" ? "dispatcher_delivery_terminal" : "dispatcher_attempts_exhausted",
     )
+    if (!terminalSettled) await archiveDuplicate(queue, stats, queued.msgId)
     return
   }
   // Record the retryable failure BEFORE rescheduling so the next delivery's
@@ -330,6 +333,7 @@ async function drainOneMessage(
   // the database clock while this process may run ahead, and an early
   // redelivery would conflict instead of starting cleanly.
   const retryAt = new Date(options.now().getTime() + backoffSeconds * 1_000 - 30_000).toISOString()
+  let heal = false
   try {
     const recorded = await events.recordAttemptFailedRetryable({
       teamId: message.teamId,
@@ -347,11 +351,16 @@ async function drainOneMessage(
     if (recorded === "conflict") {
       // Stream moved on without us (cancelled, superseded, or another worker
       // closed the attempt): heal instead of blindly rescheduling.
-      await healConflictingAttempt(queue, events, options, stats, queued, message)
-      return
+      heal = true
     }
   } catch {
     stats.processingErrors += 1
+  }
+  if (heal) {
+    // Throws bubble to the per-message catch (processingErrors + reschedule),
+    // consistent with the started-conflict call site below.
+    await healConflictingAttempt(queue, events, options, stats, queued, message)
+    return
   }
   if (await queue.reschedule(queued.msgId, backoffSeconds)) {
     stats.retried += 1
@@ -364,10 +373,13 @@ async function drainOneMessage(
  * Heals a started-conflict: another attempt already owns the target's publish
  * stream. If that attempt already reached a terminal outcome this message is a
  * pointless duplicate (archive). Otherwise back off and let the owner finish;
- * at the attempt cap, abandon the stuck attempt with a FRESH attempt's
- * started+terminal pair (valid against any non-terminal latest, unlike
- * reusing the stuck attemptId) so the target converges instead of churning.
- * Throws bubble to the per-message catch (processingErrors + reschedule).
+ * at the attempt cap, abandon the stuck attempt so the target converges
+ * instead of churning: first try a terminal for the owner's own attemptId
+ * (valid when latest is a receipt-less started/progressed), falling back to a
+ * FRESH attempt's started+terminal pair (valid when latest is a due
+ * retryable-restart). Throws bubble to the per-message catch
+ * (processingErrors + reschedule), except on the retryable path below where
+ * the caller handles them — see the comment there.
  */
 async function healConflictingAttempt(
   queue: InstagramDispatchQueueStore,
@@ -387,6 +399,20 @@ async function healConflictingAttempt(
     return
   }
   if (queued.readCt >= options.maximumAttempts) {
+    // Abandon the stuck owner: its own attemptId first (covers a dead owner
+    // between started and its follow-up), then a fresh pair (covers a due
+    // retryable-restart latest, against which the owner's id is invalid).
+    const abandoned = await recordTerminal(
+      queue,
+      events,
+      options,
+      stats,
+      queued.msgId,
+      message,
+      latest.attemptId,
+      "dispatcher_prior_attempt_abandoned",
+    )
+    if (abandoned) return
     const freshAttemptId = randomUUID()
     const opened = await events.recordAttemptStarted({
       teamId: message.teamId,
@@ -394,6 +420,11 @@ async function healConflictingAttempt(
       attemptId: freshAttemptId,
       eventId: randomUUID(),
     })
+    if (opened === "target-missing") {
+      if (await queue.archive(queued.msgId)) stats.staleArchived += 1
+      else stats.alreadySettled += 1
+      return
+    }
     if (opened !== "recorded") {
       if (await queue.archive(queued.msgId)) stats.duplicateSkipped += 1
       else stats.alreadySettled += 1
@@ -427,31 +458,24 @@ async function recordTerminal(
   message: InstagramDispatchMessage,
   attemptId: string,
   errorCode: string,
-): Promise<void> {
-  // Terminal sticks: the enqueue query excludes targets carrying a
-  // non-retryable publish.failed event, so this never re-enqueues. If the
-  // write itself fails, do NOT archive — reschedule so the terminal write is
-  // retried instead of the message being dropped into a re-enqueue loop.
+): Promise<boolean> {
+  // Returns true when the terminal outcome is settled (event recorded or
+  // target gone). Returns false on writer conflict — the stream moved on
+  // without us, so the caller decides the fallback (duplicate archive vs a
+  // fresh abandon attempt). Terminal sticks: the enqueue query excludes
+  // targets carrying a non-retryable publish.failed event, so a recorded
+  // terminal never re-enqueues. If the write itself fails, do NOT archive —
+  // reschedule so the terminal write is retried instead of the message being
+  // dropped into a re-enqueue loop.
+  let result: DispatchEventResult
   try {
-    const result = await events.recordAttemptFailedTerminal({
+    result = await events.recordAttemptFailedTerminal({
       teamId: message.teamId,
       targetId: message.targetId,
       attemptId,
       eventId: randomUUID(),
       errorCode,
     })
-    if (result === "target-missing") {
-      if (await queue.archive(msgId)) stats.staleArchived += 1
-      else stats.alreadySettled += 1
-      return
-    }
-    // A conflict means the stream moved on without us (another worker recorded
-    // the outcome); our message is a duplicate, not a terminal.
-    if (await queue.archive(msgId)) {
-      stats[result === "conflict" ? "duplicateSkipped" : "terminalArchived"] += 1
-    } else {
-      stats.alreadySettled += 1
-    }
   } catch {
     stats.processingErrors += 1
     try {
@@ -459,7 +483,26 @@ async function recordTerminal(
     } catch {
       // Lease expiry will redeliver; nothing else safe to do here.
     }
+    return true
   }
+  if (result === "target-missing") {
+    if (await queue.archive(msgId)) stats.staleArchived += 1
+    else stats.alreadySettled += 1
+    return true
+  }
+  if (result === "conflict") return false
+  if (await queue.archive(msgId)) stats.terminalArchived += 1
+  else stats.alreadySettled += 1
+  return true
+}
+
+async function archiveDuplicate(
+  queue: InstagramDispatchQueueStore,
+  stats: Record<keyof InstagramDispatchDrainStats, number>,
+  msgId: number,
+): Promise<void> {
+  if (await queue.archive(msgId)) stats.duplicateSkipped += 1
+  else stats.alreadySettled += 1
 }
 
 async function settleOutcome(
@@ -757,10 +800,10 @@ function isDispatchStateConflict(error: unknown): boolean {
   if (!error || typeof error !== "object") return false
   const tag = (error as { _tag?: unknown })._tag
   const reason = (error as { reason?: unknown }).reason
+  // NOTE: target_inactive is intentionally absent — isDispatchTargetMissing
+  // claims it first (checked before this in append).
   return tag === "SocialDeliveryEventStateError"
-    && (reason === "invalid_transition"
-      || reason === "target_inactive"
-      || reason === "request_conflict")
+    && (reason === "invalid_transition" || reason === "request_conflict")
 }
 
 function isDispatchTargetMissing(error: unknown): boolean {
