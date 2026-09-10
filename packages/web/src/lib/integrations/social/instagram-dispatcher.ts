@@ -378,8 +378,7 @@ async function drainOneMessage(
  * (valid when latest is a receipt-less started/progressed), falling back to a
  * FRESH attempt's started+terminal pair (valid when latest is a due
  * retryable-restart). Throws bubble to the per-message catch
- * (processingErrors + reschedule), except on the retryable path below where
- * the caller handles them — see the comment there.
+ * (processingErrors + reschedule).
  */
 async function healConflictingAttempt(
   queue: InstagramDispatchQueueStore,
@@ -430,7 +429,7 @@ async function healConflictingAttempt(
       else stats.alreadySettled += 1
       return
     }
-    await recordTerminal(
+    const freshSettled = await recordTerminal(
       queue,
       events,
       options,
@@ -440,6 +439,7 @@ async function healConflictingAttempt(
       freshAttemptId,
       "dispatcher_prior_attempt_abandoned",
     )
+    if (!freshSettled) await archiveDuplicate(queue, stats, queued.msgId)
     return
   }
   if (await queue.reschedule(queued.msgId, retryDelaySeconds(queued.readCt, options))) {
