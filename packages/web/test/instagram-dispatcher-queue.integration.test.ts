@@ -12,8 +12,14 @@ suite("Instagram dispatcher queue (pgmq-backed)", () => {
     max: 2,
     prepare: false,
   })
+  const sentIds: number[] = []
 
-  afterAll(() => database.end())
+  afterAll(async () => {
+    if (sentIds.length > 0) {
+      await database`DELETE FROM pgmq.a_instagram_publish WHERE msg_id = ANY(${sentIds})`
+    }
+    await database.end()
+  })
 
   it("round-trips send, read, reschedule, and archive through the wrappers", async () => {
     const sent = await database<{ readonly send: number | string }[]>`
@@ -21,6 +27,7 @@ suite("Instagram dispatcher queue (pgmq-backed)", () => {
     `
     const msgId = Number(sent[0]?.send)
     expect(Number.isSafeInteger(msgId)).toBe(true)
+    sentIds.push(msgId)
 
     const read = await database<{
       readonly msg_id: number | string

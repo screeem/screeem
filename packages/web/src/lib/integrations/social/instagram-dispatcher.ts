@@ -52,13 +52,21 @@ export interface InstagramDispatchTargetGate {
 }
 
 export interface InstagramDueTargetPublisher {
+  /**
+   * Publishes one due target. Contract: return "succeeded" ONLY after appending
+   * the success-chain delivery events (progressed/succeeded with sealed
+   * receipts) for this attempt. The drain loop archives the queue message but
+   * writes no success event itself, and enqueue's terminal exclusion depends on
+   * those events existing — a bare "succeeded" would re-enqueue and
+   * double-publish.
+   */
   publish(
     message: InstagramDispatchMessage,
     target: DispatchTargetState,
   ): Promise<DispatchPublishOutcome>
 }
 
-export type DispatchEventResult = "recorded" | "conflict"
+export type DispatchEventResult = "recorded" | "conflict" | "target-missing"
 
 export interface InstagramDispatchEventWriter {
   recordAttemptStarted(input: {
@@ -133,13 +141,15 @@ export async function drainInstagramDispatchQueue(
   stats.read = messages.length
 
   for (const queued of messages) {
-    if (options.now().getTime() >= options.deadlineTimestampMs) {
-      const settled = await queue.reschedule(queued.msgId, options.retryBaseDelaySeconds)
-      if (settled) stats.deferred += 1
-      else stats.alreadySettled += 1
-      continue
-    }
     try {
+      if (options.now().getTime() >= options.deadlineTimestampMs) {
+        if (await queue.reschedule(queued.msgId, options.retryBaseDelaySeconds)) {
+          stats.deferred += 1
+        } else {
+          stats.alreadySettled += 1
+        }
+        continue
+      }
       await drainOneMessage(queue, gate, publisher, events, options, stats, queued)
     } catch {
       stats.processingErrors += 1
@@ -177,13 +187,34 @@ async function drainOneMessage(
     return
   }
   if (target.templateVersion !== supportedTemplateVersion) {
+    // Terminal, but only sticks if recorded: a publish.failed with no preceding
+    // publish.started is rejected as invalid_transition, so open the attempt
+    // first exactly like the normal terminal path.
+    const attemptId = randomUUID()
+    const opened = await events.recordAttemptStarted({
+      teamId: message.teamId,
+      targetId: message.targetId,
+      attemptId,
+      eventId: randomUUID(),
+    })
+    if (opened === "target-missing") {
+      if (await queue.archive(queued.msgId)) stats.staleArchived += 1
+      else stats.alreadySettled += 1
+      return
+    }
+    if (opened === "conflict") {
+      if (await queue.archive(queued.msgId)) stats.duplicateSkipped += 1
+      else stats.alreadySettled += 1
+      return
+    }
     await recordTerminal(
       queue,
       events,
+      options,
       stats,
       queued.msgId,
       message,
-      randomUUID(),
+      attemptId,
       "dispatcher_template_unsupported",
     )
     return
@@ -226,6 +257,12 @@ async function drainOneMessage(
     attemptId,
     eventId: randomUUID(),
   })
+  if (started === "target-missing") {
+    // Target deleted between gate-load and event-write: stale, never publish.
+    if (await queue.archive(queued.msgId)) stats.staleArchived += 1
+    else stats.alreadySettled += 1
+    return
+  }
   if (started === "conflict") {
     // Another attempt is already active for this target; drop the duplicate.
     if (await queue.archive(queued.msgId)) stats.duplicateSkipped += 1
@@ -250,6 +287,7 @@ async function drainOneMessage(
     await recordTerminal(
       queue,
       events,
+      options,
       stats,
       queued.msgId,
       message,
@@ -268,6 +306,7 @@ async function drainOneMessage(
 async function recordTerminal(
   queue: InstagramDispatchQueueStore,
   events: InstagramDispatchEventWriter,
+  options: ResolvedDrainOptions,
   stats: Record<keyof InstagramDispatchDrainStats, number>,
   msgId: number,
   message: InstagramDispatchMessage,
@@ -275,16 +314,32 @@ async function recordTerminal(
   errorCode: string,
 ): Promise<void> {
   // Terminal sticks: the enqueue query excludes targets carrying a
-  // non-retryable publish.failed event, so this never re-enqueues.
-  await events.recordAttemptFailedTerminal({
-    teamId: message.teamId,
-    targetId: message.targetId,
-    attemptId,
-    eventId: randomUUID(),
-    errorCode,
-  })
-  if (await queue.archive(msgId)) stats.terminalArchived += 1
-  else stats.alreadySettled += 1
+  // non-retryable publish.failed event, so this never re-enqueues. If the
+  // write itself fails, do NOT archive — reschedule so the terminal write is
+  // retried instead of the message being dropped into a re-enqueue loop.
+  try {
+    const result = await events.recordAttemptFailedTerminal({
+      teamId: message.teamId,
+      targetId: message.targetId,
+      attemptId,
+      eventId: randomUUID(),
+      errorCode,
+    })
+    if (result === "target-missing") {
+      if (await queue.archive(msgId)) stats.staleArchived += 1
+      else stats.alreadySettled += 1
+      return
+    }
+    if (await queue.archive(msgId)) stats.terminalArchived += 1
+    else stats.alreadySettled += 1
+  } catch {
+    stats.processingErrors += 1
+    try {
+      await queue.reschedule(msgId, options.retryBaseDelaySeconds)
+    } catch {
+      // Lease expiry will redeliver; nothing else safe to do here.
+    }
+  }
 }
 
 async function settleOutcome(
@@ -535,6 +590,7 @@ export class PostgresInstagramDispatchEventWriter implements InstagramDispatchEv
       store.appendSystemEvent({ teamId, targetId, eventId, action }),
     ))
     if (Either.isRight(result)) return "recorded"
+    if (isDispatchTargetMissing(result.left)) return "target-missing"
     if (isDispatchStateConflict(result.left)) return "conflict"
     throw result.left
   }
@@ -548,6 +604,12 @@ function isDispatchStateConflict(error: unknown): boolean {
     && (reason === "invalid_transition"
       || reason === "target_inactive"
       || reason === "request_conflict")
+}
+
+function isDispatchTargetMissing(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false
+  return (error as { _tag?: unknown })._tag === "SocialDeliveryEventStateError"
+    && (error as { reason?: unknown }).reason === "target_missing"
 }
 
 export class InstagramPublishNotImplementedError extends Error {

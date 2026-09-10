@@ -16,6 +16,7 @@
 --   INSERT INTO public.instagram_dispatcher_config (id, app_url, cron_secret)
 --   VALUES (1, 'https://app.example.com', '<CRON_SECRET>');
 -- Until then the trigger is a no-op and the route can be called manually.
+-- NOTE: cron_secret must match the app's CRON_SECRET and be at least 16 chars.
 -- NOTE: the expression index below lives on pgmq's internal q_ table; if the
 -- queue is ever dropped/re-created, the index must be re-created with it.
 
@@ -234,7 +235,7 @@ GRANT EXECUTE ON FUNCTION public.reschedule_instagram_dispatch_message(bigint, i
 CREATE TABLE IF NOT EXISTS public.instagram_dispatcher_config (
   id integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   app_url text CHECK (
-    app_url IS NULL OR app_url ~ '^https://[^/]+$|^http://(localhost|127\.0\.0\.1)(:[0-9]+)?$'
+    app_url IS NULL OR app_url ~ '^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$|^http://(localhost|127\.0\.0\.1)(:[0-9]+)?/?$'
   ),
   cron_secret text CHECK (cron_secret IS NULL OR char_length(cron_secret) BETWEEN 16 AND 256),
   updated_at timestamp with time zone NOT NULL DEFAULT now()
@@ -261,7 +262,7 @@ BEGIN
     RETURN;
   END IF;
   PERFORM net.http_get(
-    config.app_url || '/api/internal/instagram-dispatcher',
+    rtrim(config.app_url, '/') || '/api/internal/instagram-dispatcher',
     '{}'::jsonb,
     jsonb_build_object('Authorization', 'Bearer ' || config.cron_secret),
     10000

@@ -93,7 +93,7 @@ function publisherWith(
   }
 }
 
-function eventsWith(result: "recorded" | "conflict" = "recorded"): InstagramDispatchEventWriter & {
+function eventsWith(result: "recorded" | "conflict" | "target-missing" = "recorded"): InstagramDispatchEventWriter & {
   readonly started: number
   readonly failedTerminal: number
 } {
@@ -119,8 +119,9 @@ function eventsWith(result: "recorded" | "conflict" = "recorded"): InstagramDisp
 
 const queued = (overrides: Partial<QueuedDispatchMessage> = {}): QueuedDispatchMessage => ({
   msgId: 1,
-  // pgmq starts read_ct at 0 and increments on every read, so the first live
-  // delivery of a message always carries readCt === 1 (verified against pgmq 1.5.1).
+  // pgmq increments read_ct on every read, so the first live delivery of a
+  // message always carries readCt === 1 (verified against pgmq 1.5.1, and
+  // pinned by the pgmq-backed integration test).
   readCt: 1,
   message,
   ...overrides,
@@ -190,8 +191,48 @@ describe("instagram dispatcher drain", () => {
     )
 
     expect(stats).toEqual({ ...emptyStats, read: 1, terminalArchived: 1 })
+    expect(events.started).toBe(1)
     expect(events.failedTerminal).toBe(1)
     expect(publisher.calls).toBe(0)
+  })
+
+  it("archives stale when the target vanishes mid-attempt", async () => {
+    const queue = queueWith([queued()])
+    const publisher = publisherWith("succeeded")
+
+    const startedStats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith(scheduledDue),
+      publisher,
+      eventsWith("target-missing"),
+      { now },
+    )
+
+    expect(startedStats).toEqual({ ...emptyStats, read: 1, staleArchived: 1 })
+    expect(queue.archived).toEqual([1])
+    expect(publisher.calls).toBe(0)
+  })
+
+  it("retries the terminal write instead of dropping it on writer failure", async () => {
+    const queue = queueWith([queued({ readCt: 5 })])
+    const throwing: InstagramDispatchEventWriter = {
+      recordAttemptStarted: async () => "recorded",
+      recordAttemptFailedTerminal: async () => {
+        throw new Error("db blip")
+      },
+    }
+
+    const stats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith(scheduledDue),
+      publisherWith("retryable"),
+      throwing,
+      { now, maximumAttempts: 5 },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 1, processingErrors: 1 })
+    expect(queue.archived).toEqual([])
+    expect(queue.rescheduled).toEqual([{ msgId: 1, delaySeconds: 60 }])
   })
 
   it("requeues when the connection is unavailable without recording events", async () => {
