@@ -93,15 +93,24 @@ function publisherWith(
   }
 }
 
-function eventsWith(result: "recorded" | "conflict" | "target-missing" = "recorded"): InstagramDispatchEventWriter & {
+function eventsWith(
+  result: "recorded" | "conflict" | "target-missing" = "recorded",
+  latest: { readonly attemptId: string; readonly terminal: boolean } | null = null,
+  terminalResult: "recorded" | "conflict" | "target-missing" | null = null,
+): InstagramDispatchEventWriter & {
   readonly started: number
+  readonly failedRetryable: number
   readonly failedTerminal: number
 } {
   let started = 0
+  let failedRetryable = 0
   let failedTerminal = 0
   return {
     get started() {
       return started
+    },
+    get failedRetryable() {
+      return failedRetryable
     },
     get failedTerminal() {
       return failedTerminal
@@ -110,10 +119,15 @@ function eventsWith(result: "recorded" | "conflict" | "target-missing" = "record
       started += 1
       return result
     },
-    recordAttemptFailedTerminal: async () => {
-      failedTerminal += 1
+    recordAttemptFailedRetryable: async () => {
+      failedRetryable += 1
       return result
     },
+    recordAttemptFailedTerminal: async () => {
+      failedTerminal += 1
+      return terminalResult ?? result
+    },
+    loadLatestPublishAttempt: async () => latest,
   }
 }
 
@@ -217,9 +231,11 @@ describe("instagram dispatcher drain", () => {
     const queue = queueWith([queued({ readCt: 5 })])
     const throwing: InstagramDispatchEventWriter = {
       recordAttemptStarted: async () => "recorded",
+      recordAttemptFailedRetryable: async () => "recorded",
       recordAttemptFailedTerminal: async () => {
         throw new Error("db blip")
       },
+      loadLatestPublishAttempt: async () => null,
     }
 
     const stats = await drainInstagramDispatchQueue(
@@ -322,14 +338,17 @@ describe("instagram dispatcher drain", () => {
 
   it("requeues retryable outcomes with backoff and terminates at the attempt cap", async () => {
     const first = queueWith([queued({ readCt: 1 })])
+    const firstEvents = eventsWith()
     const stats = await drainInstagramDispatchQueue(
       first,
       gateWith(scheduledDue),
       publisherWith("retryable"),
-      eventsWith(),
+      firstEvents,
       { now, maximumAttempts: 3, retryBaseDelaySeconds: 60 },
     )
     expect(stats).toEqual({ ...emptyStats, read: 1, retried: 1 })
+    expect(firstEvents.started).toBe(1)
+    expect(firstEvents.failedRetryable).toBe(1)
     expect(first.rescheduled).toEqual([{ msgId: 1, delaySeconds: 60 }])
 
     const capped = queueWith([queued({ readCt: 3 })])
@@ -344,6 +363,44 @@ describe("instagram dispatcher drain", () => {
     expect(cappedStats).toEqual({ ...emptyStats, read: 1, terminalArchived: 1 })
     expect(capped.archived).toEqual([1])
     expect(cappedEvents.failedTerminal).toBe(1)
+  })
+
+  it("heals started-conflicts against the latest attempt", async () => {
+    const attempt = "44444444-4444-4444-8444-444444444444"
+    // Terminal latest: pointless duplicate, archive without publishing.
+    const terminal = queueWith([queued()])
+    const terminalStats = await drainInstagramDispatchQueue(
+      terminal,
+      gateWith(scheduledDue),
+      publisherWith("succeeded"),
+      eventsWith("conflict", { attemptId: attempt, terminal: true }),
+      { now },
+    )
+    expect(terminalStats).toEqual({ ...emptyStats, read: 1, duplicateSkipped: 1 })
+
+    // Live latest under the cap: back off and let the owner finish.
+    const live = queueWith([queued({ readCt: 1 })])
+    const liveStats = await drainInstagramDispatchQueue(
+      live,
+      gateWith(scheduledDue),
+      publisherWith("succeeded"),
+      eventsWith("conflict", { attemptId: attempt, terminal: false }),
+      { now },
+    )
+    expect(liveStats).toEqual({ ...emptyStats, read: 1, retried: 1 })
+
+    // Live latest at the cap: abandon the stuck attempt with a terminal event.
+    const stuck = queueWith([queued({ readCt: 5 })])
+    const stuckEvents = eventsWith("conflict", { attemptId: attempt, terminal: false }, "recorded")
+    const stuckStats = await drainInstagramDispatchQueue(
+      stuck,
+      gateWith(scheduledDue),
+      publisherWith("succeeded"),
+      stuckEvents,
+      { now, maximumAttempts: 5 },
+    )
+    expect(stuckStats).toEqual({ ...emptyStats, read: 1, terminalArchived: 1 })
+    expect(stuckEvents.failedTerminal).toBe(1)
   })
 
   it("converts publisher exceptions into backoff requeues", async () => {
@@ -361,7 +418,7 @@ describe("instagram dispatcher drain", () => {
     expect(queue.archived).toEqual([])
   })
 
-  it("counts publisher-reported stale separately from terminal", async () => {
+  it("closes the attempt with a terminal event on publisher-reported stale", async () => {
     const queue = queueWith([queued()])
     const events = eventsWith()
 
@@ -373,8 +430,9 @@ describe("instagram dispatcher drain", () => {
       { now },
     )
 
-    expect(stats).toEqual({ ...emptyStats, read: 1, staleArchived: 1 })
+    expect(stats).toEqual({ ...emptyStats, read: 1, terminalArchived: 1 })
     expect(events.started).toBe(1)
+    expect(events.failedTerminal).toBe(1)
   })
 
   it("isolates mid-batch store failures and keeps draining", async () => {

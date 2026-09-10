@@ -177,6 +177,43 @@ $$;
 REVOKE ALL ON FUNCTION public.load_instagram_dispatch_target(uuid, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.load_instagram_dispatch_target(uuid, uuid) TO service_role;
 
+-- Latest publish-stream position for one target, for conflict healing.
+-- terminal is true once the stream reached publish.succeeded, publish.uncertain,
+-- or a non-retryable publish.failed.
+CREATE OR REPLACE FUNCTION public.load_latest_instagram_publish_attempt(
+  p_team_id uuid,
+  p_target_id uuid
+)
+RETURNS TABLE (
+  attempt_id text,
+  terminal boolean
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN QUERY
+    SELECT event.event_contract->'data'->>'attemptId',
+      (
+        event.event_type IN ('publish.succeeded', 'publish.uncertain')
+        OR (
+          event.event_type = 'publish.failed'
+          AND (event.event_contract->'data'->>'retryable')::boolean IS FALSE
+        )
+      )
+    FROM social_delivery_events AS event
+    WHERE event.team_id = p_team_id
+      AND event.target_id = p_target_id
+      AND event.event_type LIKE 'publish.%'
+    ORDER BY event.sequence DESC
+    LIMIT 1;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.load_latest_instagram_publish_attempt(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.load_latest_instagram_publish_attempt(uuid, uuid) TO service_role;
+
 -- Archive a queued dispatch message (terminal outcome or stale target).
 -- Returns false when the message is already gone (handled elsewhere).
 CREATE OR REPLACE FUNCTION public.archive_instagram_dispatch_message(

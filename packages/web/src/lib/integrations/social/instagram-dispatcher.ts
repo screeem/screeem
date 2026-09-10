@@ -75,6 +75,14 @@ export interface InstagramDispatchEventWriter {
     readonly attemptId: string
     readonly eventId: string
   }): Promise<DispatchEventResult>
+  recordAttemptFailedRetryable(input: {
+    readonly teamId: string
+    readonly targetId: string
+    readonly attemptId: string
+    readonly eventId: string
+    readonly errorCode: string
+    readonly retryAt: string
+  }): Promise<DispatchEventResult>
   recordAttemptFailedTerminal(input: {
     readonly teamId: string
     readonly targetId: string
@@ -82,6 +90,10 @@ export interface InstagramDispatchEventWriter {
     readonly eventId: string
     readonly errorCode: string
   }): Promise<DispatchEventResult>
+  loadLatestPublishAttempt(input: {
+    readonly teamId: string
+    readonly targetId: string
+  }): Promise<{ readonly attemptId: string; readonly terminal: boolean } | null>
 }
 
 export interface DrainInstagramDispatchQueueOptions {
@@ -249,6 +261,11 @@ async function drainOneMessage(
 
   // pgmq increments read_ct on every read starting from 1, so the first
   // delivery of a message has readCt === 1 and that is attempt 1.
+  // INVARIANT: no return-after-started without a same-attempt follow-up event.
+  // Every path past recordAttemptStarted must append a failed/succeeded-class
+  // event for that attemptId (or heal via loadLatestPublishAttempt) — otherwise
+  // the orphaned started poisons all future attempts (started conflicts) and
+  // retries silently die.
   const attempt = queued.readCt
   const attemptId = randomUUID()
   const started = await events.recordAttemptStarted({
@@ -264,25 +281,33 @@ async function drainOneMessage(
     return
   }
   if (started === "conflict") {
-    // Another attempt is already active for this target; drop the duplicate.
-    if (await queue.archive(queued.msgId)) stats.duplicateSkipped += 1
-    else stats.alreadySettled += 1
+    await healConflictingAttempt(queue, events, options, stats, queued, message)
     return
   }
 
   const outcome = await settleOutcome(() => publisher.publish(message, target))
   if (outcome === "succeeded") {
     // Success-chain events (progressed/succeeded with sealed receipts) belong
-    // to the real provider.publish drive, which lands with it.
+    // to the real provider.publish drive, which lands with it (see the
+    // publisher contract above).
     if (await queue.archive(queued.msgId)) stats.published += 1
     else stats.alreadySettled += 1
     return
   }
   if (outcome === "stale") {
-    if (await queue.archive(queued.msgId)) stats.staleArchived += 1
-    else stats.alreadySettled += 1
+    await recordTerminal(
+      queue,
+      events,
+      options,
+      stats,
+      queued.msgId,
+      message,
+      attemptId,
+      "dispatcher_delivery_stale",
+    )
     return
   }
+  const backoffSeconds = retryDelaySeconds(attempt, options)
   if (outcome === "terminal" || attempt >= options.maximumAttempts) {
     await recordTerminal(
       queue,
@@ -296,7 +321,72 @@ async function drainOneMessage(
     )
     return
   }
-  if (await queue.reschedule(queued.msgId, retryDelaySeconds(attempt, options))) {
+  // Record the retryable failure BEFORE rescheduling so the next delivery's
+  // started (fresh attemptId) finds a valid retryable-restart predecessor
+  // instead of conflicting with this attempt's orphaned started.
+  const retryAt = new Date(options.now().getTime() + backoffSeconds * 1_000).toISOString()
+  try {
+    const recorded = await events.recordAttemptFailedRetryable({
+      teamId: message.teamId,
+      targetId: message.targetId,
+      attemptId,
+      eventId: randomUUID(),
+      errorCode: "dispatcher_publish_retryable",
+      retryAt,
+    })
+    if (recorded === "target-missing") {
+      if (await queue.archive(queued.msgId)) stats.staleArchived += 1
+      else stats.alreadySettled += 1
+      return
+    }
+  } catch {
+    stats.processingErrors += 1
+  }
+  if (await queue.reschedule(queued.msgId, backoffSeconds)) {
+    stats.retried += 1
+  } else {
+    stats.alreadySettled += 1
+  }
+}
+
+/**
+ * Heals a started-conflict: another attempt already owns the target's publish
+ * stream. If that attempt already reached a terminal outcome this message is a
+ * pointless duplicate (archive). Otherwise back off and let the owner finish;
+ * at the attempt cap, abandon the stuck attempt with a terminal event so the
+ * target converges instead of churning forever.
+ */
+async function healConflictingAttempt(
+  queue: InstagramDispatchQueueStore,
+  events: InstagramDispatchEventWriter,
+  options: ResolvedDrainOptions,
+  stats: Record<keyof InstagramDispatchDrainStats, number>,
+  queued: QueuedDispatchMessage,
+  message: InstagramDispatchMessage,
+): Promise<void> {
+  const latest = await events.loadLatestPublishAttempt({
+    teamId: message.teamId,
+    targetId: message.targetId,
+  })
+  if (!latest || latest.terminal) {
+    if (await queue.archive(queued.msgId)) stats.duplicateSkipped += 1
+    else stats.alreadySettled += 1
+    return
+  }
+  if (queued.readCt >= options.maximumAttempts) {
+    await recordTerminal(
+      queue,
+      events,
+      options,
+      stats,
+      queued.msgId,
+      message,
+      latest.attemptId,
+      "dispatcher_prior_attempt_abandoned",
+    )
+    return
+  }
+  if (await queue.reschedule(queued.msgId, retryDelaySeconds(queued.readCt, options))) {
     stats.retried += 1
   } else {
     stats.alreadySettled += 1
@@ -330,8 +420,13 @@ async function recordTerminal(
       else stats.alreadySettled += 1
       return
     }
-    if (await queue.archive(msgId)) stats.terminalArchived += 1
-    else stats.alreadySettled += 1
+    // A conflict means the stream moved on without us (another worker recorded
+    // the outcome); our message is a duplicate, not a terminal.
+    if (await queue.archive(msgId)) {
+      stats[result === "conflict" ? "duplicateSkipped" : "terminalArchived"] += 1
+    } else {
+      stats.alreadySettled += 1
+    }
   } catch {
     stats.processingErrors += 1
     try {
@@ -557,6 +652,43 @@ export class PostgresInstagramDispatchEventWriter implements InstagramDispatchEv
       eventType: "publish.started",
       data: { attemptId: input.attemptId },
     })
+  }
+
+  async recordAttemptFailedRetryable(input: {
+    readonly teamId: string
+    readonly targetId: string
+    readonly attemptId: string
+    readonly eventId: string
+    readonly errorCode: string
+    readonly retryAt: string
+  }): Promise<DispatchEventResult> {
+    return this.append(input.teamId, input.targetId, input.eventId, {
+      eventType: "publish.failed",
+      data: {
+        attemptId: input.attemptId,
+        errorCode: input.errorCode,
+        receipt: { kind: "unchanged", revision: null },
+        retryable: true,
+        retryAt: input.retryAt,
+        retryMode: "restart",
+      },
+    })
+  }
+
+  async loadLatestPublishAttempt(input: {
+    readonly teamId: string
+    readonly targetId: string
+  }): Promise<{ readonly attemptId: string; readonly terminal: boolean } | null> {
+    const rows = await this.database<{
+      readonly attempt_id: string | null
+      readonly terminal: boolean
+    }[]>`
+      SELECT attempt_id, terminal
+      FROM public.load_latest_instagram_publish_attempt(${input.teamId}, ${input.targetId})
+    `
+    const row = rows[0]
+    if (!row || !row.attempt_id) return null
+    return Object.freeze({ attemptId: row.attempt_id, terminal: row.terminal })
   }
 
   async recordAttemptFailedTerminal(input: {
