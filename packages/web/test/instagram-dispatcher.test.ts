@@ -5,9 +5,12 @@ vi.mock("server-only", () => ({}))
 import {
   decodeDispatchMessage,
   drainInstagramDispatchQueue,
+  enqueueDueInstagramTargets,
   retryDelaySeconds,
+  type InstagramDispatchEventWriter,
   type InstagramDispatchQueueStore,
   type InstagramDispatchTargetGate,
+  type InstagramDispatchDrainStats,
   type InstagramDueTargetPublisher,
   type QueuedDispatchMessage,
 } from "../src/lib/integrations/social/instagram-dispatcher"
@@ -19,6 +22,20 @@ const message = Object.freeze({
   targetId,
   calendarPostId: "33333333-3333-4333-8333-333333333333",
   publishAt: "2026-09-02T08:30:00.000Z",
+})
+
+const emptyStats: InstagramDispatchDrainStats = Object.freeze({
+  read: 0,
+  published: 0,
+  staleArchived: 0,
+  invalidArchived: 0,
+  notDueRescheduled: 0,
+  retried: 0,
+  terminalArchived: 0,
+  duplicateSkipped: 0,
+  deferred: 0,
+  alreadySettled: 0,
+  processingErrors: 0,
 })
 
 function queueWith(messages: readonly QueuedDispatchMessage[]): InstagramDispatchQueueStore & {
@@ -33,17 +50,31 @@ function queueWith(messages: readonly QueuedDispatchMessage[]): InstagramDispatc
     read: async () => messages,
     archive: async (msgId: number) => {
       archived.push(msgId)
+      return true
     },
     reschedule: async (msgId: number, delaySeconds: number) => {
       rescheduled.push({ msgId, delaySeconds })
+      return true
     },
   }
 }
 
-function gateWith(
-  state: { readonly status: string; readonly publishAt: string } | null,
-): InstagramDispatchTargetGate {
-  return { loadTarget: async () => state }
+export interface GateState {
+  readonly status: string
+  readonly publishAt: string
+  readonly templateVersion?: number
+  readonly connectionOk?: boolean
+}
+
+function gateWith(state: GateState | null): InstagramDispatchTargetGate {
+  return {
+    loadTarget: async () => state === null ? null : {
+      status: state.status,
+      publishAt: state.publishAt,
+      templateVersion: state.templateVersion ?? 1,
+      connectionOk: state.connectionOk ?? true,
+    },
+  }
 }
 
 function publisherWith(
@@ -62,8 +93,34 @@ function publisherWith(
   }
 }
 
+function eventsWith(result: "recorded" | "conflict" = "recorded"): InstagramDispatchEventWriter & {
+  readonly started: number
+  readonly failedTerminal: number
+} {
+  let started = 0
+  let failedTerminal = 0
+  return {
+    get started() {
+      return started
+    },
+    get failedTerminal() {
+      return failedTerminal
+    },
+    recordAttemptStarted: async () => {
+      started += 1
+      return result
+    },
+    recordAttemptFailedTerminal: async () => {
+      failedTerminal += 1
+      return result
+    },
+  }
+}
+
 const queued = (overrides: Partial<QueuedDispatchMessage> = {}): QueuedDispatchMessage => ({
   msgId: 1,
+  // pgmq starts read_ct at 0 and increments on every read, so the first live
+  // delivery of a message always carries readCt === 1 (verified against pgmq 1.5.1).
   readCt: 1,
   message,
   ...overrides,
@@ -76,91 +133,176 @@ describe("instagram dispatcher drain", () => {
   it("archives invalid messages without publishing", async () => {
     const queue = queueWith([queued({ message: { nope: true } })])
     const publisher = publisherWith("succeeded")
+    const events = eventsWith()
 
-    const stats = await drainInstagramDispatchQueue(queue, gateWith(scheduledDue), publisher, { now })
+    const stats = await drainInstagramDispatchQueue(queue, gateWith(scheduledDue), publisher, events, { now })
 
-    expect(stats).toMatchObject({ read: 1, invalidArchived: 1, published: 0 })
+    expect(stats).toEqual({ ...emptyStats, read: 1, invalidArchived: 1 })
     expect(queue.archived).toEqual([1])
     expect(publisher.calls).toBe(0)
+    expect(events.started).toBe(0)
   })
 
   it("archives messages whose target is no longer scheduled", async () => {
     for (const status of ["cancelled", "superseded"]) {
       const queue = queueWith([queued()])
       const publisher = publisherWith("succeeded")
+      const events = eventsWith()
 
       const stats = await drainInstagramDispatchQueue(
         queue,
         gateWith({ status, publishAt: scheduledDue.publishAt }),
         publisher,
+        events,
         { now },
       )
 
-      expect(stats).toMatchObject({ staleArchived: 1, published: 0 })
+      expect(stats).toEqual({ ...emptyStats, read: 1, staleArchived: 1 })
       expect(queue.archived).toEqual([1])
       expect(publisher.calls).toBe(0)
+      expect(events.started).toBe(0)
     }
   })
 
   it("archives messages whose target is gone", async () => {
     const queue = queueWith([queued()])
     const publisher = publisherWith("succeeded")
+    const events = eventsWith()
 
-    const stats = await drainInstagramDispatchQueue(queue, gateWith(null), publisher, { now })
+    const stats = await drainInstagramDispatchQueue(queue, gateWith(null), publisher, events, { now })
 
-    expect(stats).toMatchObject({ staleArchived: 1 })
+    expect(stats).toEqual({ ...emptyStats, read: 1, staleArchived: 1 })
     expect(queue.archived).toEqual([1])
+    expect(publisher.calls).toBe(0)
+  })
+
+  it("records a terminal failure for unsupported template versions", async () => {
+    const queue = queueWith([queued()])
+    const publisher = publisherWith("succeeded")
+    const events = eventsWith()
+
+    const stats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith({ ...scheduledDue, templateVersion: 2 }),
+      publisher,
+      events,
+      { now },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 1, terminalArchived: 1 })
+    expect(events.failedTerminal).toBe(1)
+    expect(publisher.calls).toBe(0)
+  })
+
+  it("requeues when the connection is unavailable without recording events", async () => {
+    const queue = queueWith([queued()])
+    const publisher = publisherWith("succeeded")
+    const events = eventsWith()
+
+    const stats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith({ ...scheduledDue, connectionOk: false }),
+      publisher,
+      events,
+      { now },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 1, retried: 1 })
+    expect(queue.archived).toEqual([])
+    expect(events.started).toBe(0)
     expect(publisher.calls).toBe(0)
   })
 
   it("reschedules messages that are not due yet", async () => {
     const queue = queueWith([queued()])
     const publisher = publisherWith("succeeded")
+    const events = eventsWith()
     const future = new Date(now().getTime() + 10 * 60 * 1_000).toISOString()
 
     const stats = await drainInstagramDispatchQueue(
       queue,
       gateWith({ status: "scheduled", publishAt: future }),
       publisher,
+      events,
       { now },
     )
 
-    expect(stats).toMatchObject({ notDueRescheduled: 1, published: 0 })
+    expect(stats).toEqual({ ...emptyStats, read: 1, notDueRescheduled: 1 })
     expect(queue.archived).toEqual([])
     expect(queue.rescheduled).toHaveLength(1)
     expect(queue.rescheduled[0]?.delaySeconds).toBeGreaterThanOrEqual(600)
     expect(publisher.calls).toBe(0)
   })
 
-  it("archives on publish success", async () => {
+  it("caps the not-due reschedule at the maximum delay", async () => {
+    const queue = queueWith([queued()])
+    const farFuture = new Date(now().getTime() + 48 * 3_600 * 1_000).toISOString()
+
+    const stats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith({ status: "scheduled", publishAt: farFuture }),
+      publisherWith("succeeded"),
+      eventsWith(),
+      { now, retryMaximumDelaySeconds: 3_600 },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 1, notDueRescheduled: 1 })
+    expect(queue.rescheduled).toEqual([{ msgId: 1, delaySeconds: 3_600 }])
+  })
+
+  it("records started and archives on publish success", async () => {
     const queue = queueWith([queued()])
     const publisher = publisherWith("succeeded")
+    const events = eventsWith()
 
-    const stats = await drainInstagramDispatchQueue(queue, gateWith(scheduledDue), publisher, { now })
+    const stats = await drainInstagramDispatchQueue(queue, gateWith(scheduledDue), publisher, events, { now })
 
-    expect(stats).toMatchObject({ published: 1 })
+    expect(stats).toEqual({ ...emptyStats, read: 1, published: 1 })
+    expect(events.started).toBe(1)
     expect(queue.archived).toEqual([1])
   })
 
-  it("requeues retryable outcomes with backoff and archives at the attempt cap", async () => {
-    const first = queueWith([queued({ readCt: 1 })])
-    const stats = await drainInstagramDispatchQueue(first, gateWith(scheduledDue), publisherWith("retryable"), {
-      now,
-      maximumAttempts: 3,
-      retryBaseDelaySeconds: 60,
-    })
-    expect(stats).toMatchObject({ retried: 1 })
-    expect(first.rescheduled).toEqual([{ msgId: 1, delaySeconds: 120 }])
+  it("drops duplicates when another attempt is already active", async () => {
+    const queue = queueWith([queued()])
+    const publisher = publisherWith("succeeded")
 
-    const capped = queueWith([queued({ readCt: 2 })])
+    const stats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith(scheduledDue),
+      publisher,
+      eventsWith("conflict"),
+      { now },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 1, duplicateSkipped: 1 })
+    expect(queue.archived).toEqual([1])
+    expect(publisher.calls).toBe(0)
+  })
+
+  it("requeues retryable outcomes with backoff and terminates at the attempt cap", async () => {
+    const first = queueWith([queued({ readCt: 1 })])
+    const stats = await drainInstagramDispatchQueue(
+      first,
+      gateWith(scheduledDue),
+      publisherWith("retryable"),
+      eventsWith(),
+      { now, maximumAttempts: 3, retryBaseDelaySeconds: 60 },
+    )
+    expect(stats).toEqual({ ...emptyStats, read: 1, retried: 1 })
+    expect(first.rescheduled).toEqual([{ msgId: 1, delaySeconds: 60 }])
+
+    const capped = queueWith([queued({ readCt: 3 })])
+    const cappedEvents = eventsWith()
     const cappedStats = await drainInstagramDispatchQueue(
       capped,
       gateWith(scheduledDue),
       publisherWith("retryable"),
+      cappedEvents,
       { now, maximumAttempts: 3 },
     )
-    expect(cappedStats).toMatchObject({ terminalArchived: 1, retried: 0 })
+    expect(cappedStats).toEqual({ ...emptyStats, read: 1, terminalArchived: 1 })
     expect(capped.archived).toEqual([1])
+    expect(cappedEvents.failedTerminal).toBe(1)
   })
 
   it("converts publisher exceptions into backoff requeues", async () => {
@@ -170,18 +312,94 @@ describe("instagram dispatcher drain", () => {
       queue,
       gateWith(scheduledDue),
       publisherWith(new Error("boom")),
+      eventsWith(),
       { now },
     )
 
-    expect(stats).toMatchObject({ retried: 1 })
+    expect(stats).toEqual({ ...emptyStats, read: 1, retried: 1 })
     expect(queue.archived).toEqual([])
+  })
+
+  it("counts publisher-reported stale separately from terminal", async () => {
+    const queue = queueWith([queued()])
+    const events = eventsWith()
+
+    const stats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith(scheduledDue),
+      publisherWith("stale"),
+      events,
+      { now },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 1, staleArchived: 1 })
+    expect(events.started).toBe(1)
+  })
+
+  it("isolates mid-batch store failures and keeps draining", async () => {
+    const archived: number[] = []
+    const failing: InstagramDispatchQueueStore = {
+      read: async () => [queued({ msgId: 1 }), queued({ msgId: 2 })],
+      archive: async (msgId: number) => {
+        if (msgId === 1) throw new Error("db blip")
+        archived.push(msgId)
+        return true
+      },
+      reschedule: async () => true,
+    }
+
+    const stats = await drainInstagramDispatchQueue(
+      failing,
+      gateWith(scheduledDue),
+      publisherWith("succeeded"),
+      eventsWith(),
+      { now },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 2, published: 1, processingErrors: 1 })
+    expect(archived).toEqual([2])
+  })
+
+  it("counts already-removed messages without lying in stats", async () => {
+    const gone: InstagramDispatchQueueStore = {
+      read: async () => [queued({ msgId: 7 })],
+      archive: async () => false,
+      reschedule: async () => false,
+    }
+
+    const stats = await drainInstagramDispatchQueue(
+      gone,
+      gateWith(scheduledDue),
+      publisherWith("succeeded"),
+      eventsWith(),
+      { now },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 1, alreadySettled: 1 })
+  })
+
+  it("defers remaining messages past the deadline", async () => {
+    const queue = queueWith([queued({ msgId: 1 }), queued({ msgId: 2 })])
+    const publisher = publisherWith("succeeded")
+
+    const stats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith(scheduledDue),
+      publisher,
+      eventsWith(),
+      { now, deadlineTimestampMs: now().getTime() },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 2, deferred: 2 })
+    expect(publisher.calls).toBe(0)
   })
 
   it("decodes dispatch messages strictly", () => {
     expect(decodeDispatchMessage(message)).toEqual(message)
     expect(decodeDispatchMessage(null)).toBeNull()
     expect(decodeDispatchMessage({ teamId, targetId: "not-a-uuid" })).toBeNull()
-    expect(decodeDispatchMessage({ teamId, targetId })).toEqual({
+    expect(decodeDispatchMessage({ teamId, targetId, publishAt: "not-a-date" })).toBeNull()
+    expect(decodeDispatchMessage({ teamId, targetId, extra: "tolerated" })).toEqual({
       teamId,
       targetId,
       calendarPostId: null,
@@ -194,15 +412,40 @@ describe("instagram dispatcher drain", () => {
     expect(retryDelaySeconds(2, {})).toBe(120)
     expect(retryDelaySeconds(3, {})).toBe(240)
     expect(retryDelaySeconds(99, {})).toBe(3_600)
+    expect(() => retryDelaySeconds(1, { retryBaseDelaySeconds: 1.5 })).toThrow(/retry base/)
+    expect(() => retryDelaySeconds(1, { retryBaseDelaySeconds: 0 })).toThrow(/retry base/)
   })
 
   it("rejects invalid drain options", async () => {
     const queue = queueWith([])
-    await expect(
-      drainInstagramDispatchQueue(queue, gateWith(scheduledDue), publisherWith("succeeded"), {
-        batchSize: 0,
-        now,
-      }),
-    ).rejects.toThrow(/batch size/)
+    const base = {
+      gate: gateWith(scheduledDue),
+      publisher: publisherWith("succeeded"),
+      events: eventsWith(),
+    }
+    const drain = (options: Parameters<typeof drainInstagramDispatchQueue>[4]) =>
+      drainInstagramDispatchQueue(queue, base.gate, base.publisher, base.events, options)
+    await expect(drain({ batchSize: 0, now })).rejects.toThrow(/batch size/)
+    await expect(drain({
+      retryBaseDelaySeconds: 7_200,
+      retryMaximumDelaySeconds: 60,
+      now,
+    })).rejects.toThrow(/delay range/)
+    await expect(drain({ deadlineTimestampMs: Number.NaN, now })).rejects.toThrow(/deadline/)
+  })
+
+  it("validates enqueue batch sizes and results without a database", async () => {
+    await expect(enqueueDueInstagramTargets("db" as never, 0)).rejects.toThrow(/enqueue batch/)
+    await expect(enqueueDueInstagramTargets("db" as never, 501)).rejects.toThrow(/enqueue batch/)
+    const fake = Object.assign(
+      async () => [{ enqueue_due_instagram_targets: "3" }],
+      { json: (value: unknown) => value },
+    )
+    await expect(enqueueDueInstagramTargets(fake as never, 50)).resolves.toBe(3)
+    const nan = Object.assign(
+      async () => [{ enqueue_due_instagram_targets: "oops" }],
+      { json: (value: unknown) => value },
+    )
+    await expect(enqueueDueInstagramTargets(nan as never, 50)).rejects.toThrow(/enqueue result/)
   })
 })

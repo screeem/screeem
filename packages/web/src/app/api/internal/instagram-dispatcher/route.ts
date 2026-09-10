@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from "next/server"
 import {
   drainInstagramDispatchQueue,
   enqueueDueInstagramTargets,
+  PostgresInstagramDispatchEventWriter,
   PostgresInstagramDispatchQueueStore,
   PostgresInstagramDispatchTargetGate,
   unimplementedInstagramPublisher,
 } from "@/lib/integrations/social/instagram-dispatcher"
 
 export const maxDuration = 60
+
+const drainDeadlineMs = 40_000
 
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET
@@ -17,16 +20,28 @@ export async function GET(request: NextRequest) {
   if (request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+  let enqueued: number
   try {
-    const enqueued = await enqueueDueInstagramTargets(undefined, 50)
+    enqueued = await enqueueDueInstagramTargets(undefined, 50)
+  } catch (error) {
+    console.error("Instagram dispatcher enqueue failed", error)
+    return NextResponse.json({ error: "Could not enqueue Instagram dispatch queue", phase: "enqueue" }, { status: 500 })
+  }
+  try {
     const drained = await drainInstagramDispatchQueue(
       new PostgresInstagramDispatchQueueStore(),
       new PostgresInstagramDispatchTargetGate(),
       unimplementedInstagramPublisher,
-      { batchSize: 25, visibilityTimeoutSeconds: 60 },
+      new PostgresInstagramDispatchEventWriter(),
+      {
+        batchSize: 25,
+        visibilityTimeoutSeconds: 60,
+        deadlineTimestampMs: Date.now() + drainDeadlineMs,
+      },
     )
     return NextResponse.json({ enqueued, drained })
-  } catch {
-    return NextResponse.json({ error: "Could not drain Instagram dispatch queue" }, { status: 500 })
+  } catch (error) {
+    console.error("Instagram dispatcher drain failed", error)
+    return NextResponse.json({ error: "Could not drain Instagram dispatch queue", phase: "drain", enqueued }, { status: 500 })
   }
 }

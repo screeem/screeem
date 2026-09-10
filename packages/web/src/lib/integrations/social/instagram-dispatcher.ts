@@ -1,9 +1,17 @@
 import "server-only"
 
+import { randomUUID } from "node:crypto"
+
+import { Effect, Either } from "effect"
+
 import { snapshotIntegrationIdentifier } from "../contract"
 import { getDatabase } from "../../db/database"
+import { PostgresSocialDeliveryEventStore } from "./delivery-events"
 
 export const instagramDispatchQueueName = "instagram_publish" as const
+
+/** Only template version 1 exists; anything else is terminal, never published. */
+const supportedTemplateVersion = 1
 
 export interface InstagramDispatchMessage {
   readonly teamId: string
@@ -21,6 +29,8 @@ export interface QueuedDispatchMessage {
 export interface DispatchTargetState {
   readonly status: string
   readonly publishAt: string
+  readonly templateVersion: number
+  readonly connectionOk: boolean
 }
 
 export type DispatchPublishOutcome =
@@ -31,8 +41,10 @@ export type DispatchPublishOutcome =
 
 export interface InstagramDispatchQueueStore {
   read(limit: number, visibilityTimeoutSeconds: number): Promise<readonly QueuedDispatchMessage[]>
-  archive(msgId: number): Promise<void>
-  reschedule(msgId: number, delaySeconds: number): Promise<void>
+  /** Returns false when the message is already gone (handled elsewhere). */
+  archive(msgId: number): Promise<boolean>
+  /** Returns false when the message is already gone (handled elsewhere). */
+  reschedule(msgId: number, delaySeconds: number): Promise<boolean>
 }
 
 export interface InstagramDispatchTargetGate {
@@ -46,12 +58,31 @@ export interface InstagramDueTargetPublisher {
   ): Promise<DispatchPublishOutcome>
 }
 
+export type DispatchEventResult = "recorded" | "conflict"
+
+export interface InstagramDispatchEventWriter {
+  recordAttemptStarted(input: {
+    readonly teamId: string
+    readonly targetId: string
+    readonly attemptId: string
+    readonly eventId: string
+  }): Promise<DispatchEventResult>
+  recordAttemptFailedTerminal(input: {
+    readonly teamId: string
+    readonly targetId: string
+    readonly attemptId: string
+    readonly eventId: string
+    readonly errorCode: string
+  }): Promise<DispatchEventResult>
+}
+
 export interface DrainInstagramDispatchQueueOptions {
   readonly batchSize?: number
   readonly visibilityTimeoutSeconds?: number
   readonly maximumAttempts?: number
   readonly retryBaseDelaySeconds?: number
   readonly retryMaximumDelaySeconds?: number
+  readonly deadlineTimestampMs?: number
   readonly now?: () => Date
 }
 
@@ -63,6 +94,10 @@ export interface InstagramDispatchDrainStats {
   readonly notDueRescheduled: number
   readonly retried: number
   readonly terminalArchived: number
+  readonly duplicateSkipped: number
+  readonly deferred: number
+  readonly alreadySettled: number
+  readonly processingErrors: number
 }
 
 const defaultBatchSize = 25
@@ -70,15 +105,16 @@ const defaultVisibilityTimeoutSeconds = 60
 const defaultMaximumAttempts = 5
 const defaultRetryBaseDelaySeconds = 60
 const defaultRetryMaximumDelaySeconds = 3_600
+const maximumDispatchDelaySeconds = 86_400
 
 export async function drainInstagramDispatchQueue(
   queue: InstagramDispatchQueueStore,
   gate: InstagramDispatchTargetGate,
   publisher: InstagramDueTargetPublisher,
+  events: InstagramDispatchEventWriter,
   inputOptions: DrainInstagramDispatchQueueOptions = {},
 ): Promise<InstagramDispatchDrainStats> {
   const options = drainOptions(inputOptions)
-  const now = options.now()
   const stats: Record<keyof InstagramDispatchDrainStats, number> = {
     read: 0,
     published: 0,
@@ -87,55 +123,168 @@ export async function drainInstagramDispatchQueue(
     notDueRescheduled: 0,
     retried: 0,
     terminalArchived: 0,
+    duplicateSkipped: 0,
+    deferred: 0,
+    alreadySettled: 0,
+    processingErrors: 0,
   }
 
   const messages = await queue.read(options.batchSize, options.visibilityTimeoutSeconds)
   stats.read = messages.length
 
   for (const queued of messages) {
-    const message = decodeDispatchMessage(queued.message)
-    if (!message) {
-      await queue.archive(queued.msgId)
-      stats.invalidArchived += 1
+    if (options.now().getTime() >= options.deadlineTimestampMs) {
+      const settled = await queue.reschedule(queued.msgId, options.retryBaseDelaySeconds)
+      if (settled) stats.deferred += 1
+      else stats.alreadySettled += 1
       continue
     }
-    const target = await gate.loadTarget(message.teamId, message.targetId)
-    if (!target || target.status !== "scheduled") {
-      // Cancelled, superseded, or deleted after enqueue: never publish.
-      await queue.archive(queued.msgId)
-      stats.staleArchived += 1
-      continue
+    try {
+      await drainOneMessage(queue, gate, publisher, events, options, stats, queued)
+    } catch {
+      stats.processingErrors += 1
+      try {
+        await queue.reschedule(queued.msgId, options.retryBaseDelaySeconds)
+      } catch {
+        // Lease expiry will redeliver; nothing else safe to do here.
+      }
     }
-    const publishAt = Date.parse(target.publishAt)
-    if (Number.isFinite(publishAt) && publishAt > now.getTime()) {
+  }
+
+  return Object.freeze({ ...stats })
+}
+
+async function drainOneMessage(
+  queue: InstagramDispatchQueueStore,
+  gate: InstagramDispatchTargetGate,
+  publisher: InstagramDueTargetPublisher,
+  events: InstagramDispatchEventWriter,
+  options: ResolvedDrainOptions,
+  stats: Record<keyof InstagramDispatchDrainStats, number>,
+  queued: QueuedDispatchMessage,
+): Promise<void> {
+  const message = decodeDispatchMessage(queued.message)
+  if (!message) {
+    if (await queue.archive(queued.msgId)) stats.invalidArchived += 1
+    else stats.alreadySettled += 1
+    return
+  }
+  const target = await gate.loadTarget(message.teamId, message.targetId)
+  if (!target || target.status !== "scheduled") {
+    // Cancelled, superseded, or deleted after enqueue: never publish.
+    if (await queue.archive(queued.msgId)) stats.staleArchived += 1
+    else stats.alreadySettled += 1
+    return
+  }
+  if (target.templateVersion !== supportedTemplateVersion) {
+    await recordTerminal(
+      queue,
+      events,
+      stats,
+      queued.msgId,
+      message,
+      randomUUID(),
+      "dispatcher_template_unsupported",
+    )
+    return
+  }
+  if (!target.connectionOk) {
+    // Transient: the connection may recover. Requeue with backoff, no event.
+    if (await queue.reschedule(queued.msgId, retryDelaySeconds(queued.readCt, options))) {
+      stats.retried += 1
+    } else {
+      stats.alreadySettled += 1
+    }
+    return
+  }
+  const publishAt = Date.parse(target.publishAt)
+  const now = options.now().getTime()
+  if (Number.isFinite(publishAt) && publishAt > now) {
+    if (
       await queue.reschedule(
         queued.msgId,
         Math.min(
           options.retryMaximumDelaySeconds,
-          Math.max(60, Math.ceil((publishAt - now.getTime()) / 1_000)),
+          Math.max(60, Math.ceil((publishAt - now) / 1_000)),
         ),
       )
+    ) {
       stats.notDueRescheduled += 1
-      continue
+    } else {
+      stats.alreadySettled += 1
     }
-    const outcome = await settleOutcome(() => publisher.publish(message, target))
-    if (outcome === "succeeded" || outcome === "stale" || outcome === "terminal") {
-      await queue.archive(queued.msgId)
-      if (outcome === "succeeded") stats.published += 1
-      else stats.terminalArchived += 1
-      continue
-    }
-    const attempts = queued.readCt + 1
-    if (attempts >= options.maximumAttempts) {
-      await queue.archive(queued.msgId)
-      stats.terminalArchived += 1
-      continue
-    }
-    await queue.reschedule(queued.msgId, retryDelaySeconds(attempts, options))
-    stats.retried += 1
+    return
   }
 
-  return Object.freeze({ ...stats })
+  // pgmq increments read_ct on every read starting from 1, so the first
+  // delivery of a message has readCt === 1 and that is attempt 1.
+  const attempt = queued.readCt
+  const attemptId = randomUUID()
+  const started = await events.recordAttemptStarted({
+    teamId: message.teamId,
+    targetId: message.targetId,
+    attemptId,
+    eventId: randomUUID(),
+  })
+  if (started === "conflict") {
+    // Another attempt is already active for this target; drop the duplicate.
+    if (await queue.archive(queued.msgId)) stats.duplicateSkipped += 1
+    else stats.alreadySettled += 1
+    return
+  }
+
+  const outcome = await settleOutcome(() => publisher.publish(message, target))
+  if (outcome === "succeeded") {
+    // Success-chain events (progressed/succeeded with sealed receipts) belong
+    // to the real provider.publish drive, which lands with it.
+    if (await queue.archive(queued.msgId)) stats.published += 1
+    else stats.alreadySettled += 1
+    return
+  }
+  if (outcome === "stale") {
+    if (await queue.archive(queued.msgId)) stats.staleArchived += 1
+    else stats.alreadySettled += 1
+    return
+  }
+  if (outcome === "terminal" || attempt >= options.maximumAttempts) {
+    await recordTerminal(
+      queue,
+      events,
+      stats,
+      queued.msgId,
+      message,
+      attemptId,
+      outcome === "terminal" ? "dispatcher_delivery_terminal" : "dispatcher_attempts_exhausted",
+    )
+    return
+  }
+  if (await queue.reschedule(queued.msgId, retryDelaySeconds(attempt, options))) {
+    stats.retried += 1
+  } else {
+    stats.alreadySettled += 1
+  }
+}
+
+async function recordTerminal(
+  queue: InstagramDispatchQueueStore,
+  events: InstagramDispatchEventWriter,
+  stats: Record<keyof InstagramDispatchDrainStats, number>,
+  msgId: number,
+  message: InstagramDispatchMessage,
+  attemptId: string,
+  errorCode: string,
+): Promise<void> {
+  // Terminal sticks: the enqueue query excludes targets carrying a
+  // non-retryable publish.failed event, so this never re-enqueues.
+  await events.recordAttemptFailedTerminal({
+    teamId: message.teamId,
+    targetId: message.targetId,
+    attemptId,
+    eventId: randomUUID(),
+    errorCode,
+  })
+  if (await queue.archive(msgId)) stats.terminalArchived += 1
+  else stats.alreadySettled += 1
 }
 
 async function settleOutcome(
@@ -158,8 +307,18 @@ export function retryDelaySeconds(
 ): number {
   const base = options.retryBaseDelaySeconds ?? defaultRetryBaseDelaySeconds
   const maximum = options.retryMaximumDelaySeconds ?? defaultRetryMaximumDelaySeconds
-  if (!Number.isSafeInteger(attempt) || attempt < 1) return base
-  return Math.min(maximum, base * 2 ** Math.min(attempt - 1, 10))
+  if (!Number.isSafeInteger(attempt) || attempt < 1) return validatedDelay(base, "base")
+  return Math.min(
+    validatedDelay(maximum, "maximum"),
+    validatedDelay(base, "base") * 2 ** Math.min(attempt - 1, 10),
+  )
+}
+
+function validatedDelay(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximumDispatchDelaySeconds) {
+    throw new TypeError(`Invalid dispatch retry ${name} delay`)
+  }
+  return value
 }
 
 export function decodeDispatchMessage(input: unknown): InstagramDispatchMessage | null {
@@ -187,12 +346,28 @@ function validatedTimestamp(input: unknown): string {
   return input
 }
 
-function drainOptions(input: DrainInstagramDispatchQueueOptions) {
+interface ResolvedDrainOptions {
+  readonly batchSize: number
+  readonly visibilityTimeoutSeconds: number
+  readonly maximumAttempts: number
+  readonly retryBaseDelaySeconds: number
+  readonly retryMaximumDelaySeconds: number
+  readonly deadlineTimestampMs: number
+  readonly now: () => Date
+}
+
+function drainOptions(input: DrainInstagramDispatchQueueOptions): ResolvedDrainOptions {
   const batchSize = input.batchSize ?? defaultBatchSize
   const visibilityTimeoutSeconds = input.visibilityTimeoutSeconds ?? defaultVisibilityTimeoutSeconds
   const maximumAttempts = input.maximumAttempts ?? defaultMaximumAttempts
-  const retryBaseDelaySeconds = input.retryBaseDelaySeconds ?? defaultRetryBaseDelaySeconds
-  const retryMaximumDelaySeconds = input.retryMaximumDelaySeconds ?? defaultRetryMaximumDelaySeconds
+  const retryBaseDelaySeconds = validatedDelay(
+    input.retryBaseDelaySeconds ?? defaultRetryBaseDelaySeconds,
+    "base",
+  )
+  const retryMaximumDelaySeconds = validatedDelay(
+    input.retryMaximumDelaySeconds ?? defaultRetryMaximumDelaySeconds,
+    "maximum",
+  )
   if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 100) {
     throw new TypeError("Invalid dispatch batch size")
   }
@@ -206,12 +381,20 @@ function drainOptions(input: DrainInstagramDispatchQueueOptions) {
   if (!Number.isSafeInteger(maximumAttempts) || maximumAttempts < 1 || maximumAttempts > 25) {
     throw new TypeError("Invalid dispatch maximum attempts")
   }
+  if (retryBaseDelaySeconds > retryMaximumDelaySeconds) {
+    throw new TypeError("Invalid dispatch retry delay range")
+  }
+  const deadlineTimestampMs = input.deadlineTimestampMs ?? Number.POSITIVE_INFINITY
+  if (typeof deadlineTimestampMs !== "number" || !(deadlineTimestampMs > 0)) {
+    throw new TypeError("Invalid dispatch deadline")
+  }
   return {
     batchSize,
     visibilityTimeoutSeconds,
     maximumAttempts,
     retryBaseDelaySeconds,
     retryMaximumDelaySeconds,
+    deadlineTimestampMs,
     now: input.now ?? (() => new Date()),
   }
 }
@@ -222,11 +405,18 @@ export async function enqueueDueInstagramTargets(
   database: Database = getDatabase(),
   batchSize = 50,
 ): Promise<number> {
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 500) {
+    throw new TypeError("Invalid dispatch enqueue batch size")
+  }
   const rows = await database<{ readonly enqueue_due_instagram_targets: number | string }[]>`
     SELECT public.enqueue_due_instagram_targets(${batchSize})
   `
   const value = rows[0]?.enqueue_due_instagram_targets ?? 0
-  return typeof value === "number" ? value : Number(value)
+  const parsed = typeof value === "number" ? value : Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new TypeError("Invalid dispatch enqueue result")
+  }
+  return parsed
 }
 
 export class PostgresInstagramDispatchQueueStore implements InstagramDispatchQueueStore {
@@ -242,7 +432,7 @@ export class PostgresInstagramDispatchQueueStore implements InstagramDispatchQue
       readonly message: unknown
     }[]>`
       SELECT msg_id, read_ct, message
-      FROM pgmq.read(${instagramDispatchQueueName}, ${visibilityTimeoutSeconds}, ${limit})
+      FROM public.read_instagram_dispatch_messages(${visibilityTimeoutSeconds}, ${limit})
     `
     return Object.freeze(rows.map((row) =>
       Object.freeze({
@@ -253,16 +443,18 @@ export class PostgresInstagramDispatchQueueStore implements InstagramDispatchQue
     ))
   }
 
-  async archive(msgId: number): Promise<void> {
-    await this.database`
+  async archive(msgId: number): Promise<boolean> {
+    const rows = await this.database<{ readonly archive_instagram_dispatch_message: boolean }[]>`
       SELECT public.archive_instagram_dispatch_message(${msgId})
     `
+    return rows[0]?.archive_instagram_dispatch_message ?? false
   }
 
-  async reschedule(msgId: number, delaySeconds: number): Promise<void> {
-    await this.database`
+  async reschedule(msgId: number, delaySeconds: number): Promise<boolean> {
+    const rows = await this.database<{ readonly reschedule_instagram_dispatch_message: boolean }[]>`
       SELECT public.reschedule_instagram_dispatch_message(${msgId}, ${delaySeconds})
     `
+    return rows[0]?.reschedule_instagram_dispatch_message ?? false
   }
 }
 
@@ -273,18 +465,89 @@ export class PostgresInstagramDispatchTargetGate implements InstagramDispatchTar
     const rows = await this.database<{
       readonly status: string
       readonly publish_at: Date | string
+      readonly template_version: number | string
+      readonly connection_ok: boolean | null
     }[]>`
-      SELECT status, publish_at
-      FROM social_post_targets
-      WHERE team_id = ${teamId} AND id = ${targetId}
+      SELECT status, publish_at, template_version, connection_ok
+      FROM public.load_instagram_dispatch_target(${teamId}, ${targetId})
     `
     const row = rows[0]
     if (!row) return null
     const publishAt = row.publish_at instanceof Date
       ? row.publish_at.toISOString()
       : new Date(row.publish_at).toISOString()
-    return Object.freeze({ status: row.status, publishAt })
+    const templateVersion = typeof row.template_version === "number"
+      ? row.template_version
+      : Number(row.template_version)
+    if (!Number.isSafeInteger(templateVersion)) return null
+    return Object.freeze({
+      status: row.status,
+      publishAt,
+      templateVersion,
+      connectionOk: row.connection_ok === true,
+    })
   }
+}
+
+export class PostgresInstagramDispatchEventWriter implements InstagramDispatchEventWriter {
+  constructor(private readonly database: Database = getDatabase()) {}
+
+  async recordAttemptStarted(input: {
+    readonly teamId: string
+    readonly targetId: string
+    readonly attemptId: string
+    readonly eventId: string
+  }): Promise<DispatchEventResult> {
+    return this.append(input.teamId, input.targetId, input.eventId, {
+      eventType: "publish.started",
+      data: { attemptId: input.attemptId },
+    })
+  }
+
+  async recordAttemptFailedTerminal(input: {
+    readonly teamId: string
+    readonly targetId: string
+    readonly attemptId: string
+    readonly eventId: string
+    readonly errorCode: string
+  }): Promise<DispatchEventResult> {
+    return this.append(input.teamId, input.targetId, input.eventId, {
+      eventType: "publish.failed",
+      data: {
+        attemptId: input.attemptId,
+        errorCode: input.errorCode,
+        receipt: { kind: "unchanged", revision: null },
+        retryable: false,
+        retryAt: null,
+        retryMode: null,
+      },
+    })
+  }
+
+  private async append(
+    teamId: string,
+    targetId: string,
+    eventId: string,
+    action: unknown,
+  ): Promise<DispatchEventResult> {
+    const store = new PostgresSocialDeliveryEventStore(this.database)
+    const result = await Effect.runPromise(Effect.either(
+      store.appendSystemEvent({ teamId, targetId, eventId, action }),
+    ))
+    if (Either.isRight(result)) return "recorded"
+    if (isDispatchStateConflict(result.left)) return "conflict"
+    throw result.left
+  }
+}
+
+function isDispatchStateConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false
+  const tag = (error as { _tag?: unknown })._tag
+  const reason = (error as { reason?: unknown }).reason
+  return tag === "SocialDeliveryEventStateError"
+    && (reason === "invalid_transition"
+      || reason === "target_inactive"
+      || reason === "request_conflict")
 }
 
 export class InstagramPublishNotImplementedError extends Error {
