@@ -97,14 +97,17 @@ function eventsWith(
   result: "recorded" | "conflict" | "target-missing" = "recorded",
   latest: { readonly attemptId: string; readonly terminal: boolean } | null = null,
   terminalResult: "recorded" | "conflict" | "target-missing" | null = null,
+  startedSequence: Array<"recorded" | "conflict" | "target-missing"> | null = null,
 ): InstagramDispatchEventWriter & {
   readonly started: number
   readonly failedRetryable: number
   readonly failedTerminal: number
+  readonly retryCalls: Array<{ readonly attemptId: string; readonly retryAt: string }>
 } {
   let started = 0
   let failedRetryable = 0
   let failedTerminal = 0
+  const retryCalls: Array<{ readonly attemptId: string; readonly retryAt: string }> = []
   return {
     get started() {
       return started
@@ -115,12 +118,16 @@ function eventsWith(
     get failedTerminal() {
       return failedTerminal
     },
+    get retryCalls() {
+      return retryCalls
+    },
     recordAttemptStarted: async () => {
       started += 1
-      return result
+      return startedSequence?.[started - 1] ?? result
     },
-    recordAttemptFailedRetryable: async () => {
+    recordAttemptFailedRetryable: async (input) => {
       failedRetryable += 1
+      retryCalls.push({ attemptId: input.attemptId, retryAt: input.retryAt })
       return result
     },
     recordAttemptFailedTerminal: async () => {
@@ -389,9 +396,12 @@ describe("instagram dispatcher drain", () => {
     )
     expect(liveStats).toEqual({ ...emptyStats, read: 1, retried: 1 })
 
-    // Live latest at the cap: abandon the stuck attempt with a terminal event.
+    // Live latest at the cap: abandon with a fresh attempt's terminal pair.
     const stuck = queueWith([queued({ readCt: 5 })])
-    const stuckEvents = eventsWith("conflict", { attemptId: attempt, terminal: false }, "recorded")
+    const stuckEvents = eventsWith("conflict", { attemptId: attempt, terminal: false }, "recorded", [
+      "conflict",
+      "recorded",
+    ])
     const stuckStats = await drainInstagramDispatchQueue(
       stuck,
       gateWith(scheduledDue),
@@ -400,7 +410,63 @@ describe("instagram dispatcher drain", () => {
       { now, maximumAttempts: 5 },
     )
     expect(stuckStats).toEqual({ ...emptyStats, read: 1, terminalArchived: 1 })
+    expect(stuckEvents.started).toBe(2)
     expect(stuckEvents.failedTerminal).toBe(1)
+  })
+
+  it("archives duplicates when the terminal write itself conflicts", async () => {
+    const queue = queueWith([queued({ readCt: 5 })])
+    const events = eventsWith("recorded", null, "conflict")
+
+    const stats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith(scheduledDue),
+      publisherWith("retryable"),
+      events,
+      { now, maximumAttempts: 5 },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 1, duplicateSkipped: 1 })
+    expect(queue.archived).toEqual([1])
+  })
+
+  it("routes retryable-write conflicts through healing", async () => {
+    const queue = queueWith([queued({ readCt: 1 })])
+    const events: InstagramDispatchEventWriter = {
+      recordAttemptStarted: async () => "recorded",
+      recordAttemptFailedRetryable: async () => "conflict",
+      recordAttemptFailedTerminal: async () => "recorded",
+      loadLatestPublishAttempt: async () => null,
+    }
+
+    const stats = await drainInstagramDispatchQueue(
+      queue,
+      gateWith(scheduledDue),
+      publisherWith("retryable"),
+      events,
+      { now },
+    )
+
+    expect(stats).toEqual({ ...emptyStats, read: 1, duplicateSkipped: 1 })
+    expect(queue.archived).toEqual([1])
+  })
+
+  it("paces retryAt under the visibility delay for clock skew", async () => {
+    const queue = queueWith([queued({ readCt: 1 })])
+    const events = eventsWith()
+
+    await drainInstagramDispatchQueue(
+      queue,
+      gateWith(scheduledDue),
+      publisherWith("retryable"),
+      events,
+      { now, retryBaseDelaySeconds: 60 },
+    )
+
+    expect(events.retryCalls).toHaveLength(1)
+    expect(events.retryCalls[0]?.retryAt).toBe(
+      new Date(now().getTime() + 30_000).toISOString(),
+    )
   })
 
   it("converts publisher exceptions into backoff requeues", async () => {

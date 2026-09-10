@@ -287,8 +287,10 @@ async function drainOneMessage(
 
   const outcome = await settleOutcome(() => publisher.publish(message, target))
   if (outcome === "succeeded") {
-    // Success-chain events (progressed/succeeded with sealed receipts) belong
-    // to the real provider.publish drive, which lands with it (see the
+    // TODO(N3): enforce the publisher contract — verify a succeeded event for
+    // this attempt exists before archiving, instead of trusting the return
+    // value. Success-chain events (progressed/succeeded with sealed receipts)
+    // belong to the real provider.publish drive, which lands with it (see the
     // publisher contract above).
     if (await queue.archive(queued.msgId)) stats.published += 1
     else stats.alreadySettled += 1
@@ -324,7 +326,10 @@ async function drainOneMessage(
   // Record the retryable failure BEFORE rescheduling so the next delivery's
   // started (fresh attemptId) finds a valid retryable-restart predecessor
   // instead of conflicting with this attempt's orphaned started.
-  const retryAt = new Date(options.now().getTime() + backoffSeconds * 1_000).toISOString()
+  // retryAt carries a 30s margin under the VT delay: the store and pgmq run on
+  // the database clock while this process may run ahead, and an early
+  // redelivery would conflict instead of starting cleanly.
+  const retryAt = new Date(options.now().getTime() + backoffSeconds * 1_000 - 30_000).toISOString()
   try {
     const recorded = await events.recordAttemptFailedRetryable({
       teamId: message.teamId,
@@ -337,6 +342,12 @@ async function drainOneMessage(
     if (recorded === "target-missing") {
       if (await queue.archive(queued.msgId)) stats.staleArchived += 1
       else stats.alreadySettled += 1
+      return
+    }
+    if (recorded === "conflict") {
+      // Stream moved on without us (cancelled, superseded, or another worker
+      // closed the attempt): heal instead of blindly rescheduling.
+      await healConflictingAttempt(queue, events, options, stats, queued, message)
       return
     }
   } catch {
@@ -353,8 +364,10 @@ async function drainOneMessage(
  * Heals a started-conflict: another attempt already owns the target's publish
  * stream. If that attempt already reached a terminal outcome this message is a
  * pointless duplicate (archive). Otherwise back off and let the owner finish;
- * at the attempt cap, abandon the stuck attempt with a terminal event so the
- * target converges instead of churning forever.
+ * at the attempt cap, abandon the stuck attempt with a FRESH attempt's
+ * started+terminal pair (valid against any non-terminal latest, unlike
+ * reusing the stuck attemptId) so the target converges instead of churning.
+ * Throws bubble to the per-message catch (processingErrors + reschedule).
  */
 async function healConflictingAttempt(
   queue: InstagramDispatchQueueStore,
@@ -374,6 +387,18 @@ async function healConflictingAttempt(
     return
   }
   if (queued.readCt >= options.maximumAttempts) {
+    const freshAttemptId = randomUUID()
+    const opened = await events.recordAttemptStarted({
+      teamId: message.teamId,
+      targetId: message.targetId,
+      attemptId: freshAttemptId,
+      eventId: randomUUID(),
+    })
+    if (opened !== "recorded") {
+      if (await queue.archive(queued.msgId)) stats.duplicateSkipped += 1
+      else stats.alreadySettled += 1
+      return
+    }
     await recordTerminal(
       queue,
       events,
@@ -381,7 +406,7 @@ async function healConflictingAttempt(
       stats,
       queued.msgId,
       message,
-      latest.attemptId,
+      freshAttemptId,
       "dispatcher_prior_attempt_abandoned",
     )
     return
@@ -740,8 +765,11 @@ function isDispatchStateConflict(error: unknown): boolean {
 
 function isDispatchTargetMissing(error: unknown): boolean {
   if (!error || typeof error !== "object") return false
-  return (error as { _tag?: unknown })._tag === "SocialDeliveryEventStateError"
-    && (error as { reason?: unknown }).reason === "target_missing"
+  if ((error as { _tag?: unknown })._tag !== "SocialDeliveryEventStateError") return false
+  const reason = (error as { reason?: unknown }).reason
+  // target_inactive means the target left scheduled status mid-flight
+  // (cancelled/superseded): stale, same as target_missing.
+  return reason === "target_missing" || reason === "target_inactive"
 }
 
 export class InstagramPublishNotImplementedError extends Error {
