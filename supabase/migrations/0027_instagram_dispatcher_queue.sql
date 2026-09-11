@@ -37,11 +37,28 @@ $$;
 CREATE INDEX IF NOT EXISTS instagram_publish_target_idx
   ON pgmq.q_instagram_publish ((message->>'targetId'));
 
--- Enqueues due, still-scheduled Instagram targets. Idempotent: skips targets
--- with a live queued message and targets already at a terminal delivery
--- outcome (publish.succeeded / publish.uncertain / non-retryable
+-- Generic social dispatch wrappers (one queue per provider; Instagram is the
+-- first binding, see instagram-dispatcher.ts). Queue and provider names are
+-- validated against strict patterns before dynamic use. Adding a provider
+-- means: pgmq.create('<name>'), the expression index below on its q_ table,
+-- and a widening of the provider CHECK constraints on social_post_targets /
+-- social_delivery_events (today instagram-only).
+
+-- Drop the pre-generalization Instagram-only wrappers (unmerged history).
+DROP FUNCTION IF EXISTS public.enqueue_due_instagram_targets(integer);
+DROP FUNCTION IF EXISTS public.read_instagram_dispatch_messages(integer, integer);
+DROP FUNCTION IF EXISTS public.load_instagram_dispatch_target(uuid, uuid);
+DROP FUNCTION IF EXISTS public.load_latest_instagram_publish_attempt(uuid, uuid);
+DROP FUNCTION IF EXISTS public.archive_instagram_dispatch_message(bigint);
+DROP FUNCTION IF EXISTS public.reschedule_instagram_dispatch_message(bigint, integer);
+
+-- Enqueues due, still-scheduled targets for one provider queue. Idempotent:
+-- skips targets with a live queued message and targets already at a terminal
+-- delivery outcome (publish.succeeded / publish.uncertain / non-retryable
 -- publish.failed), so terminal archives stick and never re-enqueue.
-CREATE OR REPLACE FUNCTION public.enqueue_due_instagram_targets(
+CREATE OR REPLACE FUNCTION public.enqueue_due_social_targets(
+  p_queue_name text,
+  p_provider text,
   p_batch integer DEFAULT 50
 )
 RETURNS integer
@@ -52,42 +69,50 @@ AS $$
 DECLARE
   enqueued integer := 0;
   target record;
+  queue_table text;
 BEGIN
+  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{1,47}$' THEN
+    RAISE EXCEPTION 'dispatch_queue_invalid';
+  END IF;
+  IF p_provider IS NULL OR p_provider !~ '^[a-z][a-z0-9_-]{1,63}$' THEN
+    RAISE EXCEPTION 'dispatch_provider_invalid';
+  END IF;
   IF p_batch IS NULL OR p_batch < 1 OR p_batch > 500 THEN
     RAISE EXCEPTION 'enqueue_batch_out_of_range';
   END IF;
 
-  PERFORM pg_advisory_xact_lock(hashtext('enqueue-instagram-publish'));
+  PERFORM pg_advisory_xact_lock(hashtext('enqueue-' || p_queue_name));
+  queue_table := 'q_' || p_queue_name;
 
-  FOR target IN
-    SELECT team_id, id, calendar_post_id, publish_at
-    FROM social_post_targets
-    WHERE status = 'scheduled'
-      AND provider = 'instagram'
-      AND publish_at <= now()
-      AND NOT EXISTS (
-        SELECT 1
-        FROM pgmq.q_instagram_publish AS queued
-        WHERE queued.message->>'targetId' = social_post_targets.id::text
-      )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM social_delivery_events AS event
-        WHERE event.team_id = social_post_targets.team_id
-          AND event.target_id = social_post_targets.id
-          AND (
-            event.event_type IN ('publish.succeeded', 'publish.uncertain')
-            OR (
-              event.event_type = 'publish.failed'
-              AND (event.event_contract->'data'->>'retryable')::boolean IS FALSE
-            )
-          )
-      )
-    ORDER BY publish_at, id
-    LIMIT p_batch
+  FOR target IN EXECUTE format(
+    'SELECT team_id, id, calendar_post_id, publish_at'
+    ' FROM social_post_targets'
+    ' WHERE status = ''scheduled'''
+    ' AND provider = $1'
+    ' AND publish_at <= now()'
+    ' AND NOT EXISTS ('
+    '   SELECT 1 FROM pgmq.%I AS queued'
+    '   WHERE queued.message->>''targetId'' = social_post_targets.id::text'
+    ' )'
+    ' AND NOT EXISTS ('
+    '   SELECT 1 FROM social_delivery_events AS event'
+    '   WHERE event.team_id = social_post_targets.team_id'
+    '   AND event.target_id = social_post_targets.id'
+    '   AND ('
+    '     event.event_type IN (''publish.succeeded'', ''publish.uncertain'')'
+    '     OR ('
+    '       event.event_type = ''publish.failed'''
+    '       AND (event.event_contract->''data''->>''retryable'')::boolean IS FALSE'
+    '     )'
+    '   )'
+    ' )'
+    ' ORDER BY publish_at, id'
+    ' LIMIT $2',
+    queue_table
+  ) USING p_provider, p_batch
   LOOP
     PERFORM pgmq.send(
-      'instagram_publish',
+      p_queue_name,
       jsonb_build_object(
         'teamId', target.team_id,
         'targetId', target.id,
@@ -102,11 +127,12 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.enqueue_due_instagram_targets(integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.enqueue_due_instagram_targets(integer) TO service_role;
+REVOKE ALL ON FUNCTION public.enqueue_due_social_targets(text, text, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.enqueue_due_social_targets(text, text, integer) TO service_role;
 
 -- Lease-aware read for the app consumer. Returns live messages only.
-CREATE OR REPLACE FUNCTION public.read_instagram_dispatch_messages(
+CREATE OR REPLACE FUNCTION public.read_social_dispatch_messages(
+  p_queue_name text,
   p_visibility_timeout integer DEFAULT 60,
   p_batch integer DEFAULT 25
 )
@@ -120,6 +146,9 @@ SECURITY DEFINER
 SET search_path = public, pgmq
 AS $$
 BEGIN
+  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{1,47}$' THEN
+    RAISE EXCEPTION 'dispatch_queue_invalid';
+  END IF;
   IF p_visibility_timeout IS NULL
     OR p_visibility_timeout < 10
     OR p_visibility_timeout > 3600 THEN
@@ -128,25 +157,28 @@ BEGIN
   IF p_batch IS NULL OR p_batch < 1 OR p_batch > 100 THEN
     RAISE EXCEPTION 'dispatch_batch_out_of_range';
   END IF;
-  RETURN QUERY
-    SELECT queued.msg_id, queued.read_ct, queued.message
-    FROM pgmq.read('instagram_publish', p_visibility_timeout, p_batch) AS queued;
+  RETURN QUERY EXECUTE format(
+    'SELECT queued.msg_id, queued.read_ct, queued.message'
+    ' FROM pgmq.read(%L, $1, $2) AS queued',
+    p_queue_name
+  ) USING p_visibility_timeout, p_batch;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.read_instagram_dispatch_messages(integer, integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.read_instagram_dispatch_messages(integer, integer) TO service_role;
+REVOKE ALL ON FUNCTION public.read_social_dispatch_messages(text, integer, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.read_social_dispatch_messages(text, integer, integer) TO service_role;
 
 -- Status + publish-readiness gate for one target. connection_ok is false when
 -- the connection is missing, not connected, disabled, or team controls are off.
-CREATE OR REPLACE FUNCTION public.load_instagram_dispatch_target(
+-- contract_version is the provider's version field (Instagram: template_version).
+CREATE OR REPLACE FUNCTION public.load_social_dispatch_target(
   p_team_id uuid,
   p_target_id uuid
 )
 RETURNS TABLE (
   status text,
   publish_at timestamp with time zone,
-  template_version integer,
+  contract_version integer,
   connection_ok boolean
 )
 LANGUAGE plpgsql
@@ -174,15 +206,16 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.load_instagram_dispatch_target(uuid, uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.load_instagram_dispatch_target(uuid, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.load_social_dispatch_target(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.load_social_dispatch_target(uuid, uuid) TO service_role;
 
 -- Latest publish-stream position for one target, for conflict healing.
 -- terminal is true once the stream reached publish.succeeded, publish.uncertain,
 -- or a non-retryable publish.failed.
-CREATE OR REPLACE FUNCTION public.load_latest_instagram_publish_attempt(
+CREATE OR REPLACE FUNCTION public.load_latest_social_publish_attempt(
   p_team_id uuid,
-  p_target_id uuid
+  p_target_id uuid,
+  p_provider text
 )
 RETURNS TABLE (
   attempt_id text,
@@ -193,6 +226,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  IF p_provider IS NULL OR p_provider !~ '^[a-z][a-z0-9_-]{1,63}$' THEN
+    RAISE EXCEPTION 'dispatch_provider_invalid';
+  END IF;
   RETURN QUERY
     SELECT event.event_contract->'data'->>'attemptId',
       (
@@ -205,18 +241,20 @@ BEGIN
     FROM social_delivery_events AS event
     WHERE event.team_id = p_team_id
       AND event.target_id = p_target_id
+      AND event.provider = p_provider
       AND event.event_type LIKE 'publish.%'
     ORDER BY event.sequence DESC
     LIMIT 1;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.load_latest_instagram_publish_attempt(uuid, uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.load_latest_instagram_publish_attempt(uuid, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.load_latest_social_publish_attempt(uuid, uuid, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.load_latest_social_publish_attempt(uuid, uuid, text) TO service_role;
 
 -- Archive a queued dispatch message (terminal outcome or stale target).
 -- Returns false when the message is already gone (handled elsewhere).
-CREATE OR REPLACE FUNCTION public.archive_instagram_dispatch_message(
+CREATE OR REPLACE FUNCTION public.archive_social_dispatch_message(
+  p_queue_name text,
   p_msg_id bigint
 )
 RETURNS boolean
@@ -227,21 +265,27 @@ AS $$
 DECLARE
   archived bigint[];
 BEGIN
+  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{1,47}$' THEN
+    RAISE EXCEPTION 'dispatch_queue_invalid';
+  END IF;
   IF p_msg_id IS NULL OR p_msg_id < 1 THEN
     RAISE EXCEPTION 'dispatch_message_invalid';
   END IF;
-  SELECT ARRAY_AGG(result) INTO archived
-  FROM pgmq.archive('instagram_publish', ARRAY[p_msg_id]) AS result;
+  EXECUTE format(
+    'SELECT ARRAY_AGG(result) FROM pgmq.archive(%L, ARRAY[$1]) AS result',
+    p_queue_name
+  ) INTO archived USING p_msg_id;
   RETURN coalesce(array_length(archived, 1), 0) = 1;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.archive_instagram_dispatch_message(bigint) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.archive_instagram_dispatch_message(bigint) TO service_role;
+REVOKE ALL ON FUNCTION public.archive_social_dispatch_message(text, bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.archive_social_dispatch_message(text, bigint) TO service_role;
 
 -- Re-schedule a queued dispatch message (retry with backoff / not due yet).
 -- Returns false when the message is already gone (handled elsewhere).
-CREATE OR REPLACE FUNCTION public.reschedule_instagram_dispatch_message(
+CREATE OR REPLACE FUNCTION public.reschedule_social_dispatch_message(
+  p_queue_name text,
   p_msg_id bigint,
   p_delay_seconds integer
 )
@@ -253,20 +297,25 @@ AS $$
 DECLARE
   updated integer := 0;
 BEGIN
+  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{1,47}$' THEN
+    RAISE EXCEPTION 'dispatch_queue_invalid';
+  END IF;
   IF p_msg_id IS NULL OR p_msg_id < 1 THEN
     RAISE EXCEPTION 'dispatch_message_invalid';
   END IF;
   IF p_delay_seconds IS NULL OR p_delay_seconds < 1 OR p_delay_seconds > 86400 THEN
     RAISE EXCEPTION 'dispatch_delay_out_of_range';
   END IF;
-  SELECT count(*) INTO updated
-  FROM pgmq.set_vt('instagram_publish', p_msg_id, p_delay_seconds);
+  EXECUTE format(
+    'SELECT count(*) FROM pgmq.set_vt(%L, $1, $2)',
+    p_queue_name
+  ) INTO updated USING p_msg_id, p_delay_seconds;
   RETURN updated = 1;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.reschedule_instagram_dispatch_message(bigint, integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.reschedule_instagram_dispatch_message(bigint, integer) TO service_role;
+REVOKE ALL ON FUNCTION public.reschedule_social_dispatch_message(text, bigint, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.reschedule_social_dispatch_message(text, bigint, integer) TO service_role;
 
 -- Drain trigger configuration (single row; absent/NULL row = trigger disabled).
 CREATE TABLE IF NOT EXISTS public.instagram_dispatcher_config (
@@ -329,7 +378,7 @@ BEGIN
   PERFORM cron.schedule(
     'enqueue-due-instagram-targets',
     '* * * * *',
-    $cron_body$SELECT public.enqueue_due_instagram_targets(50);$cron_body$
+    $cron_body$SELECT public.enqueue_due_social_targets('instagram_publish', 'instagram', 50);$cron_body$
   );
   PERFORM cron.schedule(
     'trigger-instagram-dispatch-drain',
