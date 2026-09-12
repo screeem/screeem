@@ -146,7 +146,7 @@ const defaultRetryBaseDelaySeconds = 60
 const defaultRetryMaximumDelaySeconds = 3_600
 const maximumDispatchDelaySeconds = 86_400
 
-const queueNamePattern = /^[a-z][a-z0-9_]{0,47}$/
+const queueNamePattern = /^[a-z][a-z0-9_]{0,46}$/
 const providerNamePattern = /^[a-z][a-z0-9_-]{0,63}$/
 
 export function validatedQueueName(input: unknown): string {
@@ -603,6 +603,13 @@ function validatedTimestamp(input: unknown): string {
 }
 
 export interface DispatchProviderBinding {
+  /**
+   * Identifies one provider's dispatch lane. A complete binding also supplies:
+   * a target validator (DrainDispatchQueueOptions.validateTarget), a publisher
+   * (DueTargetPublisher), and an event writer (DispatchEventWriter). Calling
+   * the core drain without a validator accepts every contract — only correct
+   * for providers with no contract versions.
+   */
   readonly provider: string
   readonly queueName: string
 }
@@ -730,7 +737,14 @@ export class PostgresDispatchQueueStore implements DispatchQueueStore {
 }
 
 export class PostgresDispatchTargetGate implements DispatchTargetGate {
-  constructor(private readonly database: DispatchDatabase = getDatabase()) {}
+  private readonly provider: string
+
+  constructor(
+    private readonly database: DispatchDatabase = getDatabase(),
+    provider: string,
+  ) {
+    this.provider = validatedProviderName(provider)
+  }
 
   async loadTarget(teamId: string, targetId: string): Promise<DispatchTargetState | null> {
     const rows = await this.database<{
@@ -740,7 +754,7 @@ export class PostgresDispatchTargetGate implements DispatchTargetGate {
       readonly connection_ok: boolean | null
     }[]>`
       SELECT status, publish_at, contract_version, connection_ok
-      FROM public.load_social_dispatch_target(${teamId}, ${targetId})
+      FROM public.load_social_dispatch_target(${teamId}, ${targetId}, ${this.provider})
     `
     const row = rows[0]
     if (!row) return null

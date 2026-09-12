@@ -83,7 +83,8 @@ suite("Social dispatcher queue (pgmq-backed)", () => {
     }[]>`
       SELECT * FROM public.load_social_dispatch_target(
         ${"11111111-1111-4111-8111-111111111111"},
-        ${"22222222-2222-4222-8222-222222222222"}
+        ${"22222222-2222-4222-8222-222222222222"},
+        'instagram'
       )
     `
     expect(missing).toEqual([])

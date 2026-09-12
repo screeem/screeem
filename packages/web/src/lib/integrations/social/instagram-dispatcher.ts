@@ -62,7 +62,11 @@ export class PostgresInstagramDispatchQueueStore extends PostgresDispatchQueueSt
   }
 }
 
-export class PostgresInstagramDispatchTargetGate extends PostgresDispatchTargetGate {}
+export class PostgresInstagramDispatchTargetGate extends PostgresDispatchTargetGate {
+  constructor(database: DispatchDatabase = getDatabase()) {
+    super(database, validatedProviderName(instagramDispatchProviderName))
+  }
+}
 
 export class PostgresInstagramDispatchEventWriter implements DispatchEventWriter {
   // NOTE: the underlying delivery store hardcodes provider 'instagram'
@@ -175,6 +179,9 @@ export async function drainInstagramDispatchQueue(
   events: DispatchEventWriter,
   inputOptions: DrainDispatchQueueOptions = {},
 ): Promise<DispatchDrainStats> {
+  if (inputOptions.validateTarget !== undefined) {
+    throw new TypeError("Instagram dispatch validation is fixed by the binding")
+  }
   return drainDispatchQueue(queue, gate, publisher, events, {
     ...inputOptions,
     validateTarget: validateInstagramDispatchTarget,

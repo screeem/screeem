@@ -20,6 +20,8 @@
 -- NOTE: the expression index below lives on pgmq's internal q_ table; if the
 -- queue is ever dropped/re-created, the index must be re-created with it.
 
+-- NOTE: 0027 has never merged to main, so in-place edits are safe. Once
+-- merged, freeze this file and ship follow-ups as new migrations.
 CREATE EXTENSION IF NOT EXISTS pgmq;
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net;
@@ -51,6 +53,7 @@ DROP FUNCTION IF EXISTS public.load_instagram_dispatch_target(uuid, uuid);
 DROP FUNCTION IF EXISTS public.load_latest_instagram_publish_attempt(uuid, uuid);
 DROP FUNCTION IF EXISTS public.archive_instagram_dispatch_message(bigint);
 DROP FUNCTION IF EXISTS public.reschedule_instagram_dispatch_message(bigint, integer);
+DROP FUNCTION IF EXISTS public.load_social_dispatch_target(uuid, uuid);
 
 -- Enqueues due, still-scheduled targets for one provider queue. Idempotent:
 -- skips targets with a live queued message and targets already at a terminal
@@ -71,10 +74,10 @@ DECLARE
   target record;
   queue_table text;
 BEGIN
-  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{1,47}$' THEN
+  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{0,46}$' THEN
     RAISE EXCEPTION 'dispatch_queue_invalid';
   END IF;
-  IF p_provider IS NULL OR p_provider !~ '^[a-z][a-z0-9_-]{1,63}$' THEN
+  IF p_provider IS NULL OR p_provider !~ '^[a-z][a-z0-9_-]{0,63}$' THEN
     RAISE EXCEPTION 'dispatch_provider_invalid';
   END IF;
   IF p_batch IS NULL OR p_batch < 1 OR p_batch > 500 THEN
@@ -146,7 +149,7 @@ SECURITY DEFINER
 SET search_path = public, pgmq
 AS $$
 BEGIN
-  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{1,47}$' THEN
+  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{0,46}$' THEN
     RAISE EXCEPTION 'dispatch_queue_invalid';
   END IF;
   IF p_visibility_timeout IS NULL
@@ -173,7 +176,8 @@ GRANT EXECUTE ON FUNCTION public.read_social_dispatch_messages(text, integer, in
 -- contract_version is the provider's version field (Instagram: template_version).
 CREATE OR REPLACE FUNCTION public.load_social_dispatch_target(
   p_team_id uuid,
-  p_target_id uuid
+  p_target_id uuid,
+  p_provider text
 )
 RETURNS TABLE (
   status text,
@@ -186,6 +190,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  IF p_provider IS NULL OR p_provider !~ '^[a-z][a-z0-9_-]{0,63}$' THEN
+    RAISE EXCEPTION 'dispatch_provider_invalid';
+  END IF;
   RETURN QUERY
     SELECT target.status,
       target.publish_at,
@@ -202,12 +209,13 @@ BEGIN
     LEFT JOIN integration_team_controls AS controls
       ON controls.team_id = target.team_id
     WHERE target.team_id = p_team_id
-      AND target.id = p_target_id;
+      AND target.id = p_target_id
+      AND target.provider = p_provider;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.load_social_dispatch_target(uuid, uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.load_social_dispatch_target(uuid, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.load_social_dispatch_target(uuid, uuid, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.load_social_dispatch_target(uuid, uuid, text) TO service_role;
 
 -- Latest publish-stream position for one target, for conflict healing.
 -- terminal is true once the stream reached publish.succeeded, publish.uncertain,
@@ -226,7 +234,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  IF p_provider IS NULL OR p_provider !~ '^[a-z][a-z0-9_-]{1,63}$' THEN
+  IF p_provider IS NULL OR p_provider !~ '^[a-z][a-z0-9_-]{0,63}$' THEN
     RAISE EXCEPTION 'dispatch_provider_invalid';
   END IF;
   RETURN QUERY
@@ -265,7 +273,7 @@ AS $$
 DECLARE
   archived bigint[];
 BEGIN
-  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{1,47}$' THEN
+  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{0,46}$' THEN
     RAISE EXCEPTION 'dispatch_queue_invalid';
   END IF;
   IF p_msg_id IS NULL OR p_msg_id < 1 THEN
@@ -297,7 +305,7 @@ AS $$
 DECLARE
   updated integer := 0;
 BEGIN
-  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{1,47}$' THEN
+  IF p_queue_name IS NULL OR p_queue_name !~ '^[a-z][a-z0-9_]{0,46}$' THEN
     RAISE EXCEPTION 'dispatch_queue_invalid';
   END IF;
   IF p_msg_id IS NULL OR p_msg_id < 1 THEN

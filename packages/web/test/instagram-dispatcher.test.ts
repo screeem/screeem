@@ -104,6 +104,16 @@ describe("instagram dispatch binding", () => {
     expect(archived).toEqual([1])
   })
 
+  it("refuses a caller-supplied validator instead of silently overriding it", async () => {
+    const { queue, gate, events } = fakes()
+    await expect(
+      drainInstagramDispatchQueue(queue, gate, { publish: async () => "succeeded" }, events, {
+        now,
+        validateTarget: () => ({ ok: true as const }),
+      }),
+    ).rejects.toThrow(/fixed by the binding/)
+  })
+
   it("validates enqueue bindings without a database", async () => {
     await expect(enqueueDueInstagramTargets("db" as never, 0)).rejects.toThrow(/enqueue batch/)
   })
